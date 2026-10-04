@@ -8,6 +8,7 @@ export interface CallRecorder {
   failed(call: number, code: string, durationMs: number): Promise<void>;
 }
 const instructions: Record<WorkflowType, string> = {
+  OPTIMIZE_STRATEGY: 'Analyze immutable performance evidence.',
   GENERATE_STRATEGY: 'Build a practical marketing strategy with exactly 30 distinct numbered days. Distinguish assumptions from known brand facts. Do not imply market research was performed.',
   GENERATE_IDEAS: 'Generate 5 distinct actionable content ideas. Scores are subjective editorial estimates, never guaranteed predictions; state that in caveat. Use the selected platform and brand context.',
   GENERATE_SCRIPT: 'Write a script with Hook, Context, Core, Proof and CTA for the selected platform and duration. Apply the requested edit to previousScript when provided. Never fabricate testimonials, statistics or proof. Mark claims needing verification in factCheckNotes.',
@@ -16,6 +17,10 @@ export class GenerationOrchestrator {
   constructor(private readonly routes: readonly ModelRoute[]) {}
   async run(type: WorkflowType, rawInput: GenerationInput, context: OperationContext, recorder: CallRecorder): Promise<GenerationOutput> {
     const input = generationInputSchema.parse(rawInput);
+    if(type==='OPTIMIZE_STRATEGY'){
+      if(!input.performance)throw new DomainError('INVALID_INPUT');
+      return this.analyzePerformance(input.performance.evidence,input.performance.strategy,context,recorder);
+    }
     const schema = workflowSchemas[type];
     return this.generate<GenerationOutput>(instructions[type],{ workflow:type,sourceData:input },schema,value=>schema.safeParse(value),context,recorder);
   }

@@ -10,6 +10,7 @@ const serverSchema = z.object({
   OPENAI_MODEL: z.string().min(1).optional(),
   AVATAR_PROVIDER: z.enum(['disabled', 'heygen', 'mock']).default('disabled'),
   AVATAR_GENERATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  ANALYTICS_AI_ENABLED:z.enum(['true','false']).default('false'),
   ANALYTICS_ENABLED:z.enum(['true','false']).default('false'),
   PUBLISHING_ENABLED:z.enum(['true','false']).default('false'),
   SOCIAL_PROVIDER:z.enum(['disabled','telegram','mock']).default('disabled'),

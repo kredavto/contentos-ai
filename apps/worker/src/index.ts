@@ -4,7 +4,7 @@ import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
 import { ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
 import { ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
-import { DomainError, workflowSchemas, generationInputSchema, type JobType } from '@contentos/types';
+import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
 import { channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
@@ -45,8 +45,11 @@ const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-g
   const calls = new AICallRepository(database.db,job);
   try {
     if (!routes.some(route=>route.provider.name === job.provider && route.model === job.model)) throw new DomainError('CONFIGURATION_REQUIRED',503);
-    const cached = (await calls.cached()).map(row=>workflowSchemas[workflowType].safeParse(row.output)).find(result=>result.success);
-    const output = cached?.success ? cached.data : await orchestrator.run(workflowType,generationInputSchema.parse(job.input),{internalId:job.id,tenantId:job.tenantId,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:abort.signal},calls);
+    if(workflowType==='OPTIMIZE_STRATEGY'&&env.ANALYTICS_AI_ENABLED!=='true')throw new DomainError('CONFIGURATION_REQUIRED',503);
+    const input=generationInputSchema.parse(job.input);
+    if(workflowType==='OPTIMIZE_STRATEGY'&&!input.performance)throw new DomainError('INVALID_INPUT');
+    const cached = (await calls.cached()).map(row=>workflowType==='OPTIMIZE_STRATEGY'?validatePerformanceOutput(row.output,input.performance!.evidence):workflowSchemas[workflowType].safeParse(row.output)).find(result=>result.success);
+    const output = cached?.success ? cached.data : await orchestrator.run(workflowType,input,{internalId:job.id,tenantId:job.tenantId,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:abort.signal},calls);
     await repository.complete(job.tenantId,job.id,leaseToken,output);
     console.log(JSON.stringify({event:'job_completed',jobId:job.id,correlationId:job.correlationId,provider:job.provider,attempt:job.attempt}));
   } catch (error) {

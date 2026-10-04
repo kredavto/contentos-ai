@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, integer, timestamp, jsonb, unique, index, foreignKey, check, bigint } from 'drizzle-orm/pg-core';
 import { organizations, users, brands } from './identity';
-import type { GenerationInput, GenerationOutput, JobState, UsageUnit, JobType, AvatarJobInput, VideoJobInput } from '@contentos/types';
+import type { GenerationInput, StrategyOutput, JobState, UsageUnit, JobType, AvatarJobInput, VideoJobInput } from '@contentos/types';
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 export const usagePolicies = pgTable('usage_policies', {
   operation: text('operation').primaryKey(), unit: text('unit').$type<UsageUnit>().notNull(), amount: integer('amount').notNull(),
@@ -61,7 +61,7 @@ export const strategies = pgTable('strategies', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), brandId: uuid('brand_id').notNull(), createdAt: createdAt(),
 }, t => [unique('strategy_brand_uq').on(t.tenantId, t.brandId), unique('strategy_tenant_id_uq').on(t.tenantId, t.id), foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] })]);
 export const strategyVersions = pgTable('strategy_versions', {
-  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), strategyId: uuid('strategy_id').notNull(), jobId: uuid('job_id').notNull(), version: integer('version').notNull(),
-  content: jsonb('content').$type<GenerationOutput>().notNull(), createdAt: createdAt(),
-}, t => [unique('strategy_version_uq').on(t.strategyId, t.version), unique('strategy_version_job_uq').on(t.jobId),
+  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), strategyId: uuid('strategy_id').notNull(), jobId: uuid('job_id'), createdBy:uuid('created_by').references(()=>users.id), version: integer('version').notNull(),
+  content: jsonb('content').$type<StrategyOutput>().notNull(), createdAt: createdAt(),
+}, t => [unique('strategy_version_uq').on(t.strategyId, t.version), unique('strategy_tenant_version_uq').on(t.tenantId,t.strategyId,t.version), check('strategy_version_author_valid',sql`${t.jobId} is not null or ${t.createdBy} is not null`), unique('strategy_version_job_uq').on(t.jobId),
   foreignKey({ columns: [t.tenantId, t.strategyId], foreignColumns: [strategies.tenantId, strategies.id] }), foreignKey({ columns: [t.tenantId, t.jobId], foreignColumns: [jobs.tenantId, jobs.id] })]);

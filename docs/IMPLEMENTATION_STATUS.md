@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 50 tables with sixteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 57 tables with twenty-one SQL migrations (0000–0020). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -202,3 +202,15 @@ This is not yet a complete user-facing slice: the durable OPTIMIZE_STRATEGY job,
 Verification: all 153 tests in 29 files passed against PostgreSQL with real FFmpeg enabled. Eighteen new tests cover evidence/provenance/time/zero-null rules, bounded typed patches, production-safe mock behavior, metered semantic repair, repair exhaustion and missing configuration. Existing generation workflows pass through the shared engine unchanged.
 
 Final workspace/test typecheck, lint, production build and whitespace validation passed. Browser tests were not rerun locally for this engine-only change; no UI, routes or database migrations changed.
+
+## Durable AI reports and recommendation review
+
+Migrations 0018–0020 connect OPTIMIZE_STRATEGY to the existing durable generation queue and immutable credit ledger. The enqueue transaction snapshots recent publication evidence, the current strategy and Brand Brain revision. Worker/cache/completion validation uses this same input. Reports, recommendations and decisions are tenant-scoped and append-only. Acceptance creates a new strategy version; conflicting strategy/brand changes are rejected, while disjoint accepted fields from the same report can be applied sequentially. Brand Brain is not changed. The feature defaults off via ANALYTICS_AI_ENABLED on both web and worker.
+
+Analytics now includes report generation, coverage/source details, seven findings, experiment measurement rules, before/after field previews and explicit acceptance/rejection. The database sets credit cost. This supersedes the preceding engine-only integration limitation. No live external AI or Telegram request was made. See [workflow and remaining limits](performance-analysis.md).
+
+Initial verification: all 162 tests across 30 files passed with real PostgreSQL and FFmpeg. New integration tests cover frozen observations, immutable history, manager/tenant/brand isolation, concurrent idempotency, single capture, stale leases, withdrawn permissions, refunds, acceptance/rejection and strategy conflicts. Workspace/test typecheck, lint and production build passed. Browser verification is in progress; full MVP and production deployment remain outstanding.
+
+Local browser attempts stopped before reaching the new feature because resource pressure delayed registration (36 seconds) and cold onboarding compilation/navigation (over 30 seconds). Authentication waits now allow 60 seconds without weakening password hashing. The homepage passed agent-browser rendering/error checks. The complete browser scenario is being verified in an isolated CI runner before merging this slice. The preceding engine commit ad1d930 passed full remote CI (37214839876).
+
+Isolated CI reached the generated performance report and exposed an accessible-name issue in the report selector: the option text was included in its implicit name. Explicit labels now identify both analysis selects. The report was generated through the queue successfully; acceptance/rejection and visual verification are being rerun after the fix. CI now retains browser screenshots on successful runs as well as failures. Final local typecheck, lint and production build also passed.

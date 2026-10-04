@@ -11,7 +11,7 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Электронная почта').fill(email);
   await page.getByLabel('Пароль', { exact: true }).fill('secure-test-password');
   await page.getByRole('button', { name: 'Создать аккаунт' }).click();
-  await expect(page.getByRole('status')).toContainText('письмо');
+  await expect(page.getByRole('status')).toContainText('письмо',{timeout:60000}); // scrypt can exceed 30s on a memory-constrained local machine.
   const response = await request.get(`http://127.0.0.1:8026/?recipient=${encodeURIComponent(email)}`);
   const messages = await response.json() as Array<{ text: string }>;
   const token = messages.at(-1)?.text.match(/token=([a-zA-Z0-9_-]+)/)?.[1];
@@ -23,7 +23,7 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Электронная почта').fill(email);
   await page.getByLabel('Пароль', { exact: true }).fill('secure-test-password');
   await page.getByRole('button', { name: 'Войти в пространство' }).click();
-  await expect(page.getByRole('heading', { name: 'Всё начинается с бренда' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Всё начинается с бренда' })).toBeVisible({timeout:60000});
   await page.getByLabel('Название организации').fill('Демо-организация');
   await page.getByRole('button', { name: 'Создать организацию', exact: true }).click();
   await page.getByRole('button', { name: 'Добавить бренд', exact: true }).click();
@@ -293,6 +293,37 @@ test('register, verify email, create organization and resume 15-step onboarding'
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/analytics-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
+
+  const studioUrl=new URL(page.url()),brainPath=`/api/organizations/${studioUrl.searchParams.get('organization')}/brands/${studioUrl.pathname.split('/')[2]}`;
+  const beforeBrainResponse=await page.request.get(brainPath);expect(beforeBrainResponse.ok()).toBe(true);
+  const beforeAnalysisBrain=await beforeBrainResponse.json();expect(beforeAnalysisBrain.data.brand.id).toBe(studioUrl.pathname.split('/')[2]);
+  const performance=page.getByRole('region',{name:'AI-анализ эффективности',exact:true});
+  await performance.getByRole('button',{name:'Проанализировать эффективность',exact:true}).click();
+  await expect(performance.getByRole('heading',{name:'ДЕМО · Отчёт по эффективности',exact:true})).toBeVisible({timeout:90000});
+  await expect(performance.getByText('Недостаточно данных',{exact:true})).toHaveCount(7);
+  const firstReport=await performance.getByLabel('Сохранённый отчёт',{exact:true}).inputValue();
+  const accept=performance.getByRole('button',{name:'Принять рекомендацию',exact:true});
+  await expect(accept).toBeDisabled();
+  await performance.getByLabel('Я проверил изменение и хочу создать новую версию стратегии',{exact:true}).check();
+  await accept.click();
+  await expect(performance.getByText('Принято · создана версия 2',{exact:true})).toBeVisible();
+  await expect(performance.getByRole('heading',{name:'Текущая стратегия v2',exact:true})).toBeVisible();
+  const afterBrainResponse=await page.request.get(brainPath);expect(afterBrainResponse.ok()).toBe(true);
+  expect((await afterBrainResponse.json()).data).toEqual(beforeAnalysisBrain.data);
+  await page.screenshot({path:'test-results/performance-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/performance-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await performance.getByRole('button',{name:'Проанализировать эффективность',exact:true}).click();
+  await expect(performance.getByLabel('Сохранённый отчёт',{exact:true})).not.toHaveValue(firstReport,{timeout:90000});
+  await performance.getByRole('button',{name:'Отклонить рекомендацию',exact:true}).click();
+  await expect(performance.getByText('Отклонено · стратегия не изменена',{exact:true})).toBeVisible();
+  await page.reload();
+  await page.getByRole('button',{name:'Аналитика',exact:true}).click();
+  await expect(performance.getByText('Отклонено · стратегия не изменена',{exact:true})).toBeVisible();
+  await performance.getByLabel('Сохранённый отчёт',{exact:true}).selectOption(firstReport);
+  await expect(performance.getByText('Принято · создана версия 2',{exact:true})).toBeVisible();
 
   await page.getByRole('button',{name:'Видео',exact:true}).click();
   await videoCard.getByRole('button',{name:'Удалить видео',exact:true}).click();

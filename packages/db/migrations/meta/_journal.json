@@ -127,6 +127,27 @@
       "when": 1791127182606,
       "tag": "0017_mute_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791129462139,
+      "tag": "0018_massive_wasp",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791129673719,
+      "tag": "0019_immutable_performance_input",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791129736895,
+      "tag": "0020_preserve_other_job_deletion",
+      "breakpoints": true
     }
   ]
 }

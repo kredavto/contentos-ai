@@ -3,7 +3,7 @@ import { JobRepository, BrandRepository, LedgerRepository, ContentRepository } f
 import { DomainError, generationRequestSchema, scriptSchema, type GenerationInput } from '@contentos/types';
 const id = z.uuid();
 export class GenerationService {
-  constructor(private readonly jobs:JobRepository,private readonly brands:BrandRepository,private readonly ledger:LedgerRepository,private readonly content:ContentRepository,private readonly configuration:{provider:string;model:string;ready:boolean}) {}
+  constructor(private readonly jobs:JobRepository,private readonly brands:BrandRepository,private readonly ledger:LedgerRepository,private readonly content:ContentRepository,private readonly configuration:{provider:string;model:string;ready:boolean;analyticsAI?:boolean}) {}
   async overview(userId:string,tenantId:string,brandId:string) {
     id.parse(tenantId); id.parse(brandId);
     const jobs = await this.jobs.list(userId,tenantId,brandId);
@@ -12,6 +12,8 @@ export class GenerationService {
   }
   async enqueue(userId:string,tenantId:string,brandId:string,raw:unknown,correlationId:string) {
     id.parse(tenantId); id.parse(brandId); const request = generationRequestSchema.parse(raw);
+    if(request.type==='OPTIMIZE_STRATEGY'&&!this.configuration.analyticsAI)throw new DomainError('CONFIGURATION_REQUIRED',503);
+    if((request.type==='OPTIMIZE_STRATEGY')!==(request.options.analysisDays!==undefined))throw new DomainError('INVALID_INPUT');
     if (!this.configuration.ready) throw new DomainError('CONFIGURATION_REQUIRED',503);
     if (request.type !== 'GENERATE_SCRIPT' && (request.options.scriptId || request.options.ideaId)) throw new DomainError('INVALID_INPUT');
     if (request.options.edit !== 'GENERATE' && !request.options.scriptId) throw new DomainError('INVALID_INPUT');
