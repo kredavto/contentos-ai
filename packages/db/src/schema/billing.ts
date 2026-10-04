@@ -33,3 +33,16 @@ export const paymentSettlements = pgTable('payment_settlements', {
   foreignKey({ columns: [t.tenantId, t.paymentId], foreignColumns: [payments.tenantId, payments.id] }),
   check('payment_settlement_paid_valid', sql`${t.observation}->>'status' = 'SUCCEEDED' and ${t.observation}->>'paid' = 'true'`),
 ]);
+
+export const subscriptions = pgTable('subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id), createdAt: createdAt(),
+}, t => [unique('subscription_tenant_uq').on(t.tenantId), unique('subscription_tenant_id_uq').on(t.tenantId, t.id)]);
+export const subscriptionTerms = pgTable('subscription_terms', {
+  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), subscriptionId: uuid('subscription_id').notNull(), orderId: uuid('order_id').notNull(),
+  planVersionId: uuid('plan_version_id').notNull().references(() => planVersions.id), anchorAt: timestamp('anchor_at', { withTimezone: true }).notNull(), monthIndex: integer('month_index').notNull(),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull(), endsAt: timestamp('ends_at', { withTimezone: true }).notNull(), createdAt: createdAt(),
+}, t => [unique('subscription_term_order_uq').on(t.tenantId, t.orderId), index('subscription_term_current_idx').on(t.tenantId, t.startsAt, t.endsAt),
+  foreignKey({ columns: [t.tenantId, t.subscriptionId], foreignColumns: [subscriptions.tenantId, subscriptions.id] }),
+  foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [paymentSettlements.tenantId, paymentSettlements.orderId] }),
+  check('subscription_term_period_valid', sql`${t.monthIndex} between 1 and 1200 and ${t.endsAt} > ${t.startsAt} and ${t.startsAt} = ((${t.anchorAt} at time zone 'UTC') + make_interval(months => ${t.monthIndex} - 1)) at time zone 'UTC' and ${t.endsAt} = ((${t.anchorAt} at time zone 'UTC') + make_interval(months => ${t.monthIndex})) at time zone 'UTC'`),
+]);

@@ -1,14 +1,38 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import { z } from 'zod';
-import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, type PaymentObservation, type CreatePayment } from '@contentos/types';
+import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, monthlyBillingBoundary, type PaymentObservation, type CreatePayment } from '@contentos/types';
 import type { Database } from '../index';
-import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs } from '../schema';
-import { assertMembership, lockTenant } from './ledger';
+import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms } from '../schema';
+import { assertMembership, lockTenant, type Transaction } from './ledger';
 
 const merchantSchema = z.object({ provider: z.literal('yookassa'), merchantId: z.string().regex(/^\d{1,32}$/), test: z.boolean() }).strict();
 export class BillingRepository {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly now: () => Date = () => new Date()) {}
+  async overview(userId: string, tenantId: string) {
+    return this.db.transaction(async tx => {
+      await assertMembership(tx, userId, tenantId, 'billing');
+      const now = this.now();
+      const [current] = await tx.select().from(subscriptionTerms).where(and(eq(subscriptionTerms.tenantId, tenantId), lte(subscriptionTerms.startsAt, now), gt(subscriptionTerms.endsAt, now))).limit(1);
+      const upcoming = await tx.select().from(subscriptionTerms).where(and(eq(subscriptionTerms.tenantId, tenantId), gt(subscriptionTerms.startsAt, now))).orderBy(subscriptionTerms.startsAt).limit(20);
+      const history = await tx.select().from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.startsAt)).limit(20);
+      const orders = await tx.select({ id: billingOrders.id, planVersionId: billingOrders.planVersionId, kind: billingOrders.kind, amountMinor: billingOrders.amountMinor, currency: billingOrders.currency, createdAt: billingOrders.createdAt }).from(billingOrders).where(eq(billingOrders.tenantId, tenantId)).orderBy(desc(billingOrders.createdAt)).limit(20);
+      return { status: current ? 'ACTIVE' as const : 'INACTIVE' as const, current: current ?? null, upcoming, history, orders };
+    });
+  }
+  private async recordTerm(tx: Transaction, order: typeof billingOrders.$inferSelect, paidAt: Date) {
+    const [existing] = await tx.select({ id: subscriptionTerms.id }).from(subscriptionTerms).where(and(eq(subscriptionTerms.tenantId, order.tenantId), eq(subscriptionTerms.orderId, order.id)));
+    if (existing) return;
+    let [subscription] = await tx.select().from(subscriptions).where(eq(subscriptions.tenantId, order.tenantId));
+    if (!subscription) [subscription] = await tx.insert(subscriptions).values({ tenantId: order.tenantId }).returning();
+    if (!subscription) throw new Error('Subscription insert failed');
+    const [lastTerm] = await tx.select().from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, order.tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1);
+    const continuing = lastTerm && lastTerm.endsAt >= paidAt;
+    const anchorAt = continuing ? lastTerm.anchorAt : paidAt;
+    const monthIndex = continuing ? lastTerm.monthIndex + 1 : 1;
+    const startsAt = monthlyBillingBoundary(anchorAt, monthIndex - 1), endsAt = monthlyBillingBoundary(anchorAt, monthIndex);
+    await tx.insert(subscriptionTerms).values({ tenantId: order.tenantId, subscriptionId: subscription.id, orderId: order.id, planVersionId: order.planVersionId, anchorAt, monthIndex, startsAt, endsAt });
+  }
   /** Internal checkout boundary. Recurring consent must be implemented before saveMethod=true is offered. */
   async checkout(userId: string, tenantId: string, planVersionId: string, key: string, input: Pick<Extract<CreatePayment, {mode:'CHECKOUT'}>, 'receipt' | 'returnUrl'>, merchant: z.infer<typeof merchantSchema>, correlationId: string) {
     for (const value of [userId, tenantId, planVersionId, key, correlationId]) if (!z.uuid().safeParse(value).success) throw new DomainError('INVALID_INPUT');
@@ -43,11 +67,12 @@ export class BillingRepository {
       const expected = { provider: order.provider, merchantId: order.merchantId, test: order.test, internalId: order.id, externalId: known?.externalId ?? observed.externalId, amountMinor: order.amountMinor, currency: 'RUB' as const };
       if (!paymentSettlementEligible(expected, observed)) throw new DomainError('CONFLICT', 409);
       const [existing] = await tx.select().from(paymentSettlements).where(and(eq(paymentSettlements.tenantId, tenantId), eq(paymentSettlements.orderId, orderId)));
-      if (existing) return existing;
+      if (existing) { await this.recordTerm(tx, order, existing.createdAt); return existing; }
       const payment = known ?? (await tx.insert(payments).values({ tenantId, orderId, provider: order.provider, merchantId: order.merchantId, test: order.test, externalId: observed.externalId }).returning())[0];
       if (!payment) throw new Error('Payment insert failed');
       const [settlement] = await tx.insert(paymentSettlements).values({ tenantId, orderId, paymentId: payment.id, observation: observed, correlationId: order.correlationId }).returning();
       if (!settlement) throw new Error('Settlement insert failed');
+      await this.recordTerm(tx, order, this.now());
       for (const [unit, amount] of [['AI_CREDITS', order.aiCredits], ['VIDEO_SECONDS', order.videoSeconds]] as const) {
         if (!amount) continue;
         await tx.insert(usageLedger).values({ tenantId, unit, amount, type: 'PURCHASE', availableDelta: amount, reservedDelta: 0, idempotencyKey: `payment:${order.id}:${unit}`, correlationId: order.correlationId });

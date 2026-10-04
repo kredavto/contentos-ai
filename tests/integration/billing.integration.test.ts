@@ -37,6 +37,7 @@ describe.skipIf(!url)('billing orders and atomic payment settlement', () => {
     expect(results[0].id).toBe(results[1].id);
     const balance = await ledger.overview(f.owner, f.tenantId); expect(balance.balances.AI_CREDITS.available).toBe(100); expect(balance.balances.VIDEO_SECONDS.available).toBe(300);
     const rows = await database.client`select * from usage_ledger where tenant_id=${f.tenantId} and type='PURCHASE'`; expect(rows).toHaveLength(2);
+    expect(await database.client`select id from subscription_terms where tenant_id=${f.tenantId}`).toHaveLength(1);
     await expect(database.client`update payment_settlements set observation='{}' where id=${results[0].id}`).rejects.toThrow();
     await expect(billing.settle(f.tenantId, order.id, { ...evidence, externalId: randomUUID() })).rejects.toThrow('CONFLICT');
   });
@@ -61,6 +62,8 @@ describe.skipIf(!url)('billing orders and atomic payment settlement', () => {
     expect((await ledger.overview(f.owner, f.tenantId)).balances.AI_CREDITS.available).toBe(0);
     expect(await database.client`select id from payment_settlements where tenant_id=${f.tenantId}`).toHaveLength(0);
     expect(await database.client`select id from payments where tenant_id=${f.tenantId}`).toHaveLength(0);
+    expect(await database.client`select id from subscription_terms where tenant_id=${f.tenantId}`).toHaveLength(0);
+    expect(await database.client`select id from subscriptions where tenant_id=${f.tenantId}`).toHaveLength(0);
   });
   it('rejects an outdated quote but preserves exact retries of an existing order', async () => {
     const f = await fixture(), key = randomUUID(), original = await f.checkout(key);
@@ -73,5 +76,47 @@ describe.skipIf(!url)('billing orders and atomic payment settlement', () => {
     for (let i = 0; i < 3; i++) await ledger.adjust(f.tenantId, 'AI_CREDITS', 1_000_000_000, `large-grant-${i}`, f.correlation);
     const order = await f.checkout(); await billing.settle(f.tenantId, order.id, f.observation(order.id));
     expect((await ledger.overview(f.owner, f.tenantId)).balances.AI_CREDITS.available).toBe(3_000_000_100);
+  });
+  it('creates paid monthly terms without February drift and separates current from prepaid periods', async () => {
+    const f = await fixture(); let now = new Date('2027-01-31T12:30:00.000Z');
+    const subscriptions = new BillingRepository(database.db, () => now);
+    const first = await f.checkout(); await subscriptions.settle(f.tenantId, first.id, f.observation(first.id));
+    now = new Date('2027-02-20T12:30:00.000Z');
+    const second = await f.checkout(); await subscriptions.settle(f.tenantId, second.id, f.observation(second.id));
+    const overview = await subscriptions.overview(f.owner, f.tenantId);
+    expect(overview.status).toBe('ACTIVE'); expect(overview.current!.endsAt.toISOString()).toBe('2027-02-28T12:30:00.000Z');
+    expect(overview.upcoming).toHaveLength(1); expect(overview.upcoming[0]!.endsAt.toISOString()).toBe('2027-03-31T12:30:00.000Z');
+    expect(overview.upcoming[0]!.startsAt.toISOString()).toBe(overview.current!.endsAt.toISOString());
+    expect(JSON.stringify(overview)).not.toContain('billing@example.test');
+    await expect(subscriptions.overview(f.editor, f.tenantId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(database.client`delete from subscription_terms where tenant_id=${f.tenantId}`).rejects.toThrow();
+    now = new Date('2027-03-01T00:00:00.000Z'); expect((await subscriptions.overview(f.owner, f.tenantId)).current!.orderId).toBe(second.id);
+  });
+  it('starts a fresh paid period after expiry without charging for the unpaid gap', async () => {
+    const f = await fixture(); let now = new Date('2027-01-31T12:30:00.000Z');
+    const subscriptions = new BillingRepository(database.db, () => now);
+    const first = await f.checkout(); await subscriptions.settle(f.tenantId, first.id, f.observation(first.id));
+    now = new Date('2027-04-03T12:30:00.000Z'); expect((await subscriptions.overview(f.owner, f.tenantId)).status).toBe('INACTIVE');
+    const second = await f.checkout(); await subscriptions.settle(f.tenantId, second.id, f.observation(second.id));
+    const current = (await subscriptions.overview(f.owner, f.tenantId)).current!;
+    expect(current.startsAt.toISOString()).toBe(now.toISOString()); expect(current.endsAt.toISOString()).toBe('2027-05-03T12:30:00.000Z'); expect(current.monthIndex).toBe(1);
+  });
+  it('reconciles a pre-term settlement without minting credits or extending from replay time', async () => {
+    const f = await fixture(), order = await f.checkout(), evidence = f.observation(order.id), paymentId = randomUUID();
+    await database.client`insert into payments(id,tenant_id,order_id,provider,merchant_id,test,external_id) values(${paymentId},${f.tenantId},${order.id},'yookassa','100500',true,${evidence.externalId})`;
+    await database.client`insert into payment_settlements(tenant_id,order_id,payment_id,observation,correlation_id,created_at) values(${f.tenantId},${order.id},${paymentId},${JSON.stringify(evidence)},${f.correlation},'2026-10-04T18:00:00Z')`;
+    const replay = new BillingRepository(database.db, () => new Date('2027-04-03T12:00:00Z'));
+    await replay.settle(f.tenantId, order.id, evidence); await replay.settle(f.tenantId, order.id, evidence);
+    const overview = await replay.overview(f.owner, f.tenantId); expect(overview.status).toBe('INACTIVE'); expect(overview.history).toHaveLength(1);
+    expect(overview.history[0]!.startsAt.toISOString()).toBe('2026-10-04T18:00:00.000Z'); expect(overview.history[0]!.endsAt.toISOString()).toBe('2026-11-04T18:00:00.000Z');
+    expect(await database.client`select id from usage_ledger where tenant_id=${f.tenantId}`).toHaveLength(0);
+  });
+  it('rejects overlapping paid terms even for direct database inserts', async () => {
+    const f = await fixture(), first = await f.checkout();
+    await billing.settle(f.tenantId, first.id, f.observation(first.id));
+    const second = await f.checkout(), evidence = f.observation(second.id), paymentId = randomUUID();
+    await database.client`insert into payments(id,tenant_id,order_id,provider,merchant_id,test,external_id) values(${paymentId},${f.tenantId},${second.id},'yookassa','100500',true,${evidence.externalId})`;
+    await database.client`insert into payment_settlements(tenant_id,order_id,payment_id,observation,correlation_id) values(${f.tenantId},${second.id},${paymentId},${JSON.stringify(evidence)},${f.correlation})`;
+    await expect(database.client`insert into subscription_terms(tenant_id,subscription_id,order_id,plan_version_id,anchor_at,month_index,starts_at,ends_at) select tenant_id,subscription_id,${second.id},plan_version_id,anchor_at,month_index,starts_at,ends_at from subscription_terms where tenant_id=${f.tenantId}`).rejects.toThrow('Paid subscription terms cannot overlap');
   });
 });
