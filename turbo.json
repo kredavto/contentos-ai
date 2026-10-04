@@ -29,7 +29,11 @@
         "DATABASE_URL",
         "REDIS_URL",
         "SMTP_URL",
-        "EMAIL_FROM"
+        "EMAIL_FROM",
+        "AI_PROVIDER",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+        "WORKER_HEALTH_PORT"
       ]
     }
   }
