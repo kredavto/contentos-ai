@@ -71,7 +71,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Extend the implemented text/avatar/video job engine to publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
 - Official documentation research and real adapters for captions/media, YooKassa, YouTube/TikTok/Meta/VK/Telegram; production configuration and live verification of HeyGen/S3 remain pending.
 - Remaining AI workflows beyond strategy/ideas/scripts; content calendar with drag/drop and downstream content transitions.
-- Private voice cloning/import, captions editor, cover studio, B-roll and general video/audio media library; generated-video deletion and operator reconciliation tools.
+- Private voice cloning/import, captions editor, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
 - Social OAuth token encryption/refresh, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
 - AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
 - Admin/support/audit UI, notifications, privacy export/deletion workflows, encryption/rotation, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
@@ -85,7 +85,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with video lifecycle/deletion and reconciliation, then captions/Cover Studio and content calendar/publishing. Research official APIs first. Keep the complete original scope intact.
+Continue with captions/Cover Studio and content calendar/publishing; add operator investigation for expired unknown submissions. Research official APIs first. Keep the complete original scope intact.
 
 ## Local environment notes
 
@@ -116,4 +116,11 @@ Docker public pulls initially hung in docker-credential-desktop. Task-owned hang
 - Video Studio supports approved script/avatar/voice selection, three orientations, 720p/1080p, crop/contain, private playback, approval and stage history. Disabled captions/B-roll are explicitly identified. Production credentials are still unconfigured; no duplicate paid HeyGen test was sent.
 - Verification: 77 unit/integration/media tests, typecheck and lint passed; both Playwright scenarios passed (2.2 minutes), including real FFmpeg, S3 fixture transport, playback metadata and approval. Mobile screenshot reviewed, with no horizontal overflow. Four additional transport-boundary tests passed, as did the production build and final lint/typecheck.
 
-Still pending: video deletion/retention, operator reconciliation controls, auto/editable captions, cover design, background music, B-roll, intro/outro, optional watermark, calendar/publishing and the remaining full SaaS scope above.
+Still pending: configurable retention and operator investigation of expired unknown submissions, auto/editable captions, cover design, background music, B-roll, intro/outro, optional watermark, calendar/publishing and the remaining full SaaS scope above.
+
+
+## Video lifecycle follow-up
+
+Video deletion is now a durable lifecycle: immediate access/approval block, canceled-worker fencing, grace for in-flight writes, provider plus original/final/cover removal, retry and metadata scrubbing. Safe manager-level reconciliation resume preserves provider reference/idempotency and the replay deadline. Unknown submissions without a reference cannot falsely complete deletion. Migration 0011 adds deletion state/lease fields. All 85 tests passed, along with typecheck, lint, production build and both browser scenarios (2.2 minutes), including explicit confirmation and completed deletion of the video.
+
+- Video Factory commit 9345c9f passed remote CI run 37201951695, including the real FFmpeg and browser workflow.

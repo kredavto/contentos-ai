@@ -160,6 +160,9 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/videos-mobile.png',fullPage:true});
+  await videoCard.getByRole('button',{name:'Удалить видео',exact:true}).click();
+  await videoCard.getByRole('button',{name:'Подтвердить удаление видео',exact:true}).click();
+  await expect(videoCard).toHaveCount(0,{timeout:30000});
   await page.getByRole('button',{name:'Аватары',exact:true}).click();
   await avatarCard.getByRole('button',{name:'Удалить аватар и все образы',exact:true}).click();
   await expect(avatarCard).toHaveCount(0,{timeout:30000});

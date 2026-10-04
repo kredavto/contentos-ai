@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
 import {createDatabase,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
-import {AvatarService,AvatarProcessor} from '../../packages/core/src/avatars';
+import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
 import {MediaService} from '../../packages/core/src/media';
@@ -16,7 +16,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
   const repo=new VideoRepository(database.db),ledger=new LedgerRepository(database.db),consent=new ConsentService(new ConsentRepository(database.db));
   const objects=new Map<string,Uint8Array>();let lookId='',consentId='',submissions=0;
   const storage:StorageProvider={put:async(key,bytes)=>{objects.set(key,bytes);},delete:async key=>{objects.delete(key);},signedDownload:async key=>`https://storage.example.test/${key}`};
-  const provider:VideoProvider={submit:async(_input,context)=>{submissions++;return {provider:'mock-avatar',internalId:context.internalId,externalId:`test:${context.internalId}`,metadata:{}};},status:async()=>({status:'READY',downloadUrl:'mock://fixture'}),download:async()=>Buffer.from('original-fixture')};
+  const provider:VideoProvider={delete:async()=>{},submit:async(_input,context)=>{submissions++;return {provider:'mock-avatar',internalId:context.internalId,externalId:`test:${context.internalId}`,metadata:{}};},status:async()=>({status:'READY',downloadUrl:'mock://fixture'}),download:async()=>Buffer.from('original-fixture')};
   const processing:VideoProcessingProvider={process:async input=>{for(const stage of ['CAPTIONS_GENERATING','BROLL_PROCESSING','COVER_GENERATING','QC'] as const)await input.onStage?.(stage,{fixture:true});return {bytes:Buffer.from('final-fixture'),thumbnail:Buffer.from('cover-fixture'),durationSeconds:11.2,width:720,height:1280};}};
   const service=new VideoService(repo,{name:'mock-avatar',provider},storage,true);
   const processor=new VideoProcessor(database.db,{name:'mock-avatar',provider},storage,processing,true);
@@ -93,11 +93,59 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await due(job.id);await failing.run(tenantId,job.id);await due(job.id);await failing.run(tenantId,job.id);expect(keys[0]).toBe(keys[1]);
     await database.client`update video_projects set first_submitted_at=now()-interval '24 hours' where job_id=${job.id}`;
     await due(job.id);await failing.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RECONCILIATION');expect(keys).toHaveLength(2);
+    const uncertainProject=(await service.overview(userId,tenantId,brandId)).projects.find(project=>project.jobId===job.id)!;
+    await expect(service.resume(userId,tenantId,brandId,uncertainProject.id,correlationId)).rejects.toThrow('RECONCILIATION_REQUIRED');
     const [reservation]=await database.client`select status from usage_reservations where id=${(await row(job.id)).reservation_id}`;expect(reservation?.status).toBe('HELD');
     const rejected=await service.create(userId,tenantId,brandId,await request(),correlationId);
     const rejecting=new VideoProcessor(database.db,{name:'mock-avatar',provider:{...provider,submit:async()=>{throw new ProviderRequestError('PROVIDER_REJECTED',502,true);}}},storage,processing,true);
     await due(rejected.id);await rejecting.run(tenantId,rejected.id);expect((await row(rejected.id)).status).toBe('FAILED');
     const [released]=await database.client`select status from usage_reservations where id=${(await row(rejected.id)).reservation_id}`;expect(released?.status).toBe('RELEASED');
+  });
+  it('resumes a known render after exhausted local retries without paying for a second render',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId),before=submissions;
+    await due(job.id);await processor.run(tenantId,job.id);
+    const broken=new VideoProcessor(database.db,{name:'mock-avatar',provider},{...storage,put:async()=>{throw new DomainError('PROVIDER_UNAVAILABLE');}},processing,true);
+    for(let attempt=0;attempt<3;attempt++){await due(job.id);await broken.run(tenantId,job.id);}
+    expect((await row(job.id)).status).toBe('RECONCILIATION');
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    await expect(service.resume(viewerId,tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await service.resume(userId,tenantId,brandId,project.id,correlationId);
+    await due(job.id);await processor.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(submissions-before).toBe(1);
+  });
+  it('blocks access immediately and retries deletion without refunding a completed render',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId);
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    const balance=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    await expect(service.delete(viewerId,tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(service.delete(userId,tenantId,randomUUID(),project.id,correlationId)).rejects.toThrow('NOT_FOUND');
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);await service.delete(userId,tenantId,brandId,project.id,correlationId);
+    await expect(service.download(userId,tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_FOUND');
+    await expect(service.approve(userId,tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_FOUND');
+    const deleting=new VideoService(repo,{name:'mock-avatar',provider},{...storage,delete:async()=>{throw new DomainError('PROVIDER_UNAVAILABLE');}},true);
+    expect(await deleting.cleanupOne()).toBe(true);
+    expect((await service.overview(userId,tenantId,brandId)).projects.find(item=>item.id===project.id)?.lifecycle).toBe('DELETE_PENDING');
+    await database.client`update video_projects set delete_after=now()-interval '1 second' where id=${project.id}`;
+    expect(await service.cleanupOne()).toBe(true);expect((await service.overview(userId,tenantId,brandId)).projects.some(item=>item.id===project.id)).toBe(false);
+    expect([...objects.keys()].some(key=>key.includes(project.id))).toBe(false);
+    const [deleted]=await database.client`select script_text,title,reference,deleted_at from video_projects where id=${project.id}`;
+    expect(deleted?.script_text).toBe('');expect(deleted?.title).toBe('Удалённое видео');expect(deleted?.reference).toBeNull();expect(deleted?.deleted_at).not.toBeNull();
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(balance);
+    expect((await service.delete(userId,tenantId,brandId,project.id,correlationId)).status).toBe('DELETED');
+    expect(await database.client`select id from audit_logs where resource_id=${project.id} and action='VIDEO_DELETED'`).toHaveLength(1);
+  });
+  it('fences a canceled worker and waits for a late provider reference before deletion',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId);await due(job.id);
+    const claimed=(await repo.claim(tenantId,job.id))!;const project=await repo.prepare(claimed,avatarConsentPolicies(),true);
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+    expect((await row(job.id)).status).toBe('FAILED');expect(await service.cleanupOne()).toBe(false);
+    await expect(repo.complete(claimed,avatarConsentPolicies(),1,20)).rejects.toThrow('CONFLICT');
+    await repo.submitted(claimed,{provider:'mock-avatar',internalId:job.id,externalId:`late:${job.id}`,metadata:{}});
+    expect(await service.cleanupOne()).toBe(false); // Running writer grace period.
+    await database.client`update video_projects set delete_after=now()-interval '1 second' where id=${project.id}`;
+    expect(await service.cleanupOne()).toBe(true);
+    const [reservation]=await database.client`select status from usage_reservations where id=${claimed.reservationId}`;expect(reservation?.status).toBe('RELEASED');
+    expect((await service.overview(userId,tenantId,brandId)).projects.some(item=>item.id===project.id)).toBe(false);
   });
   it('blocks stale approved scripts and revoked consent before remote submission',async()=>{
     const input=await request(),stale=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;

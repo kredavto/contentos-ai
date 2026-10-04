@@ -52,7 +52,7 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified}:{tenant
     {!verified?<p className="notice warning">Подтвердите email для генерации и одобрения контента.</p>:null}
     {error?<p className="notice error" role="alert">{error}</p>:null}
     <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
-    {tab==='videos'&&data?<VideoStudio base={base} scripts={data.scripts} canWrite={canGenerate} canApprove={canApprove} maximum={data.usage.policies.find(policy=>policy.operation==='GENERATE_VIDEO')?.amount} available={data.usage.balances.VIDEO_SECONDS.available}/>:null}
+    {tab==='videos'&&data?<VideoStudio base={base} scripts={data.scripts} canWrite={canGenerate} canApprove={canApprove} canManage={canStrategy} maximum={data.usage.policies.find(policy=>policy.operation==='GENERATE_VIDEO')?.amount} available={data.usage.balances.VIDEO_SECONDS.available}/>:null}
     {tab==='avatars'?<AvatarStudio base={base} canWrite={canGenerate} canManage={canStrategy} cost={data?.usage.policies.find(policy=>policy.operation==='CREATE_AVATAR')?.amount}/>:null}
     {tab==='media'?<MediaLibrary base={base} canWrite={canGenerate}/>:null}
     {tab==='consents'?<ConsentCenter base={base} role={role}/>:null}

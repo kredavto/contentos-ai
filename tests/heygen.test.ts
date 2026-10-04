@@ -6,6 +6,14 @@ const ref={provider:'heygen',internalId:context.internalId,externalId:'look-1',m
 const look={id:'look-1',group_id:'group-1',name:'Fictional fixture',status:'completed',preview_image_url:'https://files.heygen.ai/test.jpg'};
 const response=(data:unknown)=>new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}});
 describe('HeyGen v3 adapters',()=>{
+  it('verifies video deletion and treats an already absent video as deleted',async()=>{
+    const video={...ref,externalId:'video-1'};
+    const deleting=new HeyGenVideoProvider(new HeyGenClient('test-key',async(url,init)=>{expect(url).toBe('https://api.heygen.com/v3/videos/video-1');expect(init?.method).toBe('DELETE');return response({data:{id:'video-1',deleted:true}});}));
+    await deleting.delete(video,context);
+    await new HeyGenVideoProvider(new HeyGenClient('test-key',async()=>new Response('',{status:404}))).delete(video,context);
+    for(const payload of [{data:{id:'other',deleted:true}},{data:{id:'video-1',deleted:false}}])await expect(new HeyGenVideoProvider(new HeyGenClient('test-key',async()=>response(payload))).delete(video,context)).rejects.toThrow('PROVIDER_REJECTED');
+    await expect(deleting.delete({...video,provider:'other'},context)).rejects.toThrow('INVALID_INPUT');
+  });
   it('creates photo looks with documented schema and mutation idempotency',async()=>{
     const transport:typeof fetch=async(url,init)=>{
       expect(url).toBe('https://api.heygen.com/v3/avatars');

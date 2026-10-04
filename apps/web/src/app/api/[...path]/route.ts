@@ -45,6 +45,8 @@ async function dispatch(request: Request, context: RouteContext) {
           if(path.length===5&&request.method==='GET')return ok(await videos.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await videos.create(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
           if(path[5]&&path.length===7){
+            if(path[6]==='delete'&&request.method==='POST')return ok(await videos.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+            if(path[6]==='resume'&&request.method==='POST'){await videos.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
             if(path[6]==='download'&&request.method==='GET')return ok(await videos.download(user.userId,tenantId,path[3],path[5],correlationId));
             if(path[6]==='history'&&request.method==='GET')return ok(await videos.history(user.userId,tenantId,path[3],path[5]));
             if(path[6]==='approve'&&request.method==='POST')return ok(await videos.approve(user.userId,tenantId,path[3],path[5],correlationId));

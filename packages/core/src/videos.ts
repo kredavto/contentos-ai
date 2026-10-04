@@ -19,6 +19,20 @@ export class VideoService {
     return {videoUrl,coverUrl,expiresIn:120};
   }
   async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),true,correlationId);return {approved:true};}
+  delete(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.delete(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),correlationId);}
+  resume(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.resume(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
+  async cleanupOne(){
+    if(!this.connection||!this.storage)return false;
+    const project=await this.repository.claimDeletion(this.connection.name);if(!project)return false;
+    const context:OperationContext={tenantId:project.tenantId,internalId:project.id,idempotencyKey:project.id,correlationId:project.deleteCorrelationId!,signal:AbortSignal.timeout(240_000)};
+    let succeeded=false;
+    try{
+      if(project.reference)await this.connection.provider.delete(project.reference,context);
+      for(const key of [project.originalKey,project.finalKey,project.coverKey])await this.storage.delete(key,context);
+      succeeded=true;
+    }catch{/* Durable retry retains deletion state and keeps downloads blocked. */}
+    await this.repository.finishDeletion(project,succeeded);return true;
+  }
   history(userId:string,tenantId:string,brandId:string,id:string){return this.repository.history(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id));}
 }
 export class VideoProcessor {

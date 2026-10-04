@@ -38,6 +38,7 @@ export interface VoiceCatalogProvider {
   listPublicVoicePage(cursor:string|undefined,context:OperationContext):Promise<{voices:Array<{reference:ProviderReference;name:string;language:string|null;previewUrl:string|null}>;nextCursor:string|null}>;
 }
 export interface VideoProvider {
+  delete(reference:ProviderReference,context:OperationContext):Promise<void>;
   download(url:string,context:OperationContext):Promise<Uint8Array>;
   submit(input: { script: string; avatar: ProviderReference; voice: ProviderReference; width: number; height: number }, context: OperationContext): Promise<ProviderReference>;
   status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; downloadUrl?: string; errorCode?: string }>;

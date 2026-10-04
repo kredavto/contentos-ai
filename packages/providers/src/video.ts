@@ -6,6 +6,7 @@ import {HeyGenClient,HeyGenVideoProvider} from './heygen';
 export class MockVideoProvider implements VideoProvider {
   constructor(environment:string,private readonly fixture:string){if(!['development','test'].includes(environment)||!isAbsolute(fixture))throw new DomainError('CONFIGURATION_REQUIRED',503);}
   async submit(_input:Parameters<VideoProvider['submit']>[0],context:OperationContext){context.signal.throwIfAborted();return {provider:'mock-avatar',internalId:context.internalId,externalId:`mock-video:${context.internalId}`,metadata:{demo:true}};}
+  async delete(){}
   async status(){return {status:'READY' as const,downloadUrl:'mock://video-fixture'};}
   async download(url:string,context:OperationContext){
     context.signal.throwIfAborted();if(url!=='mock://video-fixture')throw new DomainError('INVALID_MEDIA',422);

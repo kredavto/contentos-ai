@@ -69,6 +69,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 }
 export class HeyGenVideoProvider implements VideoProvider {
+  async delete(value:ProviderReference,context:OperationContext){
+    const result=await this.client.request(`/v3/videos/${checkReference(value)}`,'DELETE',z.object({data:z.object({id:externalId,deleted:z.literal(true)})}).nullable(),context);
+    if(result&&result.data.id!==value.externalId)throw new DomainError('PROVIDER_REJECTED',502);
+  }
   download(url:string,context:OperationContext){return downloadProviderVideo(url,context);}
   constructor(private readonly client:HeyGenClient) {}
   async listPublicVoicePage(cursor:string|undefined,context:OperationContext) {

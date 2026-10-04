@@ -29,3 +29,7 @@ Provision a private bucket with public access blocked and least-privilege GetObj
 ## Verification
 
 Unit tests cover decode/re-encode, orientation, metadata stripping, forged MIME, SVG, truncation and resource bounds. PostgreSQL integration tests cover tenant/brand isolation, role rejection, idempotency, failed upload recovery, persisted deletion retries, abandoned upload collection and upload-versus-delete fencing. Playwright uses a loopback S3 transport fixture and the actual AWS SDK to exercise the UI; this is not a live cloud-storage verification. Production credentials and bucket policy verification remain outstanding.
+
+## Generated video deletion
+
+Video projects use a separate durable deletion workflow covering their provider render, original MP4, final MP4 and cover. Use a private bucket without object versioning for the current deletion adapter, or configure and verify removal of all noncurrent versions through the storage provider’s retention controls. DeleteObject alone does not purge historical versions in a versioned bucket; see https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html. Signed download URLs last at most 120 seconds for video; queued deletion blocks issuance of new links.
