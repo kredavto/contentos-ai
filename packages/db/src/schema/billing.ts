@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, unique, foreignKey, check, index } from 'drizzle-orm/pg-core';
 import { organizations, users } from './identity';
-import type { CreatePayment, PaymentObservation } from '@contentos/types';
+import type { CreatePayment, PaymentObservation, EncryptedCredential } from '@contentos/types';
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(), code: text('code').notNull(), name: text('name').notNull(), enabled: boolean('enabled').notNull().default(false), createdAt: createdAt(),
@@ -14,10 +14,13 @@ export const billingOrders = pgTable('billing_orders', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id), planVersionId: uuid('plan_version_id').notNull().references(() => planVersions.id),
   requestedBy: uuid('requested_by').notNull().references(() => users.id), kind: text('kind').notNull(), amountMinor: integer('amount_minor').notNull(), currency: text('currency').notNull(),
   aiCredits: integer('ai_credits').notNull(), videoSeconds: integer('video_seconds').notNull(), provider: text('provider').notNull(), merchantId: text('merchant_id').notNull(), test: boolean('test').notNull(),
+  renewalConsentId: uuid('renewal_consent_id'), renewalRevision: integer('renewal_revision'),
   input: jsonb('input').$type<CreatePayment>().notNull(), inputHash: text('input_hash').notNull(), idempotencyKey: uuid('idempotency_key').notNull(), correlationId: uuid('correlation_id').notNull(), createdAt: createdAt(),
 }, t => [unique('billing_order_tenant_id_uq').on(t.tenantId, t.id), unique('billing_order_intent_uq').on(t.tenantId, t.idempotencyKey), index('billing_order_tenant_created_idx').on(t.tenantId, t.createdAt),
   check('billing_order_kind_valid', sql`${t.kind} in ('START','RENEWAL','UPGRADE')`), check('billing_order_amount_valid', sql`${t.amountMinor} between 1 and 1000000000 and ${t.currency} = 'RUB' and ${t.aiCredits} between 0 and 1000000000 and ${t.videoSeconds} between 0 and 1000000000`),
   check('billing_order_input_valid', sql`${t.input}->>'currency' = ${t.currency} and (${t.input}->>'amountMinor')::numeric = ${t.amountMinor}`),
+  foreignKey({ columns: [t.tenantId, t.renewalConsentId], foreignColumns: [renewalConsents.tenantId, renewalConsents.id] }),
+  check('billing_order_renewal_valid', sql`((${t.renewalConsentId} is null and ${t.renewalRevision} is null and ${t.input}->>'saveMethod' = 'false') or (${t.renewalConsentId} is not null and ${t.renewalRevision} > 0 and (${t.input}->>'saveMethod' = 'true' or ${t.input}->>'mode' = 'RENEWAL'))) IS TRUE`),
 ]);
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), orderId: uuid('order_id').notNull(), provider: text('provider').notNull(), merchantId: text('merchant_id').notNull(), test: boolean('test').notNull(),
@@ -61,4 +64,14 @@ export const renewalChanges = pgTable('billing_renewal_changes', {
 }, t => [unique('renewal_change_intent_uq').on(t.tenantId, t.idempotencyKey), unique('renewal_change_revision_uq').on(t.tenantId, t.revision),
   foreignKey({ columns: [t.tenantId, t.consentId], foreignColumns: [renewalConsents.tenantId, renewalConsents.id] }),
   check('renewal_change_valid', sql`${t.revision} > 0 and ${t.operation} in ('ENABLE','DISABLE') and (${t.operation} <> 'ENABLE' or ${t.consentId} is not null)`),
+]);
+
+export const paymentMethods = pgTable('billing_payment_methods', {
+  id: uuid('id').primaryKey(), tenantId: uuid('tenant_id').notNull(), orderId: uuid('order_id').notNull(), consentId: uuid('consent_id').notNull(), renewalRevision: integer('renewal_revision').notNull(),
+  credential: jsonb('credential').$type<EncryptedCredential>(), revokedAt: timestamp('revoked_at', { withTimezone: true }), createdAt: createdAt(),
+}, t => [unique('payment_method_order_uq').on(t.tenantId, t.orderId),
+  foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [paymentSettlements.tenantId, paymentSettlements.orderId] }),
+  foreignKey({ columns: [t.tenantId, t.consentId], foreignColumns: [renewalConsents.tenantId, renewalConsents.id] }),
+  check('payment_method_identity_valid', sql`${t.id} = ${t.orderId} and ${t.renewalRevision} > 0`),
+  check('payment_method_revocation_valid', sql`(${t.revokedAt} is null and ${t.credential} is not null) or (${t.revokedAt} is not null and ${t.credential} is null)`),
 ]);

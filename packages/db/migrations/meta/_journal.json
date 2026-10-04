@@ -169,6 +169,13 @@
       "when": 1791133617863,
       "tag": "0023_modern_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791134034632,
+      "tag": "0024_superb_meteorite",
+      "breakpoints": true
     }
   ]
 }

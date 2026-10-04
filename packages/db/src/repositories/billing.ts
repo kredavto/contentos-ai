@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import { z } from 'zod';
-import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, monthlyBillingBoundary, type PaymentObservation, type CreatePayment } from '@contentos/types';
+import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, monthlyBillingBoundary, type PaymentObservation, type CreatePayment, type EncryptedCredential } from '@contentos/types';
 import type { Database } from '../index';
-import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms } from '../schema';
+import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms, renewalConsents, renewalPreferences, paymentMethods } from '../schema';
 import { assertMembership, lockTenant, type Transaction } from './ledger';
 
 const merchantSchema = z.object({ provider: z.literal('yookassa'), merchantId: z.string().regex(/^\d{1,32}$/), test: z.boolean() }).strict();
@@ -33,16 +33,22 @@ export class BillingRepository {
     const startsAt = monthlyBillingBoundary(anchorAt, monthIndex - 1), endsAt = monthlyBillingBoundary(anchorAt, monthIndex);
     await tx.insert(subscriptionTerms).values({ tenantId: order.tenantId, subscriptionId: subscription.id, orderId: order.id, planVersionId: order.planVersionId, anchorAt, monthIndex, startsAt, endsAt });
   }
-  /** Internal checkout boundary. Recurring consent must be implemented before saveMethod=true is offered. */
-  async checkout(userId: string, tenantId: string, planVersionId: string, key: string, input: Pick<Extract<CreatePayment, {mode:'CHECKOUT'}>, 'receipt' | 'returnUrl'>, merchant: z.infer<typeof merchantSchema>, correlationId: string) {
+  /** Internal checkout boundary. Consent and its revision are frozen with the order. */
+  async checkout(userId: string, tenantId: string, planVersionId: string, key: string, input: Pick<Extract<CreatePayment, {mode:'CHECKOUT'}>, 'receipt' | 'returnUrl'> & { renewal?: { consentId: string; revision: number } }, merchant: z.infer<typeof merchantSchema>, correlationId: string) {
     for (const value of [userId, tenantId, planVersionId, key, correlationId]) if (!z.uuid().safeParse(value).success) throw new DomainError('INVALID_INPUT');
     const configured = merchantSchema.parse(merchant);
-    const request = createPaymentSchema.parse({ ...input, amountMinor: 1, currency: 'RUB', description: 'Subscription', mode: 'CHECKOUT', saveMethod: false });
-    const hash = createHash('sha256').update(JSON.stringify({ userId, planVersionId, request, configured })).digest('hex');
+    const renewal = input.renewal === undefined ? undefined : z.object({ consentId: z.uuid(), revision: z.number().int().positive() }).strict().parse(input.renewal);
+    const request = createPaymentSchema.parse({ receipt: input.receipt, returnUrl: input.returnUrl, amountMinor: 1, currency: 'RUB', description: 'Subscription', mode: 'CHECKOUT', saveMethod: Boolean(renewal) });
+    const hash = createHash('sha256').update(JSON.stringify({ userId, planVersionId, request, configured, ...(renewal ? { renewal } : {}) })).digest('hex');
     return this.db.transaction(async tx => {
       await lockTenant(tx, tenantId); await assertMembership(tx, userId, tenantId, 'billing');
       const [existing] = await tx.select().from(billingOrders).where(and(eq(billingOrders.tenantId, tenantId), eq(billingOrders.idempotencyKey, key)));
       if (existing) { if (existing.inputHash !== hash) throw new DomainError('CONFLICT', 409); return existing; }
+      if (renewal) {
+        const [preference] = await tx.select().from(renewalPreferences).where(eq(renewalPreferences.tenantId, tenantId));
+        const [consent] = await tx.select().from(renewalConsents).where(and(eq(renewalConsents.tenantId, tenantId), eq(renewalConsents.id, renewal.consentId)));
+        if (preference?.activeConsentId !== renewal.consentId || preference.revision !== renewal.revision || consent?.planVersionId !== planVersionId) throw new DomainError('CONSENT_REQUIRED', 409);
+      }
       const [quote] = await tx.select().from(planVersions).where(eq(planVersions.id, planVersionId));
       if (!quote) throw new DomainError('NOT_FOUND', 404);
       const [plan] = await tx.select().from(plans).where(eq(plans.id, quote.planId)).for('share');
@@ -50,10 +56,31 @@ export class BillingRepository {
       const [latest] = await tx.select({ id: planVersions.id }).from(planVersions).where(eq(planVersions.planId, plan.id)).orderBy(desc(planVersions.version)).limit(1);
       if (latest?.id !== quote.id) throw new DomainError('CONFLICT', 409);
       const frozen = createPaymentSchema.parse({ ...request, amountMinor: quote.amountMinor, currency: quote.currency, description: `Subscription ${plan.code}` });
-      const [order] = await tx.insert(billingOrders).values({ tenantId, planVersionId, requestedBy: userId, kind: 'START', amountMinor: quote.amountMinor, currency: quote.currency, aiCredits: quote.aiCredits, videoSeconds: quote.videoSeconds, ...configured, input: frozen, inputHash: hash, idempotencyKey: key, correlationId }).returning();
+      const [order] = await tx.insert(billingOrders).values({ tenantId, planVersionId, requestedBy: userId, kind: 'START', amountMinor: quote.amountMinor, currency: quote.currency, aiCredits: quote.aiCredits, videoSeconds: quote.videoSeconds, ...configured, renewalConsentId: renewal?.consentId ?? null, renewalRevision: renewal?.revision ?? null, input: frozen, inputHash: hash, idempotencyKey: key, correlationId }).returning();
       if (!order) throw new Error('Billing order insert failed');
       await tx.insert(auditLogs).values({ tenantId, userId, action: 'BILLING_ORDER_CREATED', resourceId: order.id, correlationId, metadata: { planVersionId, amountMinor: order.amountMinor, currency: order.currency } });
       return order;
+    });
+  }
+  /** Worker-only. Late provider results cannot resurrect a canceled or replaced mandate. */
+  async attachSavedMethod(tenantId: string, orderId: string, raw: PaymentObservation, credential: EncryptedCredential) {
+    const observed = paymentObservationSchema.parse(raw);
+    return this.db.transaction(async tx => {
+      await lockTenant(tx, tenantId);
+      const [order] = await tx.select().from(billingOrders).where(and(eq(billingOrders.tenantId, tenantId), eq(billingOrders.id, orderId)));
+      if (!order) throw new DomainError('NOT_FOUND', 404);
+      if (!order.renewalConsentId || !order.renewalRevision) return { saved: false };
+      const [preference] = await tx.select().from(renewalPreferences).where(eq(renewalPreferences.tenantId, tenantId));
+      if (preference?.activeConsentId !== order.renewalConsentId || preference.revision !== order.renewalRevision) return { saved: false };
+      try { await assertMembership(tx, order.requestedBy, tenantId, 'billing'); } catch (error) { if (error instanceof DomainError && ['NOT_FOUND', 'NOT_AUTHORIZED'].includes(error.code)) return { saved: false }; throw error; }
+      const [payment] = await tx.select().from(payments).where(and(eq(payments.tenantId, tenantId), eq(payments.orderId, orderId)));
+      const [settlement] = await tx.select({ id: paymentSettlements.id }).from(paymentSettlements).where(and(eq(paymentSettlements.tenantId, tenantId), eq(paymentSettlements.orderId, orderId)));
+      if (!payment || !settlement || !paymentSettlementEligible({ provider: order.provider, merchantId: order.merchantId, test: order.test, internalId: orderId, externalId: payment.externalId, amountMinor: order.amountMinor, currency: 'RUB' }, observed)) throw new DomainError('CONFLICT', 409);
+      const [existing] = await tx.select().from(paymentMethods).where(and(eq(paymentMethods.tenantId, tenantId), eq(paymentMethods.orderId, orderId)));
+      if (existing) return { saved: existing.revokedAt === null };
+      await tx.insert(paymentMethods).values({ id: orderId, tenantId, orderId, consentId: order.renewalConsentId, renewalRevision: order.renewalRevision, credential });
+      await tx.insert(auditLogs).values({ tenantId, action: 'BILLING_PAYMENT_METHOD_SAVED', resourceId: orderId, correlationId: order.correlationId, metadata: { consentId: order.renewalConsentId } });
+      return { saved: true };
     });
   }
   /** Worker-only: observation must come from an authenticated provider read, never the webhook payload. */

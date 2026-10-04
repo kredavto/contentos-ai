@@ -60,4 +60,14 @@ Migration 0023 adds immutable renewal consents and change events plus a tenant-s
 
 Enable/disable intents are idempotent under the tenant lock. Replaying an old enable after cancellation cannot re-enable it; replaying an old cancellation after a new acceptance cannot disable the new permission. Changed intent reuse and stale revisions conflict. Cancellation writes history/audit and clears the active permission without changing paid terms or credit balances. Safe overview excludes IP/user-agent evidence.
 
-These repository operations are not yet exposed to users and do not save a payment method or schedule charges. Checkout continues to send saveMethod=false. Before enabling renewal, the checkout/worker must bind the consent and revision to the immutable order, encrypt the confirmed saved method and recheck permission before each send marker. Queued renewal cancellation must join this transaction when the queue is implemented. No auto-charge capability is implied by the permission record alone.
+These repository operations are not yet exposed to users or scheduled by a billing worker. No auto-charge capability is implied by the permission record alone.
+
+## Consent-bound saved methods
+
+Migration 0024 binds a saving checkout to the active consent ID and revision. Ordinary checkout still uses saveMethod=false. A new saving order requires the exact active permission and quote; PostgreSQL checks this relationship as well as the repository. An exact replay returns the original immutable order, so the future worker must recheck eligibility before marking a new submission.
+
+After authenticated paid verification and atomic settlement, PaymentMethodService encrypts the provider method reference with AES-256-GCM. Associated data binds the ciphertext to its payment purpose, tenant, internal method/order ID, provider, merchant and test/live mode. It cannot be decrypted as a social token or for another payment scope. Card data is never stored. A configured credential vault is required to capture a method.
+
+Capture checks the settled payment identity, active consent/revision and requesting owner's current verified membership under the tenant lock. Cancellation or replacement permission clears stored ciphertext and records revocation in the same transaction. Concurrent cancellation/capture cannot leave a usable method. Database guards prevent resurrection. Method capture is separate from settlement: a capture failure must be retried through authenticated status reconciliation, never by repeating a charge with a new key.
+
+Durable task dispatch, pre-send eligibility checks, queued-charge cancellation, webhook reconciliation, automatic renewal scheduling and Billing UI remain to be implemented before enabling payments.

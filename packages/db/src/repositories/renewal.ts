@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { DomainError, minorToRubles, renewalAcceptanceSchema, renewalCancellationSchema, type RenewalAcceptance, type RenewalCancellation } from '@contentos/types';
 import type { Database } from '../index';
-import { plans, planVersions, renewalConsents, renewalPreferences, renewalChanges, auditLogs } from '../schema';
+import { plans, planVersions, renewalConsents, renewalPreferences, renewalChanges, auditLogs, paymentMethods } from '../schema';
 import { assertMembership, lockTenant, type Transaction } from './ledger';
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 async function quotePolicy(tx: Transaction, versionId: string) {
@@ -48,6 +48,7 @@ export class RenewalRepository {
       const [consent] = await tx.insert(renewalConsents).values({ tenantId, planVersionId: input.planVersionId, policyVersion: policy.policyVersion, policyText: policy.text, textHash: policy.textHash, amountMinor: policy.amountMinor, currency: policy.currency, acceptedBy: userId, ipAddress: request.ip.slice(0,64), userAgent: request.userAgent.slice(0,512) }).returning();
       if (!consent) throw new Error('Renewal consent insert failed');
       const revision = input.expectedRevision + 1;
+      await tx.update(paymentMethods).set({ credential: null, revokedAt: new Date() }).where(and(eq(paymentMethods.tenantId, tenantId), isNull(paymentMethods.revokedAt)));
       await tx.insert(renewalPreferences).values({ tenantId, activeConsentId: consent.id, revision }).onConflictDoUpdate({ target: renewalPreferences.tenantId, set: { activeConsentId: consent.id, revision, updatedAt: new Date() } });
       const [change] = await tx.insert(renewalChanges).values({ tenantId, consentId: consent.id, revision, operation: 'ENABLE', actorId: userId, idempotencyKey: input.idempotencyKey, inputHash, correlationId }).returning();
       if (!change) throw new Error('Renewal change insert failed');
@@ -64,6 +65,7 @@ export class RenewalRepository {
       const [preference] = await tx.select().from(renewalPreferences).where(eq(renewalPreferences.tenantId, tenantId));
       if ((preference?.revision ?? 0) !== input.expectedRevision) throw new DomainError('CONFLICT', 409);
       const revision = input.expectedRevision + 1, consentId = preference?.activeConsentId ?? null;
+      await tx.update(paymentMethods).set({ credential: null, revokedAt: new Date() }).where(and(eq(paymentMethods.tenantId, tenantId), isNull(paymentMethods.revokedAt)));
       await tx.insert(renewalPreferences).values({ tenantId, activeConsentId: null, revision }).onConflictDoUpdate({ target: renewalPreferences.tenantId, set: { activeConsentId: null, revision, updatedAt: new Date() } });
       const [change] = await tx.insert(renewalChanges).values({ tenantId, consentId, revision, operation: 'DISABLE', actorId: userId, idempotencyKey: input.idempotencyKey, inputHash, correlationId }).returning();
       if (!change) throw new Error('Renewal change insert failed');
