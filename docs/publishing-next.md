@@ -1,0 +1,7 @@
+# Publishing implementation notes
+
+Official provider research (2026-10-04): [Telegram Bot API](https://core.telegram.org/bots/api#sendvideo). `getMe` validates a bot token; `getChatMember` can inspect its channel membership. `sendVideo` accepts an MP4 file/URL and returns a Message; the documented upload limit is 50 MB and caption limit is 1024 characters. Flood-control errors can include `retry_after`. These are adapter capabilities, not a claim that the application publishing workflow is implemented.
+
+Proposed implementation: encrypted tenant/brand social connection; manager-only connect/disconnect; server-side credential vault with key IDs and rotation; explicit approval of an immutable calendar/content revision; a durable publishing job with UTC schedule, consent/source revalidation and a stable internal intent. Never expose bot tokens in URLs/logs or frontend responses. Use bounded multipart upload of the private final file. Respect platform limits before enqueueing; reject unsupported privacy/comment options instead of silently ignoring them. Paid broadcasts stay disabled.
+
+The documented sendVideo parameters contain no idempotency key. Therefore mark submission durably before the request, persist the successful Message reference, and hold uncertain transport outcomes for reconciliation rather than blindly resending. A locally idempotent scheduler alone cannot guarantee remote exactly-once delivery. Other requested social providers still require their own documented OAuth/API adapters and capabilities.

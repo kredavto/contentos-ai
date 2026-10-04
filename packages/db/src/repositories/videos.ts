@@ -15,7 +15,7 @@ async function projectFor(tx:Transaction,job:StoredJob){
   const [project]=await tx.select().from(videoProjects).where(and(projectWhere(job.tenantId,input.projectId),eq(videoProjects.jobId,job.id),eq(videoProjects.brandId,job.brandId)));
   if(!project)throw new DomainError('NOT_FOUND',404);return project;
 }
-async function validate(tx:Transaction,project:StoredVideo,policies:ConsentPolicy[]){
+export async function validateVideo(tx:Transaction,project:StoredVideo,policies:ConsentPolicy[]){
   if(project.lifecycle!=='ACTIVE')throw new DomainError('NOT_FOUND',404);
   if(project.consent.requirements.some(requirement=>!policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash)))throw new DomainError('CONSENT_REQUIRED',403);
   await requireConsent(tx,project.tenantId,project.consent.subjectId,project.consent.requirements);
@@ -87,7 +87,7 @@ export class VideoRepository {
   }
   async prepare(job:StoredJob,policies:ConsentPolicy[],markSubmitting=false){
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');let project=await projectFor(tx,active);await validate(tx,project,policies);
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');let project=await projectFor(tx,active);await validateVideo(tx,project,policies);
       if(project.captionMode==='AUTO'&&project.captionMutationState==='UNKNOWN')throw new DomainError('RECONCILIATION_REQUIRED',409);
       if(active.consecutiveFailures>=active.maxAttempts||(!project.reference&&project.firstSubmittedAt&&Date.now()-project.firstSubmittedAt.getTime()>23*3600_000))throw new DomainError('RECONCILIATION_REQUIRED',409);
       if(project.stage==='VIDEO_REQUESTED')project=await transition(tx,project,'VOICE_PREPARING',job.correlationId,{voiceId:project.voiceId,publicVoice:true});
@@ -114,7 +114,7 @@ export class VideoRepository {
   }
   async storeOriginal(job:StoredJob,policies:ConsentPolicy[],durationSeconds?:number){
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validate(tx,project,policies);
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validateVideo(tx,project,policies);
       if(durationSeconds!==undefined&&(!Number.isFinite(durationSeconds)||durationSeconds<=0||Math.ceil(durationSeconds)>project.maxDurationSeconds))throw new DomainError('INVALID_MEDIA',422);
       const [updated]=await tx.update(videoProjects).set({originalStoredAt:project.originalStoredAt??new Date(),...(durationSeconds===undefined?{}:{sourceDurationMs:Math.round(durationSeconds*1000)})}).where(projectWhere(job.tenantId,project.id)).returning();return updated!;
     });
@@ -123,13 +123,13 @@ export class VideoRepository {
     return this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);const project=await projectFor(tx,active);const [track]=await tx.select().from(captions).where(and(eq(captions.tenantId,job.tenantId),eq(captions.projectId,project.id)));return !!track&&track.confirmedRevision===track.revision;});
   }
   async markCaptionSubmission(job:StoredJob,policies:ConsentPolicy[]){
-    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validate(tx,project,policies);
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validateVideo(tx,project,policies);
       if(project.captionMode!=='AUTO'||project.captionMutationState!=='NONE'||!project.originalStoredAt||!project.sourceDurationMs)throw new DomainError('RECONCILIATION_REQUIRED',409);
       await tx.update(videoProjects).set({captionMutationState:'STARTED'}).where(projectWhere(job.tenantId,project.id));
     });
   }
   async captionDraft(job:StoredJob,policies:ConsentPolicy[],segments:CaptionSegment[]){
-    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validate(tx,project,policies);
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validateVideo(tx,project,policies);
       if(project.captionMode==='NONE'||!project.originalStoredAt||!project.sourceDurationMs||(project.captionMode==='AUTO'&&project.captionMutationState!=='STARTED'))throw new DomainError('CONFLICT',409);
       const parsed=captionSegmentsSchema.parse(segments);if(parsed.some(segment=>segment.end>project.sourceDurationMs!/1000+.05))throw new DomainError('INVALID_MEDIA',422);
       await tx.insert(captions).values({tenantId:job.tenantId,projectId:project.id,source:project.captionMode,segments:parsed});
@@ -138,14 +138,14 @@ export class VideoRepository {
     });
   }
   async captionReview(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[]){
-    return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId);const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);await validate(tx,project,policies);
+    return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId);const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);await validateVideo(tx,project,policies);
       const [track]=await tx.select().from(captions).where(and(eq(captions.tenantId,tenantId),eq(captions.projectId,id)));const [job]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,project.jobId)));
       if(!track||!project.originalStoredAt)throw new DomainError('NOT_FOUND',404);return {project,track,editable:job?.status==='WAITING_REVIEW'};
     });
   }
   async editCaptions(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[],input:CaptionEdit,correlationId:string,confirm=false){
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);await validate(tx,project,policies);
+      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);await validateVideo(tx,project,policies);
       const [job]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,project.jobId)));const [track]=await tx.select().from(captions).where(and(eq(captions.tenantId,tenantId),eq(captions.projectId,id)));
       if(!job||job.status!=='WAITING_REVIEW'||!track||track.revision!==input.revision||!project.sourceDurationMs)throw new DomainError('CONFLICT',409);
       const segments=captionSegmentsSchema.parse(confirm?track.segments:input.segments);if(segments.some(segment=>segment.end>project.sourceDurationMs!/1000+.05))throw new DomainError('INVALID_INPUT');
@@ -157,7 +157,7 @@ export class VideoRepository {
   }
   async manualCaptions(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[],correlationId:string){
     await this.db.transaction(async tx=>{
-      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);await validate(tx,project,policies);
+      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);await validateVideo(tx,project,policies);
       const [job]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,project.jobId)));
       if(!job||job.status!=='RECONCILIATION'||project.captionMode!=='AUTO'||project.captionMutationState!=='UNKNOWN'||!project.originalStoredAt||!project.sourceDurationMs)throw new DomainError('CONFLICT',409);
       if(project.captionReservationId)await settleInTransaction(tx,tenantId,project.captionReservationId,'RELEASE',correlationId);
@@ -168,7 +168,7 @@ export class VideoRepository {
     });
   }
   async complete(job:StoredJob,policies:ConsentPolicy[],durationSeconds:number,bytes:number){
-    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validate(tx,project,policies);
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validateVideo(tx,project,policies);
       const charged=Math.ceil(durationSeconds);if(!Number.isSafeInteger(charged)||charged<1||charged>project.maxDurationSeconds||!Number.isSafeInteger(bytes)||bytes<1||bytes>256*1024*1024)throw new DomainError('INVALID_MEDIA',422);
       if(project.captionMode!=='NONE'){const [track]=await tx.select().from(captions).where(and(eq(captions.tenantId,job.tenantId),eq(captions.projectId,project.id)));if(!track||track.confirmedRevision!==track.revision)throw new DomainError('CONFLICT',409);}
       await settleInTransaction(tx,job.tenantId,job.reservationId,'CAPTURE',job.correlationId,charged);
@@ -194,7 +194,7 @@ export class VideoRepository {
     });
   }
   async ready(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[],approve=false,correlationId:string=randomUUID()){
-    return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,approve?'approve':'read');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId),eq(videoProjects.stage,'READY'),eq(videoProjects.lifecycle,'ACTIVE')));if(!project)throw new DomainError('NOT_FOUND',404);await validate(tx,project,policies);
+    return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,approve?'approve':'read');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId),eq(videoProjects.stage,'READY'),eq(videoProjects.lifecycle,'ACTIVE')));if(!project)throw new DomainError('NOT_FOUND',404);await validateVideo(tx,project,policies);
       if(approve&&!project.approvedAt){await tx.update(videoProjects).set({approvedBy:userId,approvedAt:new Date()}).where(projectWhere(tenantId,id));await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_APPROVED',resourceId:id,correlationId,metadata:{scriptVersion:project.scriptVersion}});}return project;
     });
   }
@@ -206,7 +206,7 @@ export class VideoRepository {
     await this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'strategy');
       const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId))).for('update');
-      if(!project)throw new DomainError('NOT_FOUND',404);await validate(tx,project,policies);
+      if(!project)throw new DomainError('NOT_FOUND',404);await validateVideo(tx,project,policies);
       const [job]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,project.jobId))).for('update');
       if(!job||job.status!=='RECONCILIATION')throw new DomainError('CONFLICT',409);
       if(project.captionMode==='AUTO'&&project.captionMutationState==='UNKNOWN')throw new DomainError('RECONCILIATION_REQUIRED',409);

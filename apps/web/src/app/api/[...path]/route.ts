@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, videos, env } = services();
+    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -31,16 +31,22 @@ async function dispatch(request: Request, context: RouteContext) {
     if (request.method === 'GET' && key === 'me') return ok(user);
     if (request.method === 'POST' && key === 'auth/revoke-sessions') { await auth.revokeSessions(user.userId, correlationId); jar.delete(sessionCookie); return ok({ authenticated: false }); }
     if (request.method === 'GET' && key === 'organizations') return ok(await brands.listOrganizations(user.userId));
-    if (request.method === 'POST') {
+    if (request.method !== 'GET') {
       // A shared per-user mutation budget complements the authentication throttles.
       await auth.throttle('mutation', user.userId);
-      if (key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
+      if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
     }
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if(path[3]&&path[4]==='calendar'){
+          if(path.length===5&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await calendar.list(user.userId,tenantId,path[3],{from:query.get('from'),to:query.get('to')}));}
+          if(path.length===5&&request.method==='POST')return ok(await calendar.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          if(path[5]&&path.length===6&&request.method==='PUT')return ok(await calendar.update(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+          if(path[5]&&path.length===7&&path[6]==='cancel'&&request.method==='POST'){await calendar.cancel(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({cancelled:true});}
+        }
         if(path[3]&&path[4]==='videos'){
           if(path.length===8&&path[5]&&path[6]==='captions'&&path[7]==='confirm'&&request.method==='POST')return ok(await videos.confirmCaptions(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),202);
           if(path.length===5&&request.method==='GET')return ok(await videos.overview(user.userId,tenantId,path[3]));

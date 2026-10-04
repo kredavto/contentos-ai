@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 46 tables with thirteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 47 tables with fourteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -70,7 +70,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
 - Extend the implemented text/avatar/video job engine to publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
 - Official documentation research and real adapters for captions/media, YooKassa, YouTube/TikTok/Meta/VK/Telegram; production configuration and live verification of HeyGen/S3 remain pending.
-- Remaining AI workflows beyond strategy/ideas/scripts; content calendar with drag/drop and downstream content transitions.
+- Remaining AI workflows beyond strategy/ideas/scripts; downstream publishing transitions from the implemented editorial calendar.
 - Private voice cloning/import, captions editor, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
 - Social OAuth token encryption/refresh, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
 - AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
@@ -85,7 +85,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with Cover Studio and content calendar/publishing; add operator investigation for expired unknown submissions. Research official APIs first. Keep the complete original scope intact.
+Continue with publishing connections/scheduler and Cover Studio; add operator investigation for expired unknown submissions. Research official APIs first. Keep the complete original scope intact.
 
 ## Local environment notes
 
@@ -116,7 +116,7 @@ Docker public pulls initially hung in docker-credential-desktop. Task-owned hang
 - Video Studio supports approved script/avatar/voice selection, three orientations, 720p/1080p, crop/contain, private playback, approval and stage history. Disabled captions/B-roll are explicitly identified. Production credentials are still unconfigured; no duplicate paid HeyGen test was sent.
 - Verification: 77 unit/integration/media tests, typecheck and lint passed; both Playwright scenarios passed (2.2 minutes), including real FFmpeg, S3 fixture transport, playback metadata and approval. Mobile screenshot reviewed, with no horizontal overflow. Four additional transport-boundary tests passed, as did the production build and final lint/typecheck.
 
-Still pending: configurable retention and operator investigation of expired unknown submissions, cover design, background music, B-roll, intro/outro, optional watermark, calendar/publishing and the remaining full SaaS scope above.
+Still pending: configurable retention and operator investigation of expired unknown submissions, cover design, background music, B-roll, intro/outro, optional watermark, publishing and the remaining full SaaS scope above.
 
 
 ## Video lifecycle follow-up
@@ -133,3 +133,12 @@ Migration 0012 adds a tenant-bound caption draft, optimistic revision/confirmati
 Initial checks: 92 unit/integration/media tests, lint and typecheck passed, including real WAV extraction, draft review, optimistic conflict, caption billing and unknown-response fallback. Both Playwright scenarios passed (3.1 minutes), including caption editing on desktop/mobile, actual FFmpeg burn-in, playback, approval and deletion. The test waits explicitly for the asynchronous review state (the initial 30-second click timeout was shorter than the queue redispatch interval). The production build passed. No live transcription or duplicate HeyGen generation was sent.
 
 Video lifecycle commit 2e8e0ff passed remote CI run 37202409700.
+
+
+## Editorial calendar
+
+Migration 0013 adds tenant/brand content plans with UTC timestamps, IANA zones, revisions and creation idempotency. Day/week/month views, drag/drop and a keyboard/mobile editor cover all five requested content types. Plans can attach an approved video; creation and updates recheck the script and original consent. Captions, hashtags, desired privacy/comments and MANUAL/APPROVAL preferences are persisted. Read access is separate from verified writer mutations. Non-GET mutations now share the per-user throttle.
+
+The calendar does not yet publish: the UI explicitly distinguishes planning from external delivery. Publishing jobs, social connections, analytics and all other outstanding SaaS modules remain required. Next: implement the real publishing connection, durable approval scheduler and status workflow; initial Telegram research is recorded in publishing-next.md.
+
+97 tests passed; additional approved-video attachment coverage also passed. Both Playwright scenarios passed (4.0 minutes), including approved-video planning, native drag/drop, optimistic date persistence, all three views, cancellation and mobile layout. Production build, final typecheck and lint passed. Caption commit 669e43c passed remote CI run 37203378533.

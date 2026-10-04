@@ -1,8 +1,9 @@
 import {randomUUID} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {createDatabase,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {createDatabase,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
+import {CalendarService} from '../../packages/core/src/calendar';
 import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
 import {MediaService} from '../../packages/core/src/media';
@@ -74,6 +75,12 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await service.approve(userId,tenantId,brandId,project.id,correlationId);await service.approve(userId,tenantId,brandId,project.id,correlationId);
     expect((await service.overview(userId,tenantId,brandId)).projects[0]?.approvedAt).not.toBeNull();
     expect((await service.download(userId,tenantId,brandId,project.id,correlationId)).expiresIn).toBe(120);
+    const calendar=new CalendarService(new CalendarRepository(database.db));
+    const planned=await calendar.create(userId,tenantId,brandId,{title:'Video plan',type:'SHORT_VIDEO',videoProjectId:project.id,platform:'YOUTUBE',localDateTime:'2026-10-10T12:00',timeZone:'Europe/Moscow',idempotencyKey:randomUUID()},correlationId);
+    expect(planned.revision).toBe(0);
+    await database.client`update video_projects set approved_at=null where id=${project.id}`;
+    await expect(calendar.create(userId,tenantId,brandId,{title:'Unapproved video',type:'SHORT_VIDEO',videoProjectId:project.id,platform:'YOUTUBE',localDateTime:'2026-10-11T12:00',timeZone:'UTC',idempotencyKey:randomUUID()},correlationId)).rejects.toThrow('CONFLICT');
+    await service.approve(userId,tenantId,brandId,project.id,correlationId);
     await expect(service.download(randomUUID(),tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_FOUND');
     await expect(database.client`update video_transitions set details='{}' where project_id=${project.id}`).rejects.toThrow('Append-only');
     expect(await database.client`select id from usage_ledger where reservation_id=${(await row(job.id)).reservation_id} and type='CAPTURE'`).toHaveLength(1);

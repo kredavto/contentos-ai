@@ -12,3 +12,15 @@
 @media(max-width:500px){.studio-tabs{flex-wrap:wrap;overflow:visible;gap:2px}.studio-tabs button{flex:1 0 28%;padding:10px 8px}}
 
 .video-preview { width: 100%; max-height: 560px; border-radius: 12px; background: #111; }
+
+.calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
+.calendar-day { min-width:0; min-height:140px; border:1px solid var(--line); border-radius:12px; padding:10px; background:var(--surface,#fff); }
+.calendar-day h3 { font-size:13px; margin:0 0 12px; }
+.calendar-item { display:flex; flex-direction:column; text-align:left; width:100%; gap:5px; padding:10px; margin:6px 0; border-radius:8px; border:1px solid #cbd9c6; background:#edf3e6; overflow-wrap:anywhere; cursor:grab; }
+.calendar-item time,.calendar-item small { font-size:11px; }
+.calendar-item strong { font-size:13px; }
+.calendar-day:has(.calendar-item) { background:#f8faf5; }
+.calendar-day:focus-within { outline:2px solid #24594f; }
+.calendar-grid.calendar-view-day { grid-template-columns:1fr; }
+@media(max-width:900px) { .calendar-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:560px) { .calendar-grid { grid-template-columns:1fr; } .calendar-day { min-height:80px; } }

@@ -18,3 +18,4 @@ export * from './repositories/media';
 export * from './repositories/avatars';
 export * from './repositories/voices';
 export * from './repositories/videos';
+export * from './repositories/calendar';
