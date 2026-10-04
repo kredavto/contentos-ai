@@ -1,11 +1,11 @@
 import { BillingRepository, PaymentTaskRepository } from '@contentos/db';
-import { DomainError, ProviderRequestError, type PaymentProvider, type PaymentResult } from '@contentos/types';
+import { DomainError, ProviderRequestError, type CreatePayment, type PaymentProvider, type PaymentResult } from '@contentos/types';
 import { CredentialVault } from './credential-vault';
 import { PaymentMethodService } from './payment-methods';
 /** Checkout transport runs only here, behind the provider interface and durable send marker. */
 export class PaymentProcessor {
   private readonly methods: PaymentMethodService;
-  constructor(private readonly tasks: PaymentTaskRepository, private readonly billing: BillingRepository, private readonly provider: PaymentProvider | null, private readonly merchant: { provider: string; merchantId: string; test: boolean } | null, private readonly vault: CredentialVault | null) {
+  constructor(private readonly tasks: PaymentTaskRepository, private readonly billing: BillingRepository, private readonly provider: PaymentProvider | null, private readonly merchant: { provider: string; merchantId: string; test: boolean } | null, private readonly vault: CredentialVault | null, private readonly renewalsEnabled = false) {
     this.methods = new PaymentMethodService(billing, vault);
   }
   async run(tenantId: string, id: string) {
@@ -15,14 +15,22 @@ export class PaymentProcessor {
     if (!task?.leaseToken) return;
     const token = task.leaseToken;
     try {
-      const operation = await this.tasks.prepare(tenantId, id, token, this.merchant, Boolean(this.vault));
+      const operation = await this.tasks.prepare(tenantId, id, token, this.merchant, Boolean(this.vault), this.renewalsEnabled);
       if (!operation) return;
       const context = { tenantId, internalId: id, idempotencyKey: id, correlationId: operation.order.correlationId, signal: AbortSignal.timeout(45_000) };
+      let input: CreatePayment | null = null;
+      if (operation.mode === 'CREATE') {
+        if (operation.order.input.mode === 'RENEWAL') {
+          if (!this.vault || !operation.method?.credential) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+          const paymentMethodId = this.vault.decrypt(operation.method.credential, { kind: 'PAYMENT_METHOD', tenantId, methodId: operation.method.id, provider: operation.order.provider, merchantId: operation.order.merchantId, test: operation.order.test });
+          input = { ...operation.order.input, paymentMethodId };
+        } else input = operation.order.input;
+      }
       let result: PaymentResult;
       try {
         result = operation.mode === 'READ'
           ? await this.provider.get({ provider: operation.order.provider, externalId: operation.externalId, internalId: id, metadata: { merchantId: operation.order.merchantId, test: operation.order.test } }, context)
-          : await this.provider.create(operation.order.input, { ...context, idempotencyKey: operation.idempotencyKey, firstSubmittedAt: operation.firstSubmittedAt.toISOString() });
+          : await this.provider.create(input!, { ...context, idempotencyKey: operation.idempotencyKey, firstSubmittedAt: operation.firstSubmittedAt.toISOString() });
       } catch (error) {
         await this.tasks.fail(tenantId, id, token, operation.mode === 'CREATE' && error instanceof ProviderRequestError && error.definitiveRejection);
         return;

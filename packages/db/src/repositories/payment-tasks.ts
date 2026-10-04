@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { DomainError, paymentObservationSchema, type PaymentObservation } from '@contentos/types';
 import type { Database } from '../index';
-import { billingOrders, payments, paymentTasks, renewalPreferences } from '../schema';
+import { billingOrders, payments, paymentTasks, renewalPreferences, renewalIntents, paymentMethods, subscriptionTerms, plans, planVersions } from '../schema';
 import { assertMembership, lockTenant, type Transaction } from './ledger';
 const whereTask = (tenantId: string, id: string) => and(eq(paymentTasks.tenantId, tenantId), eq(paymentTasks.id, id));
 const clearedLease = { leaseToken: null, leaseExpiresAt: null };
@@ -37,7 +37,7 @@ export class PaymentTaskRepository {
     });
   }
   /** Commit a stable marker before POST. A known external ID always switches to GET. */
-  async prepare(tenantId: string, id: string, token: string, merchant: Merchant, vaultReady = false) {
+  async prepare(tenantId: string, id: string, token: string, merchant: Merchant, vaultReady = false, renewalsEnabled = false) {
     return this.db.transaction(async tx => {
       await lockTenant(tx, tenantId);
       const task = await this.owned(tx, tenantId, id, token);
@@ -52,18 +52,31 @@ export class PaymentTaskRepository {
         const [preference] = await tx.select().from(renewalPreferences).where(eq(renewalPreferences.tenantId, tenantId));
         permitted &&= preference?.activeConsentId === order.renewalConsentId && preference.revision === order.renewalRevision;
       }
-      // Renewal-method decryption/binding is not implemented here yet: never dispatch one speculatively.
-      if (order.input.mode !== 'CHECKOUT') permitted = false;
+      let method: typeof paymentMethods.$inferSelect | null = null;
+      if (order.input.mode === 'RENEWAL') {
+        if (!renewalsEnabled) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+        const [binding] = await tx.select().from(renewalIntents).where(and(eq(renewalIntents.tenantId, tenantId), eq(renewalIntents.orderId, id)));
+        const [latest] = await tx.select().from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1);
+        if (!binding || !latest || latest.id !== binding.termId || latest.endsAt > this.now() || this.now().getTime() - latest.endsAt.getTime() >= 72 * 3600000) permitted = false;
+        if (binding) {
+          const [row] = await tx.select().from(paymentMethods).where(and(eq(paymentMethods.tenantId, tenantId), eq(paymentMethods.id, binding.methodId)));
+          method = row ?? null;
+          const [source] = row ? await tx.select().from(billingOrders).where(and(eq(billingOrders.tenantId, tenantId), eq(billingOrders.id, row.orderId))) : [];
+          if (!row?.credential || row.revokedAt || row.consentId !== order.renewalConsentId || row.renewalRevision !== order.renewalRevision || source?.provider !== order.provider || source.merchantId !== order.merchantId || source.test !== order.test) permitted = false;
+        }
+        const [plan] = await tx.select({ enabled: plans.enabled }).from(plans).innerJoin(planVersions, eq(plans.id, planVersions.planId)).where(eq(planVersions.id, order.planVersionId)).for('share');
+        permitted &&= Boolean(plan?.enabled);
+      }
       const now = this.now();
       const expired = task.firstSubmittedAt && (now.getTime() - task.firstSubmittedAt.getTime() >= 23 * 3600_000 || task.firstSubmittedAt > now);
       if (!permitted || expired || task.submissionCount >= 5) {
         await tx.update(paymentTasks).set({ status: task.firstSubmittedAt ? 'RECONCILIATION' : 'CANCELED', errorCode: task.firstSubmittedAt ? 'RECONCILIATION_REQUIRED' : 'NOT_AUTHORIZED', ...clearedLease }).where(whereTask(tenantId, id));
         return null;
       }
-      if (order.input.mode === 'CHECKOUT' && order.input.saveMethod && !vaultReady) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+      if ((order.input.mode === 'RENEWAL' || order.input.saveMethod) && !vaultReady) throw new DomainError('CONFIGURATION_REQUIRED', 503);
       const firstSubmittedAt = task.firstSubmittedAt ?? now;
       await tx.update(paymentTasks).set({ firstSubmittedAt, submissionCount: task.submissionCount + 1 }).where(whereTask(tenantId, id));
-      return { mode: 'CREATE' as const, order, firstSubmittedAt, idempotencyKey: order.id };
+      return { mode: 'CREATE' as const, order, firstSubmittedAt, idempotencyKey: order.id, method };
     });
   }
   /** Records a provider-authenticated result before settlement or another asynchronous step. */

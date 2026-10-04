@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
 import { PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
@@ -25,7 +25,11 @@ const channelAnalyticsRepository=new ChannelAnalyticsRepository(database.db);
 const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env));
 const paymentRepository = new PaymentTaskRepository(database.db);
 const paymentProvider = paymentsFromEnvironment(env);
-const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env));
+const renewalRepository = new RenewalBillingRepository(database.db);
+const renewalMerchant = paymentProvider && env.YOOKASSA_SHOP_ID ? {provider:'yookassa' as const,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'} : null;
+const renewalVaultReady = Boolean(credentialVaultFromEnvironment(env));
+const renewalFiscal = env.PAYMENT_RECEIPT_VAT_CODE && env.PAYMENT_RECEIPT_SUBJECT ? {vatCode:Number(env.PAYMENT_RECEIPT_VAT_CODE),subject:env.PAYMENT_RECEIPT_SUBJECT,mode:'full_payment' as const,...(env.PAYMENT_RECEIPT_TAX_SYSTEM_CODE?{taxSystemCode:Number(env.PAYMENT_RECEIPT_TAX_SYSTEM_CODE)}:{})} : null;
+const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env), env.PAYMENT_RENEWALS_ENABLED==='true');
 const paymentWebhookRepository=new PaymentWebhookRepository(database.db);
 const paymentWebhookProcessor=new PaymentWebhookProcessor(paymentWebhookRepository,new BillingRepository(database.db),paymentProvider,paymentProvider&&env.YOOKASSA_SHOP_ID?{provider:paymentProvider.name,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'}:null,credentialVaultFromEnvironment(env));
 const paymentQueue = new Queue('contentos-payments', { connection });
@@ -74,6 +78,9 @@ async function dispatch() {
   if (dispatching) return;
   dispatching = true;
   try {
+    if(env.PAYMENT_RENEWALS_ENABLED==='true'&&renewalMerchant&&renewalFiscal&&renewalVaultReady){
+      for(const candidate of await renewalRepository.due(renewalMerchant))await renewalRepository.schedule(candidate.tenantId,renewalMerchant,renewalFiscal);
+    }
     if (paymentProvider) for(const event of await paymentWebhookRepository.due()){
       await paymentQueue.add('webhook',{id:event.id},{jobId:`webhook-${event.id}`,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await paymentWebhookRepository.dispatched(event.id);

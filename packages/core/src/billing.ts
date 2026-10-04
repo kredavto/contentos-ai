@@ -4,13 +4,13 @@ import { DomainError, billingCheckoutSchema, type CreatePayment } from '@content
 type Receipt = Omit<CreatePayment['receipt'], 'customerEmail'>;
 export type CheckoutConfiguration = { merchant: { provider: 'yookassa'; merchantId: string; test: boolean }; receipt: Receipt; appUrl: string };
 export class BillingService {
-  constructor(private readonly repository: BillingRepository, private readonly renewal: RenewalRepository, private readonly configuration: CheckoutConfiguration | null) {}
+  constructor(private readonly repository: BillingRepository, private readonly renewal: RenewalRepository, private readonly configuration: CheckoutConfiguration | null, private readonly renewalEngineEnabled = false) {}
   async overview(userId: string, tenantId: string) {
     z.uuid().parse(tenantId);
     const subscription = await this.repository.overview(userId, tenantId);
     const plans = await this.repository.catalog(userId, tenantId);
     const renewal = await this.renewal.overview(userId, tenantId);
-    return { subscription, plans, renewal, checkoutStatus: this.configuration ? 'READY' as const : 'CONFIGURATION_REQUIRED' as const };
+    return { subscription, plans, renewal, renewalEngineReady: Boolean(this.configuration && this.renewalEngineEnabled), checkoutStatus: this.configuration ? 'READY' as const : 'CONFIGURATION_REQUIRED' as const };
   }
   async checkout(userId: string, tenantId: string, raw: unknown, correlationId: string) {
     z.uuid().parse(tenantId);

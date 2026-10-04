@@ -53,7 +53,10 @@ export class BillingRepository {
     if (!subscription) [subscription] = await tx.insert(subscriptions).values({ tenantId: order.tenantId }).returning();
     if (!subscription) throw new Error('Subscription insert failed');
     const [lastTerm] = await tx.select().from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, order.tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1);
-    const continuing = lastTerm && lastTerm.endsAt >= paidAt;
+    // Automatic renewal retains its calendar anchor during the bounded retry window.
+    // Manual purchases after expiry establish a new full-month anchor.
+    const continuationWindow = order.kind === 'RENEWAL' ? 72 * 3600000 : 0;
+    const continuing = lastTerm && lastTerm.endsAt.getTime() + continuationWindow >= paidAt.getTime();
     const anchorAt = continuing ? lastTerm.anchorAt : paidAt;
     const monthIndex = continuing ? lastTerm.monthIndex + 1 : 1;
     const startsAt = monthlyBillingBoundary(anchorAt, monthIndex - 1), endsAt = monthlyBillingBoundary(anchorAt, monthIndex);

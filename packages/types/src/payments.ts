@@ -123,3 +123,6 @@ export const paymentNotificationSchema = z.object({
 export type PaymentNotification = z.infer<typeof paymentNotificationSchema>;
 
 export const billingCheckoutSchema = z.object({ planVersionId: z.uuid(), idempotencyKey: z.uuid() }).strict();
+
+/** Durable renewal intent omits the decrypted provider method reference. */
+export type StoredPaymentRequest = Extract<CreatePayment, {mode:'CHECKOUT'}> | Omit<Extract<CreatePayment, {mode:'RENEWAL'}>, 'paymentMethodId'>;

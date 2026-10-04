@@ -1,6 +1,6 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, RenewalRepository, createDatabase } from '../../packages/db/src/index';
+import { RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, RenewalRepository, createDatabase } from '../../packages/db/src/index';
 import { BillingService } from '../../packages/core/src/billing';
 import { PaymentWebhookProcessor, PaymentWebhookService } from '../../packages/core/src/payment-webhooks';
 import { YooKassaPaymentProvider } from '../../packages/providers/src/yookassa';
@@ -210,6 +210,69 @@ describe.skipIf(!url)('durable payment dispatch', () => {
     await expect(service.checkout(f.owner,f.tenantId,{planVersionId:f.versionId,idempotencyKey:randomUUID()},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
     await f.billing.settle(f.tenantId,f.order.id,{...f.result.observation,status:'SUCCEEDED',paid:true});
     const status=await service.orderStatus(f.owner,f.tenantId,f.order.id);expect(status.status).toBe('PAID');expect(status.confirmationUrl).toBeNull();
+  });
+
+  async function recurringFixture(anchor?:Date){
+    const f=await fixture(true),vault=new CredentialVault(JSON.stringify({fixture:randomBytes(32).toString('base64')}),'fixture');
+    const initialBilling=anchor?new BillingRepository(database.db,()=>anchor):f.billing;
+    const processor=new PaymentProcessor(f.tasks,initialBilling,f.provider,f.merchant,vault,true);
+    const paid:PaymentResult={...f.result,observation:{...f.result.observation,status:'SUCCEEDED',paid:true},confirmationUrl:null,savedPaymentMethodId:'fixture-recurring-method'};
+    vi.mocked(f.provider.create).mockResolvedValue(paid);await processor.run(f.tenantId,f.order.id);
+    const [term]=await database.client`select * from subscription_terms where order_id=${f.order.id}`;
+    const renewal=new RenewalBillingRepository(database.db,f.clock),fiscal={vatCode:11,subject:'service' as const,mode:'full_payment' as const};
+    const schedule=()=>renewal.schedule(f.tenantId,f.merchant,fiscal);
+    const due=()=>f.advance(new Date(term!.ends_at).getTime()-f.clock().getTime()+1000);
+    return {...f,vault,processor,paid,term:term!,renewal,fiscal,schedule,due};
+  }
+  it('schedules one renewal per paid term, freezes its price, and never stores the raw method',async()=>{
+    const f=await recurringFixture();expect(await f.schedule()).toBeNull();f.due();
+    await database.client`insert into plan_versions(plan_id,version,amount_minor,currency,ai_credits,video_seconds) select plan_id,version+1,999900,'RUB',200,300 from plan_versions where id=${f.versionId}`;
+    expect(await f.renewal.due(f.merchant)).toContainEqual({tenantId:f.tenantId});
+    const [a,b]=await Promise.all([f.schedule(),f.schedule()]);expect(a!.orderId).toBe(b!.orderId);
+    const [order]=await database.client`select * from billing_orders where id=${a!.orderId}`;expect(order!.amount_minor).toBe(499900);expect(order!.input.mode).toBe('RENEWAL');expect(order!.input.paymentMethodId).toBeUndefined();
+    expect(JSON.stringify(order)).not.toContain('fixture-recurring-method');expect(await f.renewal.due(f.merchant)).not.toContainEqual({tenantId:f.tenantId});
+    await expect(database.client`update billing_renewal_intents set method_id=${randomUUID()} where order_id=${a!.orderId}`).rejects.toThrow();
+  });
+  it('decrypts a bound method only for provider submission and settles renewal once',async()=>{
+    const f=await recurringFixture();f.due();const intent=await f.schedule();
+    const id=intent!.orderId;vi.mocked(f.provider.create).mockImplementation(async(_input,context)=>({...f.paid,reference:{...f.paid.reference,internalId:context.internalId,externalId:id},observation:{...f.paid.observation,internalId:context.internalId,externalId:id}}));
+    // Settlement clock follows simulated processing time; renewal keeps its calendar anchor.
+    const billing=new BillingRepository(database.db,f.clock),processor=new PaymentProcessor(f.tasks,billing,f.provider,f.merchant,f.vault,true);
+    await processor.run(f.tenantId,id);await processor.run(f.tenantId,id);
+    expect(f.provider.create).toHaveBeenCalledTimes(2);expect(vi.mocked(f.provider.create).mock.calls[1]![0]).toMatchObject({mode:'RENEWAL',paymentMethodId:'fixture-recurring-method',amountMinor:499900});
+    expect(await database.client`select id from subscription_terms where tenant_id=${f.tenantId}`).toHaveLength(2);expect(await database.client`select id from usage_ledger where tenant_id=${f.tenantId} and type='PURCHASE'`).toHaveLength(4);
+    expect(await f.schedule()).toBeNull();
+  });
+  it('blocks canceled permission, wrong merchant, missing feature flag and overdue catch-up',async()=>{
+    const f=await recurringFixture();f.due();expect(await f.renewal.schedule(f.tenantId,{...f.merchant,merchantId:'123'},f.fiscal)).toBeNull();
+    const intent=await f.schedule(),disabled=new PaymentProcessor(f.tasks,f.billing,f.provider,f.merchant,f.vault);
+    await disabled.run(f.tenantId,intent!.orderId);expect(f.provider.create).toHaveBeenCalledTimes(1);
+    const [task]=await database.client`select * from payment_tasks where id=${intent!.orderId}`;expect(task!.first_submitted_at).toBeNull();
+    await f.cancel();f.advance(60000);await f.processor.run(f.tenantId,intent!.orderId);expect(f.provider.create).toHaveBeenCalledTimes(1);
+    const g=await recurringFixture();g.due();g.advance(72*3600000);expect(await g.schedule()).toBeNull();
+  });
+  it('stops a queued renewal if a manual payment extends the paid period first',async()=>{
+    const f=await recurringFixture();f.due();const intent=await f.schedule();
+    const [source]=await database.client`select input from billing_orders where id=${f.order.id}`;
+    const manual=await f.billing.checkout(f.owner,f.tenantId,f.versionId,randomUUID(),{returnUrl:source!.input.returnUrl,receipt:source!.input.receipt},f.merchant,randomUUID());
+    const billing=new BillingRepository(database.db,f.clock);await billing.settle(f.tenantId,manual.id,{...f.paid.observation,internalId:manual.id,externalId:randomUUID()});
+    await f.processor.run(f.tenantId,intent!.orderId);expect(f.provider.create).toHaveBeenCalledTimes(1);
+    const [task]=await database.client`select status from payment_tasks where id=${intent!.orderId}`;expect(task!.status).toBe('CANCELED');
+  });
+
+  it('rejects plaintext payment references and unbound automatic orders in PostgreSQL',async()=>{
+    const f=await recurringFixture();
+    const insert=(kind:string,input:unknown)=>database.client`insert into billing_orders(tenant_id,plan_version_id,requested_by,kind,amount_minor,currency,ai_credits,video_seconds,provider,merchant_id,test,input,input_hash,idempotency_key,correlation_id,renewal_consent_id,renewal_revision) select tenant_id,plan_version_id,requested_by,${kind},amount_minor,currency,ai_credits,video_seconds,provider,merchant_id,test,${JSON.stringify(input)},input_hash,${randomUUID()},correlation_id,renewal_consent_id,renewal_revision from billing_orders where id=${f.order.id}`;
+    await expect(insert('START',{...f.order.input,paymentMethodId:'fixture-plaintext'})).rejects.toThrow('billing_order_no_plaintext_method');
+    await expect(insert('RENEWAL',{mode:'RENEWAL',amountMinor:f.order.amountMinor,currency:'RUB',description:'Subscription AGENCY',receipt:f.order.input.receipt})).rejects.toThrow('Renewal order requires a bound method and paid term');
+  });
+
+  it('retains a January-31 anchor through a slightly late February renewal',async()=>{
+    const f=await recurringFixture(new Date('2027-01-31T12:00:00.000Z'));f.due();const intent=await f.schedule(),id=intent!.orderId;
+    vi.mocked(f.provider.create).mockResolvedValue({...f.paid,reference:{...f.paid.reference,internalId:id,externalId:id},observation:{...f.paid.observation,internalId:id,externalId:id}});
+    const billing=new BillingRepository(database.db,f.clock),processor=new PaymentProcessor(f.tasks,billing,f.provider,f.merchant,f.vault,true);await processor.run(f.tenantId,id);
+    const [term]=await database.client`select * from subscription_terms where order_id=${id}`;
+    expect(new Date(term!.starts_at).toISOString()).toBe('2027-02-28T12:00:00.000Z');expect(new Date(term!.ends_at).toISOString()).toBe('2027-03-31T12:00:00.000Z');expect(term!.month_index).toBe(2);
   });
 
 });

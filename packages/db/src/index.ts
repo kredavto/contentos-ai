@@ -28,3 +28,4 @@ export * from './repositories/billing';
 export * from './repositories/renewal';
 export * from './repositories/payment-tasks';
 export * from './repositories/payment-webhooks';
+export * from './repositories/renewal-billing';
