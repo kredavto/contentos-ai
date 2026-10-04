@@ -1,0 +1,29 @@
+# HeyGen integration research — 2026-10-04
+
+Canonical API: https://developers.heygen.com/llms.txt. The current v3 reference supersedes older examples at docs.heygen.com and community v1/v2 snippets. No account credentials were read, no key created and no paid request made during adapter development. Contract tests use intercepted fetch, not the live service. Subsequently, an authorized short test with the user-selected private avatar was submitted through the HeyGen plugin and accepted for processing. This is separate from the application API adapter, which still lacks server credentials.
+
+## Implemented adapter contracts
+
+- Photo creation / additional uploaded-photo look: `POST /v3/avatars`, `type: photo`, `file: {type: url, url}`, optional `avatar_group_id`; save `data.avatar_item.id` as the look reference and `group_id` in provider metadata. https://developers.heygen.com/docs/avatar-from-photo and https://developers.heygen.com/reference/create-avatar
+- Public-only avatar discovery: `GET /v3/avatars/looks?ownership=public`, cursor `token`/`next_token`, `has_more`. A server API account may contain multiple tenants' private assets; those are never exposed through catalog discovery. https://developers.heygen.com/reference/list-avatar-looks
+- Poll look: `GET /v3/avatars/looks/{id}`. Completed, processing and failed are normalized; no generated avatar is treated as ready merely because creation returned an ID.
+- Delete owned avatar group: `DELETE /v3/avatars/{group_id}`. Application code must supply a tenant-owned private reference, never a user-entered external ID. Public catalog deletion is rejected by the adapter. https://developers.heygen.com/reference/delete-avatar-group
+- Direct talking-head render: `POST /v3/videos`, `type: avatar`, look ID, voice ID, script, selected aspect ratio/resolution; no default watermark. https://developers.heygen.com/reference/create-video
+- Poll render: `GET /v3/videos/{id}`, normalized processing/ready/failed; a completed response must contain an HTTPS video URL and matching ID. https://developers.heygen.com/reference/get-video
+- Public voice discovery: `GET /v3/voices?type=public`, cursor pagination. Private voice cloning remains a separate consent-gated workflow, not catalog discovery. https://developers.heygen.com/reference/list-voices
+
+Transport uses the fixed HTTPS origin, server-only API key, no redirects, 30-second abortable requests, bounded response size, normalized errors and safe correlation/job/status/duration logging. No raw response, script, URL, key or personal image is logged.
+
+## Mutation recovery constraint
+
+The Create Video reference documents `Idempotency-Key`: mutation response replay for 24 hours, 409 while the original request is in flight. The adapter propagates the durable operation key and performs no hidden retries. The upcoming durable avatar/video operation repository must persist the first submission time and immutable request, retry within that window only, and require reconciliation once it expires. Never regenerate after an ambiguous timeout under a new key. Internal ledger settlement remains separate from provider charges.
+
+## Consent
+
+HeyGen photo avatars do not collect a provider consent record; the application must retain the subject's authorization. Our center stores subject, type, exact policy version/hash, accepting user, timestamp, IP and user agent; policy evidence cannot be edited and revocation cannot be undone in-place. Withdrawal revokes all currently active attestations for that subject/type so duplicate acceptance cannot bypass it. A later grant requires a new explicit action.
+
+`requireConsent` checks exact tenant, subject, type, version and hash. Avatar/video creation and execution must call it inside their tenant-lock transaction before submitting external work and before committing results. Those media workflows are not implemented yet; the helper alone does not establish end-to-end enforcement. Production deployment also needs review of the application consent text and retention/deletion policy for the intended jurisdiction.
+
+## Remaining media slice
+
+S3 adapter boundaries are implemented and contract-tested; remaining work includes application upload/download flows, tenant-owned avatar/looks/voices records, consent-bound durable avatar/video jobs, provider configuration UI, webhook verification, generated-media ingestion, FFmpeg processing, user approval and end-to-end media tests. No video generation is currently exposed or advertised as completed.

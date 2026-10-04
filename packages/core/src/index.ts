@@ -4,3 +4,4 @@ export * from './password';
 export * from './auth';
 export * from './brands';
 export * from './generation';
+export * from './consent';

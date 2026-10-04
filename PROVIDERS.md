@@ -11,3 +11,7 @@ Before implementing an adapter, review current official documentation and record
 ## OpenAI text generation
 
 `OpenAILLMProvider` uses the official OpenAI SDK Responses API with strict JSON Schema text format, `store:false`, bounded output tokens, AbortSignal and no SDK automatic retries. `GenerationOrchestrator` validates with Zod, records usage before schema repair, and only uses explicitly supplied model/provider routes. Refer to https://developers.openai.com/api/docs/guides/structured-outputs. Contract tests intercept SDK fetch; no live paid request was made and no key was created. Model and credentials remain deployment configuration. Strategies, ideas and scripts have deterministic workflows; the other requested AI modules remain outstanding.
+
+## HeyGen v3
+
+Real photo avatar, public avatar/voice discovery, avatar status/deletion and direct video submission/status adapters are implemented with contract tests. They are not yet wired to a consent-gated media job flow or used with live credentials. See [API evidence and remaining integration work](docs/heygen-integration.md).

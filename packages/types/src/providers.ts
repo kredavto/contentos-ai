@@ -26,8 +26,9 @@ export interface ImageProvider {
   generate(input: { prompt: string; width: number; height: number }, context: OperationContext): Promise<{ reference: ProviderReference; bytes: Uint8Array; mimeType: string; usage: Usage }>;
 }
 export interface AvatarProvider {
-  create(input: { photoUrl: string; name: string }, context: OperationContext): Promise<ProviderReference>;
+  create(input: { photoUrl: string; name: string; groupReference?: ProviderReference }, context: OperationContext): Promise<ProviderReference>;
   list(context: OperationContext): Promise<Array<{ reference: ProviderReference; name: string; previewUrl: string | null }>>;
+  status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; previewUrl: string | null }>;
   delete(reference: ProviderReference, context: OperationContext): Promise<void>;
 }
 export interface VoiceProvider {

@@ -3,6 +3,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl || !new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Set TEST_DATABASE_URL to a dedicated database ending in _test');
 export default defineConfig({
   testDir: './tests/e2e', testMatch: '**/*.spec.ts', timeout: 180_000, fullyParallel: false, workers: 1,
+  expect: { timeout: 15000 },
   use: { baseURL: 'http://localhost:3187', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) } }],
   webServer: [

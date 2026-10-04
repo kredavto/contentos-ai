@@ -94,6 +94,17 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.screenshot({path:'test-results/content-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
   await page.screenshot({path:'test-results/content-desktop.png',fullPage:true});
+  await page.getByRole('button',{name:'Согласия',exact:true}).click();
+  await page.getByLabel('Имя субъекта',{exact:true}).fill('Вымышленный представитель');
+  await page.getByRole('button',{name:'Добавить субъекта',exact:true}).click();
+  await page.getByLabel('Я прочитал(а) текст и явно подтверждаю это разрешение',{exact:true}).check();
+  await page.getByRole('button',{name:'Сохранить согласие',exact:true}).click();
+  await expect(page.getByText('Действует',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Отозвать согласие',exact:true}).click();
+  await expect(page.getByText('Отозвано',{exact:true})).toBeVisible();
+  await page.reload();
+  await page.getByRole('button',{name:'Согласия',exact:true}).click();
+  await expect(page.getByText('Отозвано',{exact:true})).toBeVisible();
   await page.getByRole('link',{name:'Все бренды',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
   const sessionCookie = (await page.context().cookies()).find(cookie => cookie.name === 'contentos_session');

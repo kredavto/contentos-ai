@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, env } = services();
+    const { auth, brands, generation, consent, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +41,12 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if (path[3] && path[4] === 'consents') {
+          if (path.length === 5 && request.method === 'GET') return ok(await consent.overview(user.userId, tenantId, path[3]));
+          if (path.length === 5 && request.method === 'POST') return ok(await consent.accept(user.userId, tenantId, path[3], await readBody(request), {ip, userAgent: request.headers.get('user-agent') ?? ''}, correlationId), 201);
+          if (path[5] === 'subjects' && path.length === 6 && request.method === 'POST') return ok(await consent.createSubject(user.userId, tenantId, path[3], await readBody(request), correlationId), 201);
+          if (path[5] && path[6] === 'revoke' && path.length === 7 && request.method === 'POST') return ok(await consent.revoke(user.userId, tenantId, path[3], path[5], correlationId));
+        }
         if (path[3] && path[4] === 'content' && path.length === 5 && request.method === 'GET') return ok(await generation.overview(user.userId, tenantId, path[3]));
         if (path[3] && path[4] === 'jobs' && path.length === 5 && request.method === 'POST') return ok(await generation.enqueue(user.userId, tenantId, path[3], await readBody(request), correlationId), 202);
         if (path[3] && path[4] === 'scripts' && path[5] && path.length === 6) {

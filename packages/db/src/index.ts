@@ -13,3 +13,4 @@ export * from './repositories/ledger';
 export * from './repositories/jobs';
 export * from './repositories/ai-calls';
 export * from './repositories/content';
+export * from './repositories/consent';
