@@ -246,3 +246,11 @@ Migration 0022 adds subscription identities and immutable paid monthly periods (
 All 188 tests passed, along with workspace/test typecheck, lint and production build. This includes prepaid month boundaries, current/future selection, expiry gaps, historical replay and transaction rollback. An additional direct-insert overlap guard regression is being verified. CI run 37218738525 for the preceding persistence commit reached the browser scenarios; completion has not yet been asserted. Renewal consent/cancellation, payment dispatch/webhooks, plan changes and Billing UI remain outstanding; payments are still disabled.
 
 Final term verification: all 17 focused billing/ledger tests passed after adding the direct PostgreSQL overlap regression, and test TypeScript compilation passed. The preceding full run passed 188 tests; production code was unchanged after that run. Migration 0022 applied successfully to the dedicated test database.
+
+## Renewal permission and cancellation (in progress)
+
+Migration 0023 adds three renewal tables (67 total). Verified owners can preview and accept an exact current-price policy, or cancel future renewal permission through the internal repository. Consent/change history is immutable. Tenant locks and revisions fence competing requests; replaying old enable/disable intents cannot reverse a later choice. Cancellation preserves paid periods and credits. Overview excludes request IP/user-agent evidence.
+
+Initial tests passed five scenarios and exposed a nondeterministic test assumption about which racing request won; the assertion now uses the actual winning request. Full verification is running. Checkout still uses saveMethod=false and no billing worker/route invokes this permission flow. Binding consent to checkout, encrypted saved methods, cancellation of queued charges, automatic scheduling and UI remain required.
+
+Final renewal verification: all 195 tests across 34 files passed, plus workspace/test typecheck, lint, production build and whitespace checks. Six new integration scenarios cover exact policy acceptance, concurrent idempotency, preserving paid access on cancellation, old-intent replay after later choices, revision races, stale quotes, role/tenant isolation and immutable history. Migration 0023 applied to the dedicated test database. No live payment request or automatic charge was made.

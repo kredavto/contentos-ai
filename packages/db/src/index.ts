@@ -25,3 +25,4 @@ export * from './repositories/analytics';
 export * from './repositories/channel-analytics';
 export * from './repositories/performance';
 export * from './repositories/billing';
+export * from './repositories/renewal';

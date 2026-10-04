@@ -105,3 +105,11 @@ export type RefundResult = {
   currency: 'RUB';
   receiptStatus: 'PENDING' | 'SUCCEEDED' | 'CANCELED' | null;
 };
+
+export const renewalAcceptanceSchema = z.object({
+  planVersionId: z.uuid(), policyVersion: z.string().min(1).max(40), textHash: z.string().regex(/^[a-f0-9]{64}$/), accepted: z.literal(true),
+  expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.uuid(),
+}).strict();
+export const renewalCancellationSchema = z.object({ expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.uuid() }).strict();
+export type RenewalAcceptance = z.infer<typeof renewalAcceptanceSchema>;
+export type RenewalCancellation = z.infer<typeof renewalCancellationSchema>;
