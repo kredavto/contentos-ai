@@ -81,3 +81,8 @@ export interface ErrorReporter {
 export interface SocialConnectionProvider {
   inspect(credential:string,target:string,context:OperationContext):Promise<{reference:ProviderReference;name:string;username:string|null;canPublish:boolean}>;
 }
+
+/** Channel membership is intentionally separate from post reach/follower attribution. */
+export interface ChannelAnalyticsProvider {
+  fetchChannel(reference:ProviderReference,credential:string,context:OperationContext):Promise<import('./analytics').ChannelObservation>;
+}

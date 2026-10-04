@@ -22,3 +22,4 @@ export * from './repositories/calendar';
 export * from './repositories/social';
 export * from './repositories/publishing';
 export * from './repositories/analytics';
+export * from './repositories/channel-analytics';

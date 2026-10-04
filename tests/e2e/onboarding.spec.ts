@@ -264,6 +264,14 @@ test('register, verify email, create organization and resume 15-step onboarding'
 
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Аналитика публикаций',exact:true})).toBeVisible();
+  const channelAnalytics=page.getByRole('region',{name:'Показатели каналов',exact:true});
+  await channelAnalytics.getByRole('button',{name:'Получить показатели канала',exact:true}).click();
+  await expect(channelAnalytics.getByText('Данные получены',{exact:true})).toBeVisible({timeout:60000});
+  await expect(channelAnalytics.getByText('ДЕМО: тестовые показатели',{exact:true})).toBeVisible();
+  await channelAnalytics.getByRole('button',{name:'История показателей канала',exact:true}).click();
+  await expect(channelAnalytics.getByRole('heading',{name:'Последние 100 наблюдений канала',exact:true})).toBeVisible();
+  await expect(channelAnalytics.getByText(/1\s000 участников · ДЕМО/)).toBeVisible();
+
   const analyticsCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Одобренный ролик для Telegram',exact:true})});
   await expect(analyticsCard.getByText('Наблюдений пока нет.',{exact:true})).toBeVisible();
   await page.getByLabel('Публикация для аналитики',{exact:true}).selectOption({label:'Одобренный ролик для Telegram · ДЕМО'});

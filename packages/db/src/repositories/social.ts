@@ -3,6 +3,7 @@ import {DomainError,type EncryptedCredential,type SocialConnectionProvider} from
 import type {Database} from '../index';
 import {socialConnections,brands,auditLogs} from '../schema';
 import {assertMembership,lockTenant,type Transaction} from './ledger';
+import {cancelConnectionAnalytics} from './channel-analytics';
 import {cancelConnectionPublishing} from './publishing';
 type Inspection=Awaited<ReturnType<SocialConnectionProvider['inspect']>>;
 export type StoredSocialConnection=typeof socialConnections.$inferSelect;
@@ -27,7 +28,7 @@ export class SocialRepository{
       if(row.revision!==revision||(!credential&&row.status==='REVOKED'))throw new DomainError('CONFLICT',409);
       if(result.reference.provider!==row.provider||result.reference.externalId!==row.reference.externalId||result.reference.internalId!==row.id)throw new DomainError('CONFLICT',409);
       await tx.update(socialConnections).set({reference:result.reference,name:result.name,username:result.username,status:result.canPublish?'ACTIVE':'LIMITED',revision:revision+1,lastCheckedAt:new Date(),errorCode:null,updatedAt:new Date(),...(credential?{credential,credentialVersion:row.credentialVersion+1}:{})}).where(where(tenantId,brandId,id));
-      if(credential)await cancelConnectionPublishing(tx,tenantId,id,userId);
+      if(credential){await cancelConnectionPublishing(tx,tenantId,id,userId);await cancelConnectionAnalytics(tx,tenantId,id,userId);}
       await tx.insert(auditLogs).values({tenantId,userId,action:credential?'SOCIAL_CREDENTIAL_REPLACED':'SOCIAL_CHECKED',resourceId:id,correlationId,metadata:{revision:revision+1,status:result.canPublish?'ACTIVE':'LIMITED'}});return {id,revision:revision+1};
     });
   }
@@ -41,7 +42,7 @@ export class SocialRepository{
   async disconnect(userId:string,tenantId:string,brandId:string,id:string,revision:number,correlationId:string){
     await this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId,true);const [row]=await tx.select().from(socialConnections).where(where(tenantId,brandId,id));if(!row)throw new DomainError('NOT_FOUND',404);if(row.status==='REVOKED')return;if(row.revision!==revision)throw new DomainError('CONFLICT',409);
       await tx.update(socialConnections).set({status:'REVOKED',credential:null,credentialVersion:row.credentialVersion+1,revision:revision+1,errorCode:null,updatedAt:new Date()}).where(where(tenantId,brandId,id));
-      await cancelConnectionPublishing(tx,tenantId,id,userId);
+      await cancelConnectionPublishing(tx,tenantId,id,userId);await cancelConnectionAnalytics(tx,tenantId,id,userId);
       await tx.insert(auditLogs).values({tenantId,userId,action:'SOCIAL_DISCONNECTED',resourceId:id,correlationId});
     });
   }

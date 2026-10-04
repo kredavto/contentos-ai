@@ -14,3 +14,4 @@ export * from './credential-vault';
 export * from './social';
 export * from './publishing';
 export * from './analytics';
+export * from './channel-analytics';

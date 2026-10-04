@@ -3,6 +3,7 @@ import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {AnalyticsService} from '@contentos/core';
 import {metricLabels,type NormalizedMetrics} from '@contentos/types';
 import {api} from '../lib/api-client';
+import {ChannelAnalytics} from './channel-analytics';
 type Overview=Awaited<ReturnType<AnalyticsService['overview']>>;
 type History=Awaited<ReturnType<AnalyticsService['history']>>;
 const keys=Object.keys(metricLabels) as (keyof NormalizedMetrics)[];
@@ -23,8 +24,8 @@ export function AnalyticsStudio({base,canManage}:{base:string;canManage:boolean}
       form.reset();setSelected('');intent.current=null;setNotice('Показатели сохранены. История наблюдений сохранена.');setHistoryId('');setHistory(null);setRefresh(value=>value+1);
     }catch(failure){setError(failure instanceof Error?failure.message:'Не удалось сохранить показатели');}finally{setPending(false);}
   }
-  return <section className="stack"><h2>Аналитика публикаций</h2><p className="muted">Последние 100 публикаций. У каждой показаны значения из последнего по дате наблюдения; наблюдения не суммируются. Пустое поле означает отсутствие данных, а 0 — измеренный ноль.</p>
-    <p className="notice warning">Автоматический сбор показателей пока не подключён. Telegram Bot API не предоставляет просмотры отдельных постов. Введите доступные показатели из статистики площадки; они будут отмечены как введённые вручную.</p>
+  return <section className="stack"><ChannelAnalytics base={base} canManage={canManage}/><h2>Аналитика публикаций</h2><p className="muted">Последние 100 публикаций. У каждой показаны значения из последнего по дате наблюдения; наблюдения не суммируются. Пустое поле означает отсутствие данных, а 0 — измеренный ноль.</p>
+    <p className="notice warning">Автоматический сбор показателей отдельных постов пока не подключён. Telegram Bot API не предоставляет просмотры отдельных постов. Введите доступные показатели из статистики площадки; они будут отмечены как введённые вручную.</p>
     {error?<p role="alert" className="notice error">{error}</p>:null}{notice?<p role="status" className="notice success">{notice}</p>:null}
     {!rows&&!error?<p role="status">Загружаем аналитику…</p>:null}<button className="text-button" disabled={pending} onClick={()=>{setError('');setRefresh(value=>value+1);}}>Обновить аналитику</button>
     {rows&&!rows.length?<div className="panel empty">После подтверждённой отправки здесь появятся публикации.</div>:null}

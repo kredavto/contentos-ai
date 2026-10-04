@@ -180,3 +180,15 @@ Automatic FETCH_ANALYTICS, channel metrics, raw provider payloads and AI recomme
 Verification: all 124 tests across 26 files passed with PostgreSQL and real FFmpeg enabled. The final analytics/publishing regression passed 13 tests, including zero/null semantics, invalid values, time bounds, immutable history, concurrent idempotency and real organization/brand isolation. Both Playwright scenarios passed in 5.6 minutes, including manual observation entry, persistence after reload, history, desktop/mobile screenshots and no horizontal overflow. The initial browser run exposed an exact-label lookup issue in the new publication selector; an explicit accessible label fixed it. No live Telegram request was made.
 
 Final production build, workspace/test typecheck and lint passed after the browser fix and Unicode source-note validation.
+
+## Background channel membership analytics
+
+Migration 0017 adds durable FETCH_ANALYTICS jobs, immutable channel membership observations and separate numeric provider evidence. The real Telegram adapter uses getChatMemberCount. Collection is requested in Analytics and executed by a dedicated BullMQ worker with database delivery recovery, bounded retries, leases, cooldown, provenance, role rechecks and credential-generation fencing. Disconnect/reconnect cancels pending reads and rejects their late responses. The UI separates whole-channel counts/history/deltas from manual publication metrics and labels all demo observations. See [workflow, configuration and remaining analytics work](channel-analytics.md).
+
+Recurring collection, other providers, automatic publication metrics and AI recommendations remain outstanding; this slice does not complete the overall MVP or deployment.
+
+Verification: all 135 tests across 28 files passed with real PostgreSQL and FFmpeg. New adapter/integration coverage includes measured zero, invalid responses, safe error classification, immutable evidence, tenant/brand isolation, idempotency, cooldown, bounded retries, stale leases, disconnect/token replacement and role withdrawal. Both Playwright scenarios passed in 5.0 minutes, including the dedicated queue, labeled demo observations, channel history, manual publication metrics, persistence and mobile overflow checks. Desktop/mobile screenshots were reviewed. No live Telegram API request was made.
+
+The first browser run exposed a pre-existing consent-form race: controls could be changed while a refresh was pending, then a delayed state reset cleared the user's confirmation. Pending controls are now disabled and the reset happens at operation start. The complete browser rerun passed. Prior manual-analytics commit 96dcf75 passed remote CI run 37212147587.
+
+Final production build, workspace/test typecheck and lint passed after the consent-form fix.
