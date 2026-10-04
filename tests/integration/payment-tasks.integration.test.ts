@@ -1,6 +1,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, RenewalRepository, createDatabase } from '../../packages/db/src/index';
+import { BillingService } from '../../packages/core/src/billing';
 import { PaymentWebhookProcessor, PaymentWebhookService } from '../../packages/core/src/payment-webhooks';
 import { YooKassaPaymentProvider } from '../../packages/providers/src/yookassa';
 import { CredentialVault } from '../../packages/core/src/credential-vault';
@@ -40,7 +41,7 @@ describe.skipIf(!url)('durable payment dispatch', () => {
     const claim = async () => (await tasks.claim(tenantId,order.id))!;
     const prepare = (token:string) => tasks.prepare(tenantId,order.id,token,merchant,true);
     const cancel = () => renewal.cancel(owner,tenantId,{expectedRevision:1,idempotencyKey:randomUUID()},correlation);
-    return {clock:()=>now,tenantId,owner,order,tasks,billing,merchant,advance,provider,processor,result,row,claim,prepare,cancel};
+    return {clock:()=>now,versionId,tenantId,owner,order,tasks,billing,merchant,advance,provider,processor,result,row,claim,prepare,cancel};
   }
   it('creates an atomic outbox and claims duplicate deliveries once', async()=>{
     const f=await fixture(); expect((await f.row()).status).toBe('QUEUED');
@@ -186,6 +187,29 @@ describe.skipIf(!url)('durable payment dispatch', () => {
     await f.receive();expect((await f.eventRow(event.id)).status).toBe('RETRY');expect((await f.eventRow(event.id)).attempt).toBe(0);
     const disabled=new PaymentWebhookService(f.repository,null);await expect(disabled.receive(f.notification,randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
     await expect(f.receive({...f.notification,event:'refund.succeeded'})).rejects.toThrow();
+  });
+
+  it('serves owner-only prices/status and creates checkout from server-owned fiscal fields',async()=>{
+    const f=await fixture(),renewal=new RenewalRepository(database.db);
+    const service=new BillingService(f.billing,renewal,{merchant:f.merchant,appUrl:'https://contentos.example',receipt:{vatCode:11,subject:'service',mode:'full_payment'}});
+    const overview=await service.overview(f.owner,f.tenantId);expect(overview.plans.some(plan=>plan.planVersionId===f.versionId)).toBe(true);expect(overview.checkoutStatus).toBe('READY');
+    const intent={planVersionId:f.versionId,idempotencyKey:randomUUID()};
+    const first=await service.checkout(f.owner,f.tenantId,intent,randomUUID()),second=await service.checkout(f.owner,f.tenantId,intent,randomUUID());expect(first.id).toBe(second.id);expect(first.status).toBe('QUEUED');
+    const [stored]=await database.client`select input from billing_orders where id=${first.id}`;
+    expect(stored!.input.receipt.customerEmail).toBe(`task-${f.owner}@example.test`);expect(stored!.input.saveMethod).toBe(false);expect(new URL(stored!.input.returnUrl).pathname).toBe('/billing');
+    expect(JSON.stringify(first)).not.toContain('@example.test');expect(JSON.stringify(first)).not.toContain('merchant');
+    await expect(service.checkout(f.owner,f.tenantId,{...intent,amountMinor:1},randomUUID())).rejects.toThrow();
+    await expect(service.checkout(f.owner,f.tenantId,{...intent,returnUrl:'https://evil.example'},randomUUID())).rejects.toThrow();
+    const other=await fixture();await expect(service.orderStatus(other.owner,other.tenantId,first.id)).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='EDITOR' where tenant_id=${f.tenantId}`;
+    await expect(service.overview(f.owner,f.tenantId)).rejects.toThrow('NOT_AUTHORIZED');await expect(service.orderStatus(f.owner,f.tenantId,first.id)).rejects.toThrow('NOT_AUTHORIZED');
+  });
+  it('shows paid status from committed settlement and keeps checkout disabled without fiscal configuration',async()=>{
+    const f=await fixture(),service=new BillingService(f.billing,new RenewalRepository(database.db),null);
+    expect((await service.overview(f.owner,f.tenantId)).checkoutStatus).toBe('CONFIGURATION_REQUIRED');
+    await expect(service.checkout(f.owner,f.tenantId,{planVersionId:f.versionId,idempotencyKey:randomUUID()},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
+    await f.billing.settle(f.tenantId,f.order.id,{...f.result.observation,status:'SUCCEEDED',paid:true});
+    const status=await service.orderStatus(f.owner,f.tenantId,f.order.id);expect(status.status).toBe('PAID');expect(status.confirmationUrl).toBeNull();
   });
 
 });

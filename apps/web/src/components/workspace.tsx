@@ -57,7 +57,7 @@ export function Workspace({ name, verified }: { name: string; verified: boolean 
     </aside>
     <div className="workspace-main">
       <div className="page-eyebrow">ВАШ КОНТЕНТ. ВАША СИСТЕМА.</div>
-      <div className="page-title"><div><h1>Всё начинается с бренда</h1><p className="muted">Соберите контекст один раз. Сохраняйте его для всей контент-команды.</p></div><span className="badge">Ранний доступ</span></div>
+      <div className="page-title"><div><h1>Всё начинается с бренда</h1><p className="muted">Соберите контекст один раз. Сохраняйте его для всей контент-команды.</p></div><div>{tenant&&overview?.role==='OWNER'?<Link className="button secondary" href={`/billing?organization=${tenant}`}>Биллинг</Link>:null}<span className="badge">Ранний доступ</span></div></div>
       {!verified ? <p className="notice warning">Подтвердите почту перед подключением AI-сервисов. <Link href="/resend-verification">Отправить письмо</Link></p> : null}
       {error ? <p className="notice error" role="alert">{error}</p> : null}
       {loading ? <div className="panel loading" role="status"><LoaderCircle className="spin" />Загружаем рабочее пространство…</div> : null}

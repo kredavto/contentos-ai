@@ -121,3 +121,5 @@ export const paymentNotificationSchema = z.object({
   object: z.object({ id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i).transform(value => value.toLowerCase()) }),
 });
 export type PaymentNotification = z.infer<typeof paymentNotificationSchema>;
+
+export const billingCheckoutSchema = z.object({ planVersionId: z.uuid(), idempotencyKey: z.uuid() }).strict();

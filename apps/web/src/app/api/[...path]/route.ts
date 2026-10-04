@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -39,6 +39,12 @@ async function dispatch(request: Request, context: RouteContext) {
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
+      if(path[2]==='billing'){
+        if(path.length===3&&request.method==='GET')return ok(await billing.overview(user.userId,tenantId));
+        if(path[3]==='checkout'&&path.length===4&&request.method==='POST')return ok(await billing.checkout(user.userId,tenantId,await readBody(request),correlationId),202);
+        if(path[3]==='orders'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.orderStatus(user.userId,tenantId,path[4]));
+        if(path[3]==='cancel-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.cancelRenewal(user.userId,tenantId,await readBody(request),correlationId));
+      }
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
         if(path[3]&&path[4]==='performance'&&path.length===5){

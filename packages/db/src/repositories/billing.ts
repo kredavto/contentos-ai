@@ -3,12 +3,38 @@ import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import { z } from 'zod';
 import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, monthlyBillingBoundary, type PaymentObservation, type CreatePayment, type EncryptedCredential } from '@contentos/types';
 import type { Database } from '../index';
-import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms, renewalConsents, renewalPreferences, paymentMethods, paymentTasks } from '../schema';
+import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms, renewalConsents, renewalPreferences, paymentMethods, paymentTasks, users } from '../schema';
 import { assertMembership, lockTenant, type Transaction } from './ledger';
 
 const merchantSchema = z.object({ provider: z.literal('yookassa'), merchantId: z.string().regex(/^\d{1,32}$/), test: z.boolean() }).strict();
 export class BillingRepository {
   constructor(private readonly db: Database, private readonly now: () => Date = () => new Date()) {}
+  async catalog(userId: string, tenantId: string) {
+    return this.db.transaction(async tx => {
+      await assertMembership(tx, userId, tenantId, 'billing');
+      const rows = await tx.selectDistinctOn([plans.id], { planVersionId: planVersions.id, code: plans.code, name: plans.name, amountMinor: planVersions.amountMinor, currency: planVersions.currency, aiCredits: planVersions.aiCredits, videoSeconds: planVersions.videoSeconds }).from(plans).innerJoin(planVersions, eq(planVersions.planId, plans.id)).where(eq(plans.enabled, true)).orderBy(plans.id, desc(planVersions.version));
+      return rows.filter(row => row.code !== 'FREE' && row.amountMinor > 0).sort((a,b) => ['START','CREATOR','EXPERT','AGENCY'].indexOf(a.code) - ['START','CREATOR','EXPERT','AGENCY'].indexOf(b.code));
+    });
+  }
+  async receiptEmail(userId: string, tenantId: string) {
+    return this.db.transaction(async tx => {
+      await assertMembership(tx, userId, tenantId, 'billing');
+      const [user] = await tx.select({ email: users.email }).from(users).where(eq(users.id, userId));
+      if (!user) throw new DomainError('NOT_FOUND', 404);
+      return user.email;
+    });
+  }
+  async orderStatus(userId: string, tenantId: string, orderId: string) {
+    return this.db.transaction(async tx => {
+      await assertMembership(tx, userId, tenantId, 'billing');
+      const [order] = await tx.select({ id: billingOrders.id, planVersionId: billingOrders.planVersionId, amountMinor: billingOrders.amountMinor, currency: billingOrders.currency, createdAt: billingOrders.createdAt }).from(billingOrders).where(and(eq(billingOrders.tenantId, tenantId), eq(billingOrders.id, orderId)));
+      if (!order) throw new DomainError('NOT_FOUND', 404);
+      const [task] = await tx.select({ status: paymentTasks.status, confirmationUrl: paymentTasks.confirmationUrl, errorCode: paymentTasks.errorCode }).from(paymentTasks).where(and(eq(paymentTasks.tenantId, tenantId), eq(paymentTasks.id, orderId)));
+      const [settled] = await tx.select({ id: paymentSettlements.id }).from(paymentSettlements).where(and(eq(paymentSettlements.tenantId, tenantId), eq(paymentSettlements.orderId, orderId)));
+      const status = settled ? 'PAID' : task?.status ?? 'RECONCILIATION';
+      return { ...order, status, confirmationUrl: !settled && task && ['WAITING', 'RUNNING'].includes(task.status) ? task.confirmationUrl : null, errorCode: settled ? null : task?.errorCode ?? null };
+    });
+  }
   async overview(userId: string, tenantId: string) {
     return this.db.transaction(async tx => {
       await assertMembership(tx, userId, tenantId, 'billing');

@@ -1,6 +1,6 @@
 # Payments and monthly subscriptions
 
-Status: implementation in progress. No checkout, renewal, provider settlement or payment-based credit grant is enabled yet. Existing trial credits remain separate. Production requires merchant credentials and receipt configuration; missing configuration must never simulate payment success.
+Status: checkout UI/API, worker settlement and webhook reconciliation are implemented but disabled by default. Automatic renewal and plan changes are still in progress. Existing trial credits remain separate. Production requires merchant credentials and receipt configuration; missing configuration must never simulate payment success.
 
 ## Domain and consistency decisions
 
@@ -34,7 +34,7 @@ Checkout return URLs must use the configured application HTTPS origin. Confirmat
 
 The first receipt contract supports a single subscription item, full payment, a reviewed service/intellectual-activity classification, explicit VAT code and optional tax-system code. It is intentionally not a general merchandise/prepayment receipt engine. Production activation must verify the merchant's fiscal setup fits this contract; otherwise implement the required receipt lifecycle before accepting money. No tax classification is selected by default.
 
-Configuration parsing and the provider factory require explicit mode and server credentials. PAYMENTS_ENABLED defaults false; PAYMENT_PROVIDER defaults disabled. Test mode cannot enable payments in production. The factory and adapter are wired to the payment worker. Checkout routes are not exposed yet; explicitly enabling payments allows the worker to process newly created durable checkout tasks. Existing historical orders are not automatically backfilled into tasks.
+Configuration parsing and the provider factory require explicit mode and server credentials. PAYMENTS_ENABLED defaults false; PAYMENT_PROVIDER defaults disabled. Test mode cannot enable payments in production. The factory and adapter are wired to the payment worker. Owner checkout routes additionally require explicit fiscal settings; enabling payments allows the worker to process newly created durable checkout tasks. Existing historical orders are not automatically backfilled into tasks.
 
 Additional official references checked: [receipt parameter values](https://yookassa.ru/developers/payment-acceptance/receipts/54fz/other-services/parameters-values), [refund receipts](https://yookassa.ru/developers/payment-acceptance/receipts/54fz/yoomoney/refunds), [documented request paths in event logs](https://yookassa.ru/docs/support/merchant/payments/logs). No third-party SDK or undocumented endpoint is used.
 
@@ -46,7 +46,7 @@ Migration 0021 adds plans, immutable price/entitlement versions, immutable tenan
 
 BillingRepository checkout is verified-OWNER-only, snapshots a current enabled quote and receipt input, and serializes exact client-intent replay under the tenant lock. Changed intent or outdated quotes conflict. Payment settlement is an internal worker boundary accepting only an authenticated observation; it validates order identity/amount/mode, locks the tenant and atomically inserts payment, settlement, both nonzero PURCHASE grants and audit. A failure in either ledger insertion rolls back all changes. It is not a public webhook body handler.
 
-No user-facing billing route or payment task invokes these methods yet. Subscription terms and renewal consent must join the same settlement transaction before enabling recurring subscriptions. Payment submission persistence, outbox/lease handling, authenticated webhook reconciliation, billing UI, refunds affecting entitlement balances and plan changes remain in progress. Immutable receipt email data also requires an explicit financial retention policy in the account deletion workflow; no deletion compliance claim is made by this schema.
+Checkout routes and the durable worker now invoke this foundation. Refunds affecting entitlement balances and plan changes remain in progress. Immutable receipt email data also requires an explicit financial retention policy in the account deletion workflow; no deletion compliance claim is made by this schema.
 
 ## Paid subscription periods
 
@@ -60,7 +60,7 @@ Migration 0023 adds immutable renewal consents and change events plus a tenant-s
 
 Enable/disable intents are idempotent under the tenant lock. Replaying an old enable after cancellation cannot re-enable it; replaying an old cancellation after a new acceptance cannot disable the new permission. Changed intent reuse and stale revisions conflict. Cancellation writes history/audit and clears the active permission without changing paid terms or credit balances. Safe overview excludes IP/user-agent evidence.
 
-These repository operations are not yet exposed to users or scheduled by a billing worker. No auto-charge capability is implied by the permission record alone.
+Cancellation is exposed in Billing; enabling a new recurring permission is not exposed until automatic scheduling and method binding are ready. No auto-charge capability is implied by the permission record alone.
 
 ## Consent-bound saved methods
 
@@ -70,7 +70,7 @@ After authenticated paid verification and atomic settlement, PaymentMethodServic
 
 Capture checks the settled payment identity, active consent/revision and requesting owner's current verified membership under the tenant lock. Cancellation or replacement permission clears stored ciphertext and records revocation in the same transaction. Concurrent cancellation/capture cannot leave a usable method. Database guards prevent resurrection. Method capture is separate from settlement: a capture failure must be retried through authenticated status reconciliation, never by repeating a charge with a new key.
 
-Durable task dispatch, pre-send eligibility checks, queued-charge cancellation, webhook reconciliation, automatic renewal scheduling and Billing UI remain to be implemented before enabling payments.
+Durable task dispatch, pre-send eligibility checks, unsent saving-checkout cancellation, webhook reconciliation and Billing UI are connected below. Automatic renewal scheduling remains outstanding.
 
 
 ## Durable checkout processing
@@ -83,7 +83,7 @@ An authenticated result is persisted as a unique payment mapping before settleme
 
 Cancellation/replacement consent cancels unsent saving tasks in its transaction, including a claimed task whose send marker has not committed. Already marked submissions retain their uncertainty and must be reconciled; an unknown payment is not resent after consent revocation. A known payment can still be read and settled, preserving already paid access. The send-marker transaction defines the cancellation boundary; cancellation cannot retract an HTTP request already authorized there.
 
-The persistent worker now has a separate `contentos-payments` BullMQ queue, health participation and shutdown handling. Disabled provider configuration does not dispatch or claim payment work. This step supports checkout tasks; automatic saved-method renewal orders intentionally cannot be submitted until their method binding/scheduling implementation is complete. Webhook reconciliation, owner-facing checkout/status endpoints, plan changes and Billing UI remain required.
+The persistent worker now has a separate `contentos-payments` BullMQ queue, health participation and shutdown handling. Disabled provider configuration does not dispatch or claim payment work. This step supports checkout tasks; automatic saved-method renewal orders intentionally cannot be submitted until their method binding/scheduling implementation is complete. Webhook reconciliation and owner-facing checkout/status endpoints are connected below. Plan changes and automatic renewal remain required.
 
 
 ## Durable YooKassa notifications
@@ -96,4 +96,15 @@ The payment worker consumes the durable receipt and calls the authenticated prov
 
 Paid settlement and method capture remain idempotent. A claimed terminal event while the actual payment is still pending remains retryable, so a forged early body cannot suppress a later paid notification. Receipt processing has leases, bounded exponential retry and a reconciliation state after 24 claims; provider redelivery can rearm an unresolved receipt with a fresh attempt budget without changing its original identity. Processed duplicates stay processed. Delayed event names do not override the current authenticated state.
 
-An integration test now exercises the actual YooKassa adapter through the checkout processor with fixture HTTP responses. It caught and fixes a missing merchant/mode reference on status GET that interface-only mocks did not detect. No real provider request is made by these tests. Owner-facing checkout/status routes, renewal scheduling/method binding, plan changes and Billing UI remain outstanding.
+An integration test now exercises the actual YooKassa adapter through the checkout processor with fixture HTTP responses. It caught and fixes a missing merchant/mode reference on status GET that interface-only mocks did not detect. No real provider request is made by these tests. Renewal scheduling/method binding and plan changes remain outstanding.
+
+
+## Owner checkout and Billing UI
+
+Verified organization owners can use `/billing?organization=<UUID>` and the organization billing API. The catalog reads only the latest version of enabled, priced paid plans; no UI price is hardcoded. Checkout accepts only an immutable plan-version ID and client UUID intent. It builds the HTTPS return URL from APP_URL and the receipt email from the verified owner, and takes fiscal classification from explicit server settings. Client amount, recipient email, provider credentials and arbitrary return URL fields are rejected. Creating a checkout does not make an external call inside HTTP; the response is a sanitized queued order.
+
+Endpoints: GET `/api/organizations/:tenant/billing`, POST `.../billing/checkout`, GET `.../billing/orders/:order`, and POST `.../billing/cancel-renewal`. Session authentication, tenant/OWNER verification and Origin checks apply; mutations share the existing per-user rate limit. Order projections omit receipt email, merchant/payment IDs and saved methods. PAID is derived from the committed settlement, even if a later method-capture step is recovering. Only pending tasks expose their verified provider confirmation URL.
+
+The screen shows configured plan resources, current/upcoming paid periods, confirmation/status polling, recent orders and renewal cancellation. Initial load resumes the most recent order. A checkout retry retains its UUID intent; a new purchase after a terminal result uses a new intent. Missing merchant/fiscal configuration disables purchase. Recurring permission is not enabled by a manual purchase. The active-permission display explicitly states that automatic charging is not yet connected.
+
+Checkout readiness requires PAYMENT_RECEIPT_VAT_CODE and PAYMENT_RECEIPT_SUBJECT; PAYMENT_RECEIPT_TAX_SYSTEM_CODE is optional according to the reviewed merchant setup. No tax defaults are invented. This does not constitute fiscal/legal approval of a merchant configuration.
