@@ -5,3 +5,4 @@ export * from './generation';
 export * from './content';
 export * from './consent';
 export * from './media';
+export * from './avatars';

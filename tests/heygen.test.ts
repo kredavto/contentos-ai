@@ -41,4 +41,17 @@ describe('HeyGen v3 adapters',()=>{
     let calls=0;const client=new HeyGenClient('test-key',async()=>{calls++;return new Response('private provider error',{status:503});});
     await expect(new HeyGenAvatarProvider(client).create({photoUrl:'https://storage.example.test/image.jpg',name:'Test'},context)).rejects.toThrow('PROVIDER_UNAVAILABLE');expect(calls).toBe(1);
   });
+  it('distinguishes a definitive HTTP rejection from an unreadable accepted response',async()=>{
+    const input={name:'Fixture',photoUrl:'https://storage.example.test/fixture.jpg'};
+    const denied=new HeyGenAvatarProvider(new HeyGenClient('test',async()=>new Response('private',{status:400})));
+    await expect(denied.create(input,context)).rejects.toMatchObject({code:'PROVIDER_REJECTED',definitiveRejection:true});
+    const malformed=new HeyGenAvatarProvider(new HeyGenClient('test',async()=>response({unexpected:true})));
+    await expect(malformed.create(input,context)).rejects.not.toHaveProperty('definitiveRejection',true);
+  });
+  it('rejects status replies for a different look or group',async()=>{
+    for(const changed of [{...look,id:'other'},{...look,group_id:'other'}]){
+      const provider=new HeyGenAvatarProvider(new HeyGenClient('test',async()=>response({data:changed})));
+      await expect(provider.status(ref,context)).rejects.toThrow('PROVIDER_REJECTED');
+    }
+  });
 });

@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, env } = services();
+    const { auth, brands, generation, consent, media, avatars, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +41,12 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if (path[3] && path[4] === 'avatars') {
+          if (path.length === 5 && request.method === 'GET') return ok(await avatars.overview(user.userId,tenantId,path[3]));
+          if (path.length === 5 && request.method === 'POST') return ok(await avatars.create(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
+          if (path[5] && path[6] === 'delete' && path.length === 7 && request.method === 'POST') return ok(await avatars.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+        }
+        if (path[3] && path[4] === 'avatar-jobs' && path[5] && path[6] === 'resume' && path.length === 7 && request.method === 'POST') {await avatars.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
         if (path[3] && path[4] === 'media') {
           if (path.length === 5 && request.method === 'GET') return ok(await media.overview(user.userId,tenantId,path[3]));
           if (path.length === 5 && request.method === 'POST') {

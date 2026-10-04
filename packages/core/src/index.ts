@@ -6,3 +6,4 @@ export * from './brands';
 export * from './generation';
 export * from './consent';
 export * from './media';
+export * from './avatars';

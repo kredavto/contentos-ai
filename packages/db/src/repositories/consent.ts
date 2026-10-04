@@ -3,11 +3,14 @@ import { DomainError,type ConsentAcceptance,type ConsentType } from '@contentos/
 import type { Database } from '../index';
 import { consentSubjects,consentRecords,brands,auditLogs } from '../schema';
 import { assertMembership,lockTenant,type Transaction } from './ledger';
-export async function requireConsent(tx:Transaction,tenantId:string,subjectId:string,requirements:Array<{type:ConsentType;version:string;textHash:string}>) {
+export async function requireConsent(tx:Transaction,tenantId:string,subjectId:string,requirements:Array<{type:ConsentType;version:string;textHash:string;recordId?:string}>) {
+  const ids:string[]=[];
   for(const requirement of requirements){
-    const [record]=await tx.select({id:consentRecords.id}).from(consentRecords).where(and(eq(consentRecords.tenantId,tenantId),eq(consentRecords.subjectId,subjectId),eq(consentRecords.consentType,requirement.type),eq(consentRecords.consentVersion,requirement.version),eq(consentRecords.consentTextHash,requirement.textHash),isNull(consentRecords.revokedAt))).for('share');
+    const [record]=await tx.select({id:consentRecords.id}).from(consentRecords).where(and(eq(consentRecords.tenantId,tenantId),eq(consentRecords.subjectId,subjectId),eq(consentRecords.consentType,requirement.type),eq(consentRecords.consentVersion,requirement.version),eq(consentRecords.consentTextHash,requirement.textHash),isNull(consentRecords.revokedAt),requirement.recordId?eq(consentRecords.id,requirement.recordId):undefined)).for('share');
     if(!record)throw new DomainError('CONSENT_REQUIRED',403);
+    ids.push(record.id);
   }
+  return ids;
 }
 export class ConsentRepository {
   constructor(private readonly db:Database){}

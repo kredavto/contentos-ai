@@ -8,6 +8,9 @@ const serverSchema = z.object({
   AI_PROVIDER: z.enum(['disabled', 'openai', 'mock']).default('disabled'),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).optional(),
+  AVATAR_PROVIDER: z.enum(['disabled', 'heygen', 'mock']).default('disabled'),
+  AVATAR_GENERATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  HEYGEN_API_KEY: z.string().min(1).optional(),
   STORAGE_PROVIDER: z.enum(['disabled', 's3']).default('disabled'),
   S3_REGION: z.string().min(1).optional(),
   S3_BUCKET: z.string().min(1).optional(),
@@ -20,6 +23,7 @@ const serverSchema = z.object({
   SMTP_URL: z.url().optional(),
   EMAIL_FROM: z.email().optional(),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production' && env.AVATAR_PROVIDER === 'mock') ctx.addIssue({ code: 'custom', path: ['AVATAR_PROVIDER'], message: 'Mock avatars are forbidden in production' });
   if (env.NODE_ENV === 'production' && env.AI_PROVIDER === 'mock') ctx.addIssue({ code: 'custom', path: ['AI_PROVIDER'], message: 'Mock AI is forbidden in production' });
   if (env.NODE_ENV === 'production' && !env.APP_URL.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'Production origin must use HTTPS' });
 });

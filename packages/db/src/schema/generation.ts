@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, integer, timestamp, jsonb, unique, index, foreignKey, check, bigint } from 'drizzle-orm/pg-core';
 import { organizations, users, brands } from './identity';
-import type { GenerationInput, GenerationOutput, JobState, UsageUnit, WorkflowType } from '@contentos/types';
+import type { GenerationInput, GenerationOutput, JobState, UsageUnit, JobType, AvatarJobInput } from '@contentos/types';
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 export const usagePolicies = pgTable('usage_policies', {
   operation: text('operation').primaryKey(), unit: text('unit').$type<UsageUnit>().notNull(), amount: integer('amount').notNull(),
@@ -34,9 +34,9 @@ export const trialGrants = pgTable('trial_grants', {
 });
 export const jobs = pgTable('jobs', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id), brandId: uuid('brand_id').notNull(),
-  requestedBy: uuid('requested_by').notNull().references(() => users.id), type: text('type').$type<WorkflowType>().notNull(), status: text('status').$type<JobState>().notNull().default('QUEUED'),
-  input: jsonb('input').$type<GenerationInput>().notNull(), inputHash: text('input_hash').notNull(), idempotencyKey: uuid('idempotency_key').notNull(),
-  reservationId: uuid('reservation_id').notNull(), attempt: integer('attempt').notNull().default(0), maxAttempts: integer('max_attempts').notNull().default(3),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id), type: text('type').$type<JobType>().notNull(), status: text('status').$type<JobState>().notNull().default('QUEUED'),
+  input: jsonb('input').$type<GenerationInput | AvatarJobInput>().notNull(), inputHash: text('input_hash').notNull(), idempotencyKey: uuid('idempotency_key').notNull(),
+  reservationId: uuid('reservation_id').notNull(), attempt: integer('attempt').notNull().default(0), maxAttempts: integer('max_attempts').notNull().default(3), consecutiveFailures: integer('consecutive_failures').notNull().default(0), pollCount: integer('poll_count').notNull().default(0),
   provider: text('provider').notNull(), model: text('model').notNull(), externalJobId: text('external_job_id'), progress: integer('progress').notNull().default(0),
   errorCode: text('error_code'), errorMessage: text('error_message'), leaseToken: uuid('lease_token'), leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(), correlationId: uuid('correlation_id').notNull(),
@@ -45,7 +45,7 @@ export const jobs = pgTable('jobs', {
   foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }),
   foreignKey({ columns: [t.tenantId, t.reservationId], foreignColumns: [usageReservations.tenantId, usageReservations.id] }),
   check('jobs_progress_valid', sql`${t.progress} between 0 and 100`), check('jobs_attempt_valid', sql`${t.attempt} >= 0 and ${t.maxAttempts} between 1 and 10`),
-  check('jobs_status_valid', sql`${t.status} in ('QUEUED','RUNNING','RETRY','SUCCEEDED','FAILED')`),
+  check('jobs_status_valid', sql`${t.status} in ('QUEUED','RUNNING','RETRY','SUCCEEDED','FAILED','WAITING_EXTERNAL','RECONCILIATION')`),
 ]);
 export const outbox = pgTable('outbox', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), jobId: uuid('job_id').notNull().unique(),

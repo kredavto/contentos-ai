@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DomainError, type AvatarProvider, type VideoProvider, type OperationContext, type ProviderReference } from '@contentos/types';
+import { DomainError, ProviderRequestError, type AvatarProvider, type VideoProvider, type OperationContext, type ProviderReference } from '@contentos/types';
 const externalId = z.string().min(1).max(255);
 const httpsUrl = z.url().refine(value=>new URL(value).protocol === 'https:');
 const lookSchema = z.object({id:externalId,name:z.string(),group_id:externalId,status:z.enum(['processing','completed','failed']),preview_image_url:httpsUrl.nullish()});
@@ -17,9 +17,9 @@ export class HeyGenClient {
       const response=await this.transport(`https://api.heygen.com${path}`,{method,redirect:'error',signal:AbortSignal.any([context.signal,AbortSignal.timeout(30_000)]),headers:{'X-Api-Key':this.apiKey,...(body?{'Content-Type':'application/json'}:{}),...(method==='POST'?{'Idempotency-Key':context.idempotencyKey}:{})},...(body?{body:JSON.stringify(body)}:{})});
       status=response.status;
       if(method==='DELETE'&&status===404)return schema.parse(null);
-      if(status===401||status===403)throw new DomainError('CONFIGURATION_REQUIRED',503);
+      if(status===401||status===403)throw new ProviderRequestError('CONFIGURATION_REQUIRED',503,true);
       if(status===429||status===408||status===409||status>=500)throw new DomainError('PROVIDER_UNAVAILABLE',503);
-      if(!response.ok)throw new DomainError('PROVIDER_REJECTED',502);
+      if(!response.ok)throw new ProviderRequestError('PROVIDER_REJECTED',502,true);
       if(status===204)return schema.parse(null);
       const reader=response.body?.getReader();if(!reader)throw new DomainError('PROVIDER_REJECTED',502);
       let size=0;const chunks:Uint8Array[]=[];
@@ -58,6 +58,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
   async status(value:ProviderReference,context:OperationContext) {
     const result=await this.client.request(`/v3/avatars/looks/${checkReference(value)}`,'GET',z.object({data:lookSchema}),context);
+    if(result.data.id!==value.externalId||result.data.group_id!==value.metadata.groupId)throw new DomainError('PROVIDER_REJECTED',502);
     return {status:result.data.status==='completed'?'READY' as const:result.data.status==='failed'?'FAILED' as const:'PROCESSING' as const,previewUrl:result.data.preview_image_url??null};
   }
   async delete(value:ProviderReference,context:OperationContext) {

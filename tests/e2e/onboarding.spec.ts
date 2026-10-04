@@ -116,6 +116,28 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/media-mobile.png',fullPage:true});
+  await page.getByRole('button',{name:'Согласия',exact:true}).click();
+  for(const type of ['OWN_LIKENESS','CROSS_BORDER_PROCESSING']){
+    await page.getByLabel('Разрешение',{exact:true}).selectOption(type);
+    await page.getByLabel('Я прочитал(а) текст и явно подтверждаю это разрешение',{exact:true}).check();
+    await page.getByRole('button',{name:'Сохранить согласие',exact:true}).click();
+    await expect(page.getByLabel('Я прочитал(а) текст и явно подтверждаю это разрешение',{exact:true})).not.toBeChecked();
+  }
+  await page.getByRole('button',{name:'Аватары',exact:true}).click();
+  await page.getByLabel('Название образа',{exact:true}).fill('Вымышленный тестовый образ');
+  await page.getByLabel('Человек на фотографии',{exact:true}).selectOption({label:'Вымышленный представитель'});
+  await page.getByLabel('Исходная фотография',{exact:true}).selectOption({label:'Тестовая фотография.png'});
+  await page.getByRole('button',{name:'Создать образ · 5 кр.',exact:true}).click();
+  const avatarCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Вымышленный тестовый образ',exact:true})});
+  await expect(avatarCard.getByText('Готово',{exact:true})).toBeVisible({timeout:60000});
+  await expect(page.getByText('80 AI-кредитов',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/avatars-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.screenshot({path:'test-results/avatars-desktop.png',fullPage:true});
+  await avatarCard.getByRole('button',{name:'Удалить аватар и все образы',exact:true}).click();
+  await expect(avatarCard).toHaveCount(0,{timeout:30000});
+  await page.getByRole('button',{name:'Медиа',exact:true}).click();
   await page.getByRole('button',{name:'Удалить фотографию',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Тестовая фотография.png',exact:true})).toHaveCount(0,{timeout:20000});
   await page.reload();

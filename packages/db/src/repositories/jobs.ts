@@ -1,12 +1,12 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { and, eq, sql, desc } from 'drizzle-orm';
-import { DomainError, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas } from '@contentos/types';
+import { DomainError, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
 import type { Database } from '../index';
 import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions } from '../schema';
 import { lockTenant, assertMembership, reserveInTransaction, settleInTransaction, type Transaction } from './ledger';
 export type StoredJob = typeof jobs.$inferSelect;
 const jobWhere = (tenantId: string, id: string) => and(eq(jobs.tenantId, tenantId), eq(jobs.id,id));
-async function ownedJob(tx: Transaction, tenantId: string, id: string, leaseToken: string) {
+export async function ownedJob(tx: Transaction, tenantId: string, id: string, leaseToken: string) {
   const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
   if (!job || job.status !== 'RUNNING' || job.leaseToken !== leaseToken || !job.leaseExpiresAt || job.leaseExpiresAt.getTime() <= Date.now()) throw new DomainError('CONFLICT',409);
   return job;
@@ -47,14 +47,14 @@ export class JobRepository {
     return this.db.transaction(async tx => { await assertMembership(tx,userId,tenantId); return tx.select({id:jobs.id,type:jobs.type,status:jobs.status,progress:jobs.progress,attempt:jobs.attempt,errorCode:jobs.errorCode,result:jobs.result,createdAt:jobs.createdAt,provider:jobs.provider}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId))).orderBy(desc(jobs.createdAt)).limit(50); });
   }
   async due() {
-    return this.db.select({tenantId:jobs.tenantId,id:jobs.id}).from(jobs).innerJoin(outbox,and(eq(outbox.tenantId,jobs.tenantId),eq(outbox.jobId,jobs.id))).where(sql`((${jobs.status} in ('QUEUED','RETRY') and ${jobs.nextAttemptAt} <= now()) or (${jobs.status} = 'RUNNING' and ${jobs.leaseExpiresAt} <= now())) and (${outbox.lastDispatchedAt} is null or ${outbox.lastDispatchedAt} < now() - interval '30 seconds')`).limit(100);
+    return this.db.select({tenantId:jobs.tenantId,id:jobs.id,type:jobs.type}).from(jobs).innerJoin(outbox,and(eq(outbox.tenantId,jobs.tenantId),eq(outbox.jobId,jobs.id))).where(sql`((${jobs.status} in ('QUEUED','RETRY','WAITING_EXTERNAL') and ${jobs.nextAttemptAt} <= now()) or (${jobs.status} = 'RUNNING' and ${jobs.leaseExpiresAt} <= now())) and (${outbox.lastDispatchedAt} is null or ${outbox.lastDispatchedAt} < now() - interval '30 seconds')`).limit(100);
   }
   async dispatched(tenantId:string,id:string) { await this.db.update(outbox).set({lastDispatchedAt:new Date()}).where(and(eq(outbox.tenantId,tenantId),eq(outbox.jobId,id))); }
   async claim(tenantId:string,id:string): Promise<StoredJob | null> {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId);
       const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
-      if (!job || ['SUCCEEDED','FAILED'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
+      if (!job || job.type === 'CREATE_AVATAR' || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
       let permitted = true;
       try { await assertMembership(tx,job.requestedBy,tenantId,job.type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
       if (!permitted || job.attempt >= job.maxAttempts) {
@@ -84,6 +84,8 @@ export class JobRepository {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId); const job = await ownedJob(tx,tenantId,id,leaseToken);
       await assertMembership(tx,job.requestedBy,tenantId,job.type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate');
+      if (job.type === 'CREATE_AVATAR') throw new DomainError('INVALID_INPUT');
+      const input = generationInputSchema.parse(job.input);
       let result: {internalId:string;version:number};
       if (job.type === 'GENERATE_STRATEGY') {
         const content = workflowSchemas.GENERATE_STRATEGY.parse(output);
@@ -100,12 +102,12 @@ export class JobRepository {
         result = {internalId:inserted[0]!.id,version:1};
       } else {
         const content = workflowSchemas.GENERATE_SCRIPT.parse(output);
-        let [script] = job.input.options.scriptId ? await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,job.brandId),eq(scripts.id,job.input.options.scriptId))) : [];
-        if (job.input.options.scriptId && (!script || script.currentVersion !== job.input.options.revision)) throw new DomainError('CONFLICT',409);
+        let [script] = input.options.scriptId ? await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,job.brandId),eq(scripts.id,input.options.scriptId))) : [];
+        if (input.options.scriptId && (!script || script.currentVersion !== input.options.revision)) throw new DomainError('CONFLICT',409);
         if (!script) {
-          const [item] = await tx.insert(contentItems).values({tenantId,brandId:job.brandId,ideaId:job.input.options.ideaId,title:job.input.options.topic || content.hook.slice(0,200),type:'SHORT_VIDEO'}).returning();
+          const [item] = await tx.insert(contentItems).values({tenantId,brandId:job.brandId,ideaId:input.options.ideaId,title:input.options.topic || content.hook.slice(0,200),type:'SHORT_VIDEO'}).returning();
           if (!item) throw new Error('Content insert failed');
-          [script] = await tx.insert(scripts).values({tenantId,brandId:job.brandId,contentItemId:item.id,platform:job.input.options.platform,duration:job.input.options.duration}).returning();
+          [script] = await tx.insert(scripts).values({tenantId,brandId:job.brandId,contentItemId:item.id,platform:input.options.platform,duration:input.options.duration}).returning();
         }
         if (!script) throw new Error('Script insert failed');
         const version = script.currentVersion+1;

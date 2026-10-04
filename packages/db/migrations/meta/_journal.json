@@ -43,6 +43,13 @@
       "when": 1791111929740,
       "tag": "0005_wandering_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791114200831,
+      "tag": "0006_even_whiplash",
+      "breakpoints": true
     }
   ]
 }
