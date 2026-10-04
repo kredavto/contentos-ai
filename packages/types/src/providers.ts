@@ -45,6 +45,7 @@ export interface VideoProvider {
 }
 export interface CaptionSegment { start: number; end: number; text: string }
 export interface VideoProcessingProvider {
+  prepareAudio(bytes:Uint8Array,context:OperationContext):Promise<{bytes:Uint8Array;durationSeconds:number}>;
   process(input:{bytes:Uint8Array;options:import('./video-processing').VideoProcessingOptions;onStage?:(stage:'CAPTIONS_GENERATING'|'BROLL_PROCESSING'|'COVER_GENERATING'|'QC',details:Record<string,unknown>)=>Promise<void>},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
 }
 export interface CaptionProvider {
@@ -67,6 +68,7 @@ export interface PaymentProvider {
   refund(reference: ProviderReference, amountMinor: number, context: OperationContext): Promise<ProviderReference>;
 }
 export interface StorageProvider {
+  get(key:string,maxBytes:number,context:OperationContext):Promise<Uint8Array>;
   put(key: string, bytes: Uint8Array, mimeType: string, context: OperationContext): Promise<void>;
   signedDownload(key: string, expiresSeconds: number, context: OperationContext): Promise<string>;
   delete(key: string, context: OperationContext): Promise<void>;

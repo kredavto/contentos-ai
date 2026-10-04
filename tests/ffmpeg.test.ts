@@ -34,6 +34,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     await expect(processor.process({bytes:new TextEncoder().encode('#EXTM3U\nhttp://127.0.0.1/private'),options:videoProcessingSchema.parse({})},context())).rejects.toThrow('INVALID_MEDIA');
     await expect(processor.process({bytes,options:videoProcessingSchema.parse({captions:[{start:0,end:10,text:'Too long'}]})},context())).rejects.toThrow('INVALID_INPUT');
   });
+  it('extracts bounded mono PCM WAV for transcription',async()=>{const audio=await processor.prepareAudio(bytes,context());expect(Buffer.from(audio.bytes.subarray(0,4)).toString()).toBe('RIFF');expect(Buffer.from(audio.bytes.subarray(8,12)).toString()).toBe('WAVE');expect(audio.bytes.length).toBeLessThan(6000000);expect(audio.durationSeconds).toBeGreaterThan(.8);});
   it('fails closed for missing binaries and honors cancellation',async()=>{
     await expect(new FFmpegVideoProcessor('/nonexistent/ffmpeg','/nonexistent/ffprobe').process({bytes,options:videoProcessingSchema.parse({})},context())).rejects.toThrow('CONFIGURATION_REQUIRED');
     const abort=new AbortController();abort.abort();await expect(processor.process({bytes,options:videoProcessingSchema.parse({})},{...context(),signal:abort.signal})).rejects.toThrow();

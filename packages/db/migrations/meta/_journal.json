@@ -85,6 +85,13 @@
       "when": 1791116710024,
       "tag": "0011_free_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791117303120,
+      "tag": "0012_military_hellcat",
+      "breakpoints": true
     }
   ]
 }

@@ -6,3 +6,4 @@ export * from './storage';
 export * from './avatar';
 export * from './ffmpeg';
 export * from './video';
+export * from './captions';

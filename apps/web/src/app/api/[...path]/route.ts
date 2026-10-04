@@ -42,9 +42,13 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
         if(path[3]&&path[4]==='videos'){
+          if(path.length===8&&path[5]&&path[6]==='captions'&&path[7]==='confirm'&&request.method==='POST')return ok(await videos.confirmCaptions(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),202);
           if(path.length===5&&request.method==='GET')return ok(await videos.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await videos.create(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
           if(path[5]&&path.length===7){
+            if(path[6]==='captions'&&request.method==='GET')return ok(await videos.captionReview(user.userId,tenantId,path[3],path[5],correlationId));
+            if(path[6]==='captions'&&request.method==='PUT')return ok(await videos.editCaptions(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+            if(path[6]==='manual-captions'&&request.method==='POST'){await videos.manualCaptions(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'WAITING_REVIEW'});}
             if(path[6]==='delete'&&request.method==='POST')return ok(await videos.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
             if(path[6]==='resume'&&request.method==='POST'){await videos.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
             if(path[6]==='download'&&request.method==='GET')return ok(await videos.download(user.userId,tenantId,path[3],path[5],correlationId));

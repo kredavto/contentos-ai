@@ -1,15 +1,16 @@
 import {z} from 'zod';
 import {VideoRepository,JobRepository,AICallRepository,type Database} from '@contentos/db';
-import {DomainError,ProviderRequestError,videoRequestSchema,videoDimensions,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
+import {DomainError,ProviderRequestError,videoRequestSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
 import {avatarConsentPolicies} from './avatars';
 export type VideoConnection={provider:VideoProvider;name:string}|null;
+export type CaptionConnection={provider:CaptionProvider;name:string;model:string}|null;
 const uuid=z.uuid();
 export class VideoService {
-  constructor(private readonly repository:VideoRepository,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean){}
-  async overview(userId:string,tenantId:string,brandId:string){return {projects:await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId)),configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled'}};}
+  constructor(private readonly repository:VideoRepository,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null){}
+  async overview(userId:string,tenantId:string,brandId:string){return {projects:await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId)),configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled',captionsReady:!!this.captionConnection}};}
   create(userId:string,tenantId:string,brandId:string,input:unknown,correlationId:string){
     if(!this.enabled||!this.connection||!this.storage)throw new DomainError('CONFIGURATION_REQUIRED',503);
-    return this.repository.enqueue(userId,uuid.parse(tenantId),uuid.parse(brandId),videoRequestSchema.parse(input),avatarConsentPolicies(),this.connection.name,correlationId);
+    return this.repository.enqueue(userId,uuid.parse(tenantId),uuid.parse(brandId),videoRequestSchema.parse(input),avatarConsentPolicies(),this.connection.name,correlationId,this.captionConnection?{provider:this.captionConnection.name,model:this.captionConnection.model}:null);
   }
   async download(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){
     const project=await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies());
@@ -18,6 +19,15 @@ export class VideoService {
     const [videoUrl,coverUrl]=await Promise.all([this.storage.signedDownload(project.finalKey,120,context),this.storage.signedDownload(project.coverKey,120,context)]);
     return {videoUrl,coverUrl,expiresIn:120};
   }
+  async captionReview(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){
+    const review=await this.repository.captionReview(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies());
+    if(!this.storage)throw new DomainError('CONFIGURATION_REQUIRED',503);
+    const videoUrl=await this.storage.signedDownload(review.project.originalKey,120,{tenantId,internalId:id,idempotencyKey:id,correlationId,signal:AbortSignal.timeout(15_000)});
+    return {track:review.track,editable:review.editable,durationSeconds:review.project.sourceDurationMs!/1000,videoUrl,expiresIn:120};
+  }
+  editCaptions(userId:string,tenantId:string,brandId:string,id:string,input:unknown,correlationId:string){return this.repository.editCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),captionEditSchema.parse(input),correlationId);}
+  confirmCaptions(userId:string,tenantId:string,brandId:string,id:string,input:unknown,correlationId:string){return this.repository.editCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),{...captionConfirmSchema.parse(input),segments:[],style:'clean'},correlationId,true);}
+  manualCaptions(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.manualCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
   async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),true,correlationId);return {approved:true};}
   delete(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.delete(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),correlationId);}
   resume(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.resume(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
@@ -38,7 +48,7 @@ export class VideoService {
 export class VideoProcessor {
   private readonly repository:VideoRepository;
   private readonly jobs:JobRepository;
-  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
+  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job?.leaseToken)return;
     const abort=new AbortController(),context:OperationContext={tenantId,internalId:id,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:abort.signal};
@@ -58,16 +68,38 @@ export class VideoProcessor {
         await calls.succeeded(1,{json:reference,usage:{model:'avatar-video',inputUnits:project.scriptText.length,outputUnits:1,costMicrounits:null,currency:'USD'}},Date.now()-start);
         await this.repository.wait(job);return;
       }
-      polling=true;
-      const result=await this.connection.provider.status(project.reference,context);
-      polling=false;
-      if(result.status==='FAILED'){await this.repository.fail(job,'PROVIDER_REJECTED');return;}
-      if(result.status==='PROCESSING'){await this.repository.wait(job);return;}
-      if(!result.downloadUrl)throw new DomainError('RECONCILIATION_REQUIRED',409);
-      await this.repository.prepare(job,avatarConsentPolicies());
-      const original=await this.connection.provider.download(result.downloadUrl,context);
+      let original:Uint8Array;
+      if(project.originalStoredAt)original=await this.storage.get(project.originalKey,256*1024*1024,context);
+      else{
+        polling=true;
+        const result=await this.connection.provider.status(project.reference,context);polling=false;
+        if(result.status==='FAILED'){await this.repository.fail(job,'PROVIDER_REJECTED');return;}
+        if(result.status==='PROCESSING'){await this.repository.wait(job);return;}
+        if(!result.downloadUrl)throw new DomainError('RECONCILIATION_REQUIRED',409);
+        await this.repository.prepare(job,avatarConsentPolicies());
+        original=await this.connection.provider.download(result.downloadUrl,context);
+        await this.storage.put(project.originalKey,original,'video/mp4',context);
+        project=await this.repository.storeOriginal(job,avatarConsentPolicies());
+      }
       await this.repository.stage(job,'POST_PROCESSING');
-      await this.storage.put(project.originalKey,original,'video/mp4',context);
+      if(project.captionMode!=='NONE'&&!await this.repository.captionsConfirmed(job)){
+        const audio=await this.processing.prepareAudio(original,context);
+        project=await this.repository.storeOriginal(job,avatarConsentPolicies(),audio.durationSeconds);
+        await this.repository.stage(job,'CAPTIONS_GENERATING',{mode:project.captionMode});
+        if(project.captionMode==='AUTO'){
+          const caption=this.captionConnection;
+          if(!caption||caption.name!==project.captionProvider||caption.model!==project.captionModel)throw new DomainError('CONFIGURATION_REQUIRED',503);
+          await calls.started(2,caption.name,caption.model);
+          await this.repository.markCaptionSubmission(job,avatarConsentPolicies());abort.signal.throwIfAborted();
+          const started=Date.now();
+          try{
+            const segments=await caption.provider.transcribe({bytes:audio.bytes,mimeType:'audio/wav',language:project.captionLanguage},context);
+            await this.repository.captionDraft(job,avatarConsentPolicies(),segments);
+            await calls.succeeded(2,{json:segments,usage:{model:caption.model,inputUnits:Math.ceil(audio.durationSeconds),outputUnits:segments.length,costMicrounits:null,currency:'USD'}},Date.now()-started);
+          }catch(error){await calls.failed(2,error instanceof ProviderRequestError&&error.definitiveRejection?error.code:'PROVIDER_UNAVAILABLE',Date.now()-started);throw error;}
+        }else await this.repository.captionDraft(job,avatarConsentPolicies(),[]);
+        return;
+      }
       const final=await this.processing.process({bytes:original,options:project.options,onStage:async(stage,details)=>{await this.repository.prepare(job,avatarConsentPolicies());await this.repository.stage(job,stage,details);}},context);
       await this.repository.prepare(job,avatarConsentPolicies());
       await this.storage.put(project.finalKey,final.bytes,'video/mp4',context);

@@ -6,7 +6,7 @@ import { createDatabase, JobRepository, AICallRepository, MediaRepository, Avata
 import { MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, FFmpegVideoProcessor } from '@contentos/providers';
+import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
@@ -17,8 +17,8 @@ const avatarConnection = avatarFromEnvironment(env);
 const avatars = new AvatarService(new AvatarRepository(database.db),avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true');
 const avatarProcessor = new AvatarProcessor(database.db,avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true');
 const videoConnection=videoFromEnvironment(env);
-const videos=new VideoService(new VideoRepository(database.db),videoConnection,storage,env.VIDEO_GENERATION_ENABLED==='true');
-const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true');
+const videos=new VideoService(new VideoRepository(database.db),videoConnection,storage,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env));
+const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env));
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];

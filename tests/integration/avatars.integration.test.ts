@@ -13,7 +13,7 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
   if(url&&!new URL(url).pathname.endsWith('_test'))throw new Error('Dedicated test database required');
   const database=createDatabase(url??'postgresql://localhost/unused_test'),repo=new AvatarRepository(database.db),ledger=new LedgerRepository(database.db);
   const tenantId=randomUUID(),userId=randomUUID(),viewerId=randomUUID(),workspaceId=randomUUID(),brandId=randomUUID(),correlationId=randomUUID();let assetId='';
-  const storage:StorageProvider={put:async()=>{},delete:async()=>{},signedDownload:async()=> 'https://storage.example.test/fixture.jpg'};
+  const storage:StorageProvider={get:async()=>{throw new Error('Unexpected fixture read');},put:async()=>{},delete:async()=>{},signedDownload:async()=> 'https://storage.example.test/fixture.jpg'};
   const consent=new ConsentService(new ConsentRepository(database.db));
   const connection={provider:new MockAvatarProvider('test'),name:`fixture-${tenantId}`};
   // Isolated provider namespace keeps deletion workers/tests tenant-independent.

@@ -45,7 +45,7 @@ export const jobs = pgTable('jobs', {
   foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }),
   foreignKey({ columns: [t.tenantId, t.reservationId], foreignColumns: [usageReservations.tenantId, usageReservations.id] }),
   check('jobs_progress_valid', sql`${t.progress} between 0 and 100`), check('jobs_attempt_valid', sql`${t.attempt} >= 0 and ${t.maxAttempts} between 1 and 10`),
-  check('jobs_status_valid', sql`${t.status} in ('QUEUED','RUNNING','RETRY','SUCCEEDED','FAILED','WAITING_EXTERNAL','RECONCILIATION')`),
+  check('jobs_status_valid', sql`${t.status} in ('QUEUED','RUNNING','RETRY','SUCCEEDED','FAILED','WAITING_EXTERNAL','WAITING_REVIEW','RECONCILIATION')`),
 ]);
 export const outbox = pgTable('outbox', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), jobId: uuid('job_id').notNull().unique(),

@@ -16,6 +16,18 @@ export function captionAss(options:VideoProcessingOptions,width:number,height:nu
 /** Worker-only local media processing. No URLs, shell fragments or user paths. */
 export class FFmpegVideoProcessor implements VideoProcessingProvider {
   constructor(private readonly ffmpeg:string,private readonly ffprobe:string){if(!isAbsolute(ffmpeg)||!isAbsolute(ffprobe))throw new DomainError('CONFIGURATION_REQUIRED',503);}
+  async prepareAudio(bytes:Uint8Array,context:OperationContext){
+    if(bytes.byteLength<12||bytes.byteLength>maxBytes||Buffer.from(bytes.subarray(4,8)).toString('ascii')!=='ftyp')throw new DomainError('INVALID_MEDIA',422);
+    const directory=await mkdtemp(join(tmpdir(),'contentos-audio-'));
+    try{
+      await writeFile(join(directory,'source.mp4'),bytes,{mode:0o600});
+      const source=await this.inspect('source.mp4',directory,context);
+      await this.run(this.ffmpeg,['-nostdin','-v','error','-y','-threads','1','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-i','source.mp4','-map','0:a:0','-vn','-map_metadata','-1','-ac','1','-ar','16000','-c:a','pcm_s16le','-t',String(maxDuration),'-fs','6000000','-f','wav','audio.wav'],directory,context,60_000);
+      const audio=await readFile(join(directory,'audio.wav'));
+      if(audio.length<44||audio.length>=6_000_000||audio.toString('ascii',0,4)!=='RIFF'||audio.toString('ascii',8,12)!=='WAVE')throw new DomainError('INVALID_MEDIA',422);
+      return {bytes:audio,durationSeconds:source.duration};
+    }finally{await rm(directory,{recursive:true,force:true});}
+  }
   private run(binary:string,args:string[],cwd:string,context:OperationContext,timeout=180_000):Promise<string>{
     return new Promise((resolve,reject)=>{
       execFile(binary,args,{cwd,encoding:'utf8',maxBuffer:512*1024,timeout,killSignal:'SIGKILL',signal:context.signal,env:{NODE_ENV:'production',PATH:'/usr/bin:/bin',LANG:'en_US.UTF-8',HOME:cwd,TMPDIR:cwd}},(error,stdout)=>{

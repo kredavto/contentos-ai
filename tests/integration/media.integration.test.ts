@@ -10,7 +10,7 @@ describe.skipIf(!url)('tenant media lifecycle',()=>{
   const database=createDatabase(url??'postgresql://localhost/unused_test');const repo=new MediaRepository(database.db);
   const tenantId=randomUUID(),userId=randomUUID(),viewerId=randomUUID(),workspaceId=randomUUID(),brandId=randomUUID(),secondBrand=randomUUID(),correlationId=randomUUID();
   const objects=new Map<string,Uint8Array>();let writes=0,failPut=false,failDelete=false;let image:Buffer;
-  const storage:StorageProvider={put:async(key,bytes)=>{writes++;if(failPut)throw new Error('fixture unavailable');objects.set(key,bytes);},signedDownload:async(key,ttl)=>`https://storage.example.test/${key}?ttl=${ttl}`,delete:async key=>{if(failDelete)throw new Error('fixture unavailable');objects.delete(key);}};
+  const storage:StorageProvider={get:async key=>{const bytes=objects.get(key);if(!bytes)throw new Error('Missing fixture');return bytes;},put:async(key,bytes)=>{writes++;if(failPut)throw new Error('fixture unavailable');objects.set(key,bytes);},signedDownload:async(key,ttl)=>`https://storage.example.test/${key}?ttl=${ttl}`,delete:async key=>{if(failDelete)throw new Error('fixture unavailable');objects.delete(key);}};
   const service=new MediaService(repo,storage,`fixture-${tenantId}`);const input=()=>({name:'Fictional photograph.png',mimeType:'image/png',idempotencyKey:randomUUID()});
   beforeAll(async()=>{
     await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${userId},${`media-${userId}@example.test`},'test-unusable','Fictional owner',now()),(${viewerId},${`media-${viewerId}@example.test`},'test-unusable','Fictional viewer',now())`;

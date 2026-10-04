@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 43 tables with eight SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 46 tables with thirteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -85,7 +85,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with captions/Cover Studio and content calendar/publishing; add operator investigation for expired unknown submissions. Research official APIs first. Keep the complete original scope intact.
+Continue with Cover Studio and content calendar/publishing; add operator investigation for expired unknown submissions. Research official APIs first. Keep the complete original scope intact.
 
 ## Local environment notes
 
@@ -116,7 +116,7 @@ Docker public pulls initially hung in docker-credential-desktop. Task-owned hang
 - Video Studio supports approved script/avatar/voice selection, three orientations, 720p/1080p, crop/contain, private playback, approval and stage history. Disabled captions/B-roll are explicitly identified. Production credentials are still unconfigured; no duplicate paid HeyGen test was sent.
 - Verification: 77 unit/integration/media tests, typecheck and lint passed; both Playwright scenarios passed (2.2 minutes), including real FFmpeg, S3 fixture transport, playback metadata and approval. Mobile screenshot reviewed, with no horizontal overflow. Four additional transport-boundary tests passed, as did the production build and final lint/typecheck.
 
-Still pending: configurable retention and operator investigation of expired unknown submissions, auto/editable captions, cover design, background music, B-roll, intro/outro, optional watermark, calendar/publishing and the remaining full SaaS scope above.
+Still pending: configurable retention and operator investigation of expired unknown submissions, cover design, background music, B-roll, intro/outro, optional watermark, calendar/publishing and the remaining full SaaS scope above.
 
 
 ## Video lifecycle follow-up
@@ -124,3 +124,12 @@ Still pending: configurable retention and operator investigation of expired unkn
 Video deletion is now a durable lifecycle: immediate access/approval block, canceled-worker fencing, grace for in-flight writes, provider plus original/final/cover removal, retry and metadata scrubbing. Safe manager-level reconciliation resume preserves provider reference/idempotency and the replay deadline. Unknown submissions without a reference cannot falsely complete deletion. Migration 0011 adds deletion state/lease fields. All 85 tests passed, along with typecheck, lint, production build and both browser scenarios (2.2 minutes), including explicit confirmation and completed deletion of the video.
 
 - Video Factory commit 9345c9f passed remote CI run 37201951695, including the real FFmpeg and browser workflow.
+
+
+## Reviewed captions before final render
+
+Migration 0012 adds a tenant-bound caption draft, optimistic revision/confirmation, WAITING_REVIEW jobs, source checkpoints and a separate AUTO_CAPTIONS credit reservation. Manual captions work without an external API. The OpenAI whisper-1 adapter validates timestamped segments and never retries an uncertain paid call. Uncertainty holds the job; explicit manual fallback refunds transcription credits and reuses the private original. Final rendering uses only the confirmed revision, with clean/bold ASS templates. Deletion scrubs caption text. Consent and current script approval are checked again before edit/confirmation and worker completion.
+
+Initial checks: 92 unit/integration/media tests, lint and typecheck passed, including real WAV extraction, draft review, optimistic conflict, caption billing and unknown-response fallback. Both Playwright scenarios passed (3.1 minutes), including caption editing on desktop/mobile, actual FFmpeg burn-in, playback, approval and deletion. The test waits explicitly for the asynchronous review state (the initial 30-second click timeout was shorter than the queue redispatch interval). The production build passed. No live transcription or duplicate HeyGen generation was sent.
+
+Video lifecycle commit 2e8e0ff passed remote CI run 37202409700.

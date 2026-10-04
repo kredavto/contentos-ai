@@ -39,6 +39,6 @@ export type IdeasOutput = z.infer<typeof ideasSchema>;
 export type ScriptOutput = z.infer<typeof scriptSchema>;
 export type GenerationOutput = StrategyOutput | IdeasOutput | ScriptOutput;
 export const workflowSchemas = { GENERATE_STRATEGY: strategySchema, GENERATE_IDEAS: ideasSchema, GENERATE_SCRIPT: scriptSchema };
-export const jobStates = ['QUEUED', 'RUNNING', 'RETRY', 'SUCCEEDED', 'FAILED', 'WAITING_EXTERNAL', 'RECONCILIATION'] as const;
+export const jobStates = ['QUEUED', 'RUNNING', 'RETRY', 'SUCCEEDED', 'FAILED', 'WAITING_EXTERNAL', 'WAITING_REVIEW', 'RECONCILIATION'] as const;
 export type JobState = (typeof jobStates)[number];
 export type UsageUnit = 'AI_CREDITS' | 'VIDEO_SECONDS';
