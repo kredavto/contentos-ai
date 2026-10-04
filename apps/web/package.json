@@ -16,10 +16,16 @@
     "@contentos/ui": "workspace:*",
     "next": "^16.3.8",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "@contentos/db": "workspace:*",
+    "zod": "^4.3.6",
+    "lucide-react": "^0.577.0",
+    "@contentos/providers": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0"
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.2.1",
+    "@tailwindcss/postcss": "^4.2.1"
   }
 }

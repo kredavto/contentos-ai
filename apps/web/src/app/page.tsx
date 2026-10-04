@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { ArrowRight, Layers3, CheckCircle2 } from 'lucide-react';
 export default function HomePage() {
-  return <section><h1>Рабочее пространство контент-команды</h1><p>Первый рабочий модуль находится в разработке. Регистрация и генерация пока недоступны.</p></section>;
+  return <div className="landing page-container"><div className="badge">РАБОЧЕЕ ПРОСТРАНСТВО ДЛЯ КОНТЕНТА</div><h1>Знания о вашем бренде.<br /><em>Основа каждого материала.</em></h1><p className="landing-description">Соберите продукты, аудиторию и голос бренда в одном месте.<br />Начните с контекста, который принадлежит вашей команде.</p><div className="landing-actions"><Link href="/register" className="button primary">Создать пространство<ArrowRight size={18} /></Link><Link href="/login" className="button secondary">Войти</Link></div><div className="landing-preview"><div className="icon-tile"><Layers3 /></div><div><h2>Ваш Brand Brain</h2><p>Бизнес · Аудитория · Позиционирование · Tone of voice</p></div><CheckCircle2 size={26} /></div><p className="implementation-note">Ранний доступ: аккаунт, организации и Brand Brain. AI-генерация и публикация ещё в разработке.</p></div>;
 }

@@ -11,3 +11,11 @@ Webhook receipts are durable and deduplicated; signatures are checked when suppo
 OWASP release review: broken access control (tenant/role adversarial tests), cryptographic failures (secrets/tokens), injection (SQL/prompts/FFmpeg), insecure design (approval/ledger invariants), misconfiguration (production env validation), vulnerable components (lockfile/dependency audit), auth failures (sessions/throttling), integrity failures (webhooks/CI), logging failures (redacted audit), SSRF (external/media URLs).
 
 Open risks and verification evidence must be recorded before declaring production readiness. RU_DATA_RESIDENCY requires infrastructure placement verification and separate assessment of cross-border provider operations.
+
+## Identity/onboarding verification
+
+Passwords currently use scrypt N=131072, r=8, p=1 with per-password random salt. Session and email/reset tokens are 32 random bytes; only SHA-256 digests are stored. Reset and login issuance lock the user row; a reset invalidates outstanding sessions and stale in-flight password checks. Reset/verification links keep tokens in URL fragments and require a POST, so mail scanners cannot consume them by GET. Production cookies use Secure + HttpOnly + SameSite=Lax. Unsafe API methods require exact Origin match and reject cross-site Fetch Metadata.
+
+Database tests exercise simultaneous token consumption, shared atomic rate limits, role denial, tenant read denial, cross-tenant composite foreign-key rejection, optimistic onboarding revisions and session invalidation. Browser tests exercise actual SMTP delivery to a test sink, verification and the complete first slice. This is not a completed platform-wide OWASP review.
+
+Remaining identity hardening: durable email outbox/retries, OAuth implementation, production trusted reverse-proxy configuration outside Vercel, periodic expiry cleanup, and production secrets/backup/monitoring configuration.

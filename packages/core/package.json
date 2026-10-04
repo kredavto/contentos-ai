@@ -10,6 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@contentos/types": "workspace:*"
+    "@contentos/types": "workspace:*",
+    "@contentos/db": "workspace:*",
+    "@contentos/providers": "workspace:*",
+    "zod": "^4.3.6"
   }
 }

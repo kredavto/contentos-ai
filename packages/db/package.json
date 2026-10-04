@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.45.3",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "@contentos/types": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"

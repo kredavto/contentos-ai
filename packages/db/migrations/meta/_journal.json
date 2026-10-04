@@ -8,6 +8,20 @@
       "when": 1791107649923,
       "tag": "0000_salty_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791107938092,
+      "tag": "0001_high_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791109371411,
+      "tag": "0002_curious_dust",
+      "breakpoints": true
     }
   ]
 }

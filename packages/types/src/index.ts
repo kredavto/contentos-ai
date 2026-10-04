@@ -10,3 +10,4 @@ export class DomainError extends Error {
   constructor(public readonly code: ErrorCode, public readonly status = 400) { super(code); this.name = 'DomainError'; }
 }
 export * from './providers';
+export * from './onboarding';

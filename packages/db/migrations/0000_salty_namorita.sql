@@ -210,6 +210,29 @@ CREATE TABLE "reference_content" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE INDEX "audit_tenant_created_idx" ON "audit_logs" USING btree ("tenant_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "auth_tokens_hash_uq" ON "auth_tokens" USING btree ("token_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX "brands_tenant_id_uq" ON "brands" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE INDEX "members_user_idx" ON "organization_members" USING btree ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "sessions_token_uq" ON "sessions" USING btree ("token_hash");--> statement-breakpoint
+CREATE INDEX "sessions_user_idx" ON "sessions" USING btree ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "users_email_uq" ON "users" USING btree ("email");--> statement-breakpoint
+CREATE UNIQUE INDEX "workspaces_tenant_id_uq" ON "workspaces" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "audience_segments_tenant_id_uq" ON "audience_segments" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "brand_profiles_brand_uq" ON "brand_profiles" USING btree ("tenant_id","brand_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "brand_rules_tenant_id_uq" ON "brand_rules" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "brand_voice_tenant_id_uq" ON "brand_voice" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "competitors_tenant_id_uq" ON "competitors" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "content_pillars_tenant_id_uq" ON "content_pillars" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "ctas_tenant_id_uq" ON "ctas" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "desires_tenant_id_uq" ON "desires" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "lead_magnets_tenant_id_uq" ON "lead_magnets" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "objections_tenant_id_uq" ON "objections" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "offers_tenant_id_uq" ON "offers" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "pain_points_tenant_id_uq" ON "pain_points" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "positioning_tenant_id_uq" ON "positioning" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "products_tenant_id_uq" ON "products" USING btree ("tenant_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "reference_content_tenant_id_uq" ON "reference_content" USING btree ("tenant_id","id");--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_tenant_id_organizations_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organizations"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "auth_tokens" ADD CONSTRAINT "auth_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -233,27 +256,4 @@ ALTER TABLE "offers" ADD CONSTRAINT "offers_tenant_id_brand_id_brands_tenant_id_
 ALTER TABLE "pain_points" ADD CONSTRAINT "pain_points_tenant_id_brand_id_brands_tenant_id_id_fk" FOREIGN KEY ("tenant_id","brand_id") REFERENCES "public"."brands"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "positioning" ADD CONSTRAINT "positioning_tenant_id_brand_id_brands_tenant_id_id_fk" FOREIGN KEY ("tenant_id","brand_id") REFERENCES "public"."brands"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "products" ADD CONSTRAINT "products_tenant_id_brand_id_brands_tenant_id_id_fk" FOREIGN KEY ("tenant_id","brand_id") REFERENCES "public"."brands"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "reference_content" ADD CONSTRAINT "reference_content_tenant_id_brand_id_brands_tenant_id_id_fk" FOREIGN KEY ("tenant_id","brand_id") REFERENCES "public"."brands"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "audit_tenant_created_idx" ON "audit_logs" USING btree ("tenant_id","created_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "auth_tokens_hash_uq" ON "auth_tokens" USING btree ("token_hash");--> statement-breakpoint
-CREATE UNIQUE INDEX "brands_tenant_id_uq" ON "brands" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE INDEX "members_user_idx" ON "organization_members" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "sessions_token_uq" ON "sessions" USING btree ("token_hash");--> statement-breakpoint
-CREATE INDEX "sessions_user_idx" ON "sessions" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "users_email_uq" ON "users" USING btree ("email");--> statement-breakpoint
-CREATE UNIQUE INDEX "workspaces_tenant_id_uq" ON "workspaces" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "audience_segments_tenant_id_uq" ON "audience_segments" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "brand_profiles_brand_uq" ON "brand_profiles" USING btree ("tenant_id","brand_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "brand_rules_tenant_id_uq" ON "brand_rules" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "brand_voice_tenant_id_uq" ON "brand_voice" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "competitors_tenant_id_uq" ON "competitors" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "content_pillars_tenant_id_uq" ON "content_pillars" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "ctas_tenant_id_uq" ON "ctas" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "desires_tenant_id_uq" ON "desires" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "lead_magnets_tenant_id_uq" ON "lead_magnets" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "objections_tenant_id_uq" ON "objections" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "offers_tenant_id_uq" ON "offers" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "pain_points_tenant_id_uq" ON "pain_points" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "positioning_tenant_id_uq" ON "positioning" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "products_tenant_id_uq" ON "products" USING btree ("tenant_id","id");--> statement-breakpoint
-CREATE UNIQUE INDEX "reference_content_tenant_id_uq" ON "reference_content" USING btree ("tenant_id","id");
+ALTER TABLE "reference_content" ADD CONSTRAINT "reference_content_tenant_id_brand_id_brands_tenant_id_id_fk" FOREIGN KEY ("tenant_id","brand_id") REFERENCES "public"."brands"("tenant_id","id") ON DELETE cascade ON UPDATE no action;

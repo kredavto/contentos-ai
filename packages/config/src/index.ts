@@ -5,6 +5,8 @@ const serverSchema = z.object({
   APP_URL: z.url(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.url(),
+  SMTP_URL: z.url().optional(),
+  EMAIL_FROM: z.email().optional(),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV === 'production' && !env.APP_URL.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'Production origin must use HTTPS' });
 });

@@ -1,40 +1,54 @@
 # Implementation status
 
-## Verified
-- Read attached requirements and inspected workspace.
-- Existing workspace contained TECH_SPEC.md and no implementation.
-- Remote kredavto/contentos-ai is reachable and contains no refs.
-- Initialized local main and configured origin to requested repository.
-- Architecture, data model, security, provider and deployment design documented.
+Updated 2026-10-04. This is an implementation inventory, not a claim that the full specification is complete.
 
-## In progress
-- Monorepo tooling and first persisted identity/organization/onboarding slice.
+## Verified working slice
 
-## Remaining
-- Implement all domain modules, database migrations, providers, worker, UI and tests from the specification.
-- Validate current official provider documentation before each adapter.
-- Verify full MVP chain, security and architecture.
-- Push tested implementation and configure CI/release profiles.
-- Live hosting target and external credentials have not been configured. Production deployment has not occurred.
+- pnpm 10.30.3 / Turborepo monorepo: apps/web, apps/worker and seven requested packages; strict TypeScript 5.9.3, ESLint 10, Vitest, Playwright.
+- Next.js 16.3.8 Russian-first responsive UI with Tailwind 4, shared shadcn-style Radix/CVA button and original green/ivory visual design.
+- Email/password registration, real SMTP adapter, email verification, reset links, login/logout and revoke-all-sessions API. scrypt N=131072/r=8/p=1; random tokens hashed at rest; HttpOnly/SameSite/Secure-in-production cookies.
+- Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
+- Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
+- Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
+- Identity, Brand Brain and rate-limit schema: 24 tables with three SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Typed provider contracts for all requested provider categories; SMTP is the only implemented external adapter so far.
+- Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI execution has not yet been verified.
 
-Do not interpret design documents as implemented functionality. Update this file with actual test results and gaps after each slice.
+## Verification evidence
 
-## Hosting update
-User explicitly requested Vercel deployment. Connected Vercel account is accessible; team Yuriy / digagency (team_T4Jm4ASQqZgd6ys8grG6emG4). No project/deployment created yet. Web is GLOBAL on Vercel; queue/media worker requires separate hosting.
-
-## Foundation implementation
-Created pnpm/Turborepo package layout and strict TypeScript configuration. Added provider contracts, deny-by-default role policy and content transition guards with adversarial unit tests (not yet run). Added local PostgreSQL/Redis Compose definition. Docker daemon currently unavailable. Runtime Node 24.19.0 is bundled outside default PATH. Bundled pnpm is 11.19.0; use `pnpm dlx pnpm@10.30.3` for project-pinned version. Initial dependency resolution selected TypeScript 7 incompatible with typescript-eslint; pin a compatible compiler before checks. Apps are not yet functional; worker entry is scaffold only.
-
-## Foundation verification, 2026-10-04
-- Typecheck passed for all 9 packages.
+- Typecheck for all 9 workspace packages and test sources passed.
 - ESLint passed.
-- Vitest: 3 files, 12 tests passed (role/tenant guards, content state transitions, password/token primitives, safe configuration).
-- These are policy/unit tests, not database tenant-isolation integration tests or E2E.
-- Pinned TypeScript 5.9.3 and moved ESLint to supported major 10; initial compiler peer mismatch resolved.
-- Added Drizzle identity and structured Brand Brain schemas. Migration generation/build verification in progress.
-- Added GitHub CI for install/typecheck/lint/unit tests/build. Integration/E2E jobs remain to be implemented.
-- Drizzle migration generated successfully for 23 initial tables at packages/db/migrations/0000_salty_namorita.sql; not applied to live PostgreSQL yet.
-- Next.js production build passed (home status page and liveness endpoint only). This is scaffolding, not a completed UI or MVP.
+- 18 tests in 4 Vitest files passed against real PostgreSQL 16 and PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts.
+- 2 Playwright tests passed in installed Chrome: register → SMTP email → verify → login → organization → brand → 15 onboarding steps → save/reload/resume → Brand Brain → dashboard → mobile logout, plus CSRF/anonymous request rejection. HttpOnly/SameSite cookie assertions and no browser page errors.
+- Agent-browser verified homepage renders, navigation exists and no Next error overlay/browser errors. Desktop/mobile dashboard screenshots visually inspected; mobile overflow check passed.
+- Production Next.js build passed for implemented routes.
+- Browser tests caught and fixed Strict Mode token clearing and textarea label association after reload.
+
+## Full objective still outstanding
+
+- Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
+- Jobs/outbox/BullMQ worker, idempotency/reconciliation, immutable usage ledger, reservations/captures/releases and provider cost accounting.
+- Official documentation research and real adapters for OpenAI, HeyGen, captions/media, S3, YooKassa, YouTube/TikTok/Meta/VK/Telegram; credentials and provider approvals as applicable.
+- Deterministic AI workflows, strict JSON/repair/fallback/usage, versioned strategy, ideas/scoring, script studio/history/editor, content states and calendar with drag/drop.
+- Consent/revocation, avatars/looks/voices, video state machine, FFmpeg processing, captions editor, cover studio, B-roll and media library.
+- Social OAuth token encryption/refresh, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
+- AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
+- Admin/support/audit UI, notifications, privacy export/deletion workflows, encryption/rotation, signed media URLs, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
+- Complete development seed, full requested E2E beyond onboarding, adapter/webhook/queue/billing tests, platform-wide security and architecture review.
+- Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
+- Vercel deployment and verification. No deployment has happened; scaffold/partial functionality is not represented as the finished product.
+
+## Source and hosting
+
+Git remote origin: https://github.com/kredavto/contentos-ai. User selected Vercel for web/BFF. Connected Vercel team: Yuriy / digagency (team_T4Jm4ASQqZgd6ys8grG6emG4). Persistent BullMQ/FFmpeg worker requires a separate host. RU_DATA_RESIDENCY remains a separate Russian infrastructure profile.
 
 ## Next concrete slice
-Implement auth/session/email verification/reset services and persisted organization/brand/onboarding APIs and forms. Start local Docker if possible, apply migrations and add database integration tests. Then implement durable jobs/ledger and AI workflows. Do not deploy the current scaffold as the finished product.
+
+Implement immutable ledger + durable jobs/outbox and an actual worker, then strategy/ideas/script generation through validated provider workflows. Research official APIs first. Expand UI and tests to the new end-to-end slice. Keep the complete original scope intact.
+
+## Local environment notes
+
+Bundled Node: /Users/urijlebedinskij/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node. Add its directory to PATH for tools. Bundled pnpm is 11.19.0; invoke `pnpm dlx pnpm@10.30.3` for project-pinned installs. Development web server started with test PostgreSQL 16 on localhost:55432 and SMTP test sink on 1026 (sink runs only during E2E). For ordinary interactive use, start with .env.example values (PostgreSQL 17 on 5432, Mailpit on 1025).
+
+Docker public pulls initially hung in docker-credential-desktop. Task-owned hanging helpers were stopped; public pulls succeeded using an isolated empty Docker CLI config at /tmp/contentos-docker-public with the existing Docker socket. User credential configuration was not changed. Compose stack subsequently started normally with cached images.

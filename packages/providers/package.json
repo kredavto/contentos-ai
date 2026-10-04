@@ -8,5 +8,12 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@contentos/types": "workspace:*",
+    "nodemailer": "^7.0.13"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^7.0.11"
   }
 }
