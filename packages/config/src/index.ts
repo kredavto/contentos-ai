@@ -5,6 +5,11 @@ const serverSchema = z.object({
   APP_URL: z.url(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.url(),
+  PAYMENTS_ENABLED: z.enum(['true', 'false']).default('false'),
+  PAYMENT_PROVIDER: z.enum(['disabled', 'yookassa']).default('disabled'),
+  YOOKASSA_SHOP_ID: z.string().regex(/^\d{1,32}$/).optional(),
+  YOOKASSA_SECRET_KEY: z.string().min(1).max(512).optional(),
+  YOOKASSA_TEST_MODE: z.enum(['true', 'false']).optional(),
   AI_PROVIDER: z.enum(['disabled', 'openai', 'mock']).default('disabled'),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).optional(),
@@ -36,6 +41,7 @@ const serverSchema = z.object({
   SMTP_URL: z.url().optional(),
   EMAIL_FROM: z.email().optional(),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production' && env.PAYMENTS_ENABLED === 'true' && env.YOOKASSA_TEST_MODE === 'true') ctx.addIssue({ code: 'custom', path: ['YOOKASSA_TEST_MODE'], message: 'Test payments are forbidden in production' });
   if(env.NODE_ENV==='production'&&env.SOCIAL_PROVIDER==='mock')ctx.addIssue({code:'custom',path:['SOCIAL_PROVIDER'],message:'Mock social connections are forbidden in production'});
   if(env.NODE_ENV==='production'&&env.CAPTION_PROVIDER==='mock')ctx.addIssue({code:'custom',path:['CAPTION_PROVIDER'],message:'Mock captions are forbidden in production'});
   if (env.NODE_ENV === 'production' && env.VIDEO_PROVIDER === 'mock') ctx.addIssue({code:'custom',path:['VIDEO_PROVIDER'],message:'Mock video is forbidden in production'});

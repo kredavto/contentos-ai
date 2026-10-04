@@ -23,3 +23,19 @@ YooKassa v3 uses server-side Basic authentication and Idempotence-Key for mutati
 ## Required verification before enabling
 
 Provider contract tests must cover exact decimal money conversion, merchant/mode/reference mismatch, saved-method handling, response size/time limits, redaction and uncertain outcomes. Real PostgreSQL integration tests must cover tenant permissions, concurrent checkout/settlement, replay conflicts, webhook deduplication, expiry, cancellation versus send, term boundaries and no duplicate credit grants. Browser tests must exercise quoted prices, external confirmation using explicit development fixtures, persisted plan/credits, cancellation and scheduled changes. No real charge is needed for CI.
+
+## Implemented YooKassa transport
+
+The adapter supports redirect checkout, saved-method renewal, authenticated payment reads, refund creation and refund reads. The payment contract now includes merchant/test identity and paid status, rather than treating a bare status string as sufficient evidence. Saved method IDs are returned only for paid, saved methods; all card details and raw provider payloads are dropped. Receipt registration status is retained separately from payment success.
+
+Each call is one bounded HTTP attempt to the fixed v3 API host, with redirects disabled, a 30-second timeout and a 128 KB response limit. Mutations require the original submission timestamp and stable UUID key; replay at or after 23 hours is refused. The worker must persist this timestamp/key and immutable request before first send. A definitive rejection describes this HTTP attempt only: if an earlier attempt was uncertain, a later rejection must not be interpreted as proof that no original charge exists.
+
+Checkout return URLs must use the configured application HTTPS origin. Confirmation URLs must be HTTPS on YooMoney/YooKassa domains. Identity mismatches, malformed success responses and uncertain sends require reconciliation. Logs contain only operation, correlation/job IDs, status and duration; never credentials, receipt email, card details or saved method IDs.
+
+The first receipt contract supports a single subscription item, full payment, a reviewed service/intellectual-activity classification, explicit VAT code and optional tax-system code. It is intentionally not a general merchandise/prepayment receipt engine. Production activation must verify the merchant's fiscal setup fits this contract; otherwise implement the required receipt lifecycle before accepting money. No tax classification is selected by default.
+
+Configuration parsing and the provider factory require explicit mode and server credentials. PAYMENTS_ENABLED defaults false; PAYMENT_PROVIDER defaults disabled. Test mode cannot enable payments in production. The factory and adapter are not yet wired to checkout routes or the worker, so setting environment variables alone does not enable a payment flow.
+
+Additional official references checked: [receipt parameter values](https://yookassa.ru/developers/payment-acceptance/receipts/54fz/other-services/parameters-values), [refund receipts](https://yookassa.ru/developers/payment-acceptance/receipts/54fz/yoomoney/refunds), [documented request paths in event logs](https://yookassa.ru/docs/support/merchant/payments/logs). No third-party SDK or undocumented endpoint is used.
+
+Refund requests distinguish FULL (omit receipt; provider reuses the original receipt) from PARTIAL (supply the reviewed receipt for the refunded subscription amount). The future refund repository must enforce this classification against the original immutable payment and prior refunds under a lock. Both payment and refund reads retain receipt registration status for later monitoring; a successful payment alone does not establish successful fiscal registration.

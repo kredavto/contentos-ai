@@ -62,9 +62,11 @@ export interface AnalyticsProvider {
   fetch(reference: ProviderReference, credential: string, context: OperationContext): Promise<{ metrics: Partial<Record<MetricName, number | null>>; observedAt: string; raw: unknown }>;
 }
 export interface PaymentProvider {
-  create(input: { amountMinor: number; currency: string; description: string; returnUrl: string; saveMethod: boolean }, context: OperationContext): Promise<{ reference: ProviderReference; confirmationUrl: string }>;
-  get(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PENDING' | 'SUCCEEDED' | 'CANCELED'; amountMinor: number; currency: string; paymentMethodId?: string }>;
-  refund(reference: ProviderReference, amountMinor: number, context: OperationContext): Promise<ProviderReference>;
+  readonly name: string;
+  create(input: import('./payments').CreatePayment, context: import('./payments').PaymentMutationContext): Promise<import('./payments').PaymentResult>;
+  get(reference: ProviderReference, context: OperationContext): Promise<import('./payments').PaymentResult>;
+  refund(reference: ProviderReference, input: import('./payments').RefundPayment, context: import('./payments').PaymentMutationContext): Promise<import('./payments').RefundResult>;
+  getRefund(reference: ProviderReference, context: OperationContext): Promise<import('./payments').RefundResult>;
 }
 export interface StorageProvider {
   get(key:string,maxBytes:number,context:OperationContext):Promise<Uint8Array>;

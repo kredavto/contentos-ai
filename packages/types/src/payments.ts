@@ -59,3 +59,49 @@ export function monthlyBillingBoundary(anchor: Date, monthOffset: number): Date 
   if (!Number.isFinite(result.getTime())) throw new Error('INVALID_BILLING_PERIOD');
   return result;
 }
+
+/** Receipt classification is supplied from reviewed merchant configuration, never inferred. */
+export const paymentReceiptSchema = z.object({
+  customerEmail: z.email().max(254),
+  vatCode: z.number().int().min(1).max(12),
+  taxSystemCode: z.number().int().min(1).max(6).optional(),
+  subject: z.enum(['service', 'intellectual_activity']),
+  mode: z.literal('full_payment'),
+}).strict();
+const safeHttps = z.url().max(2048).refine(value => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password;
+  } catch { return false; }
+});
+const paymentFields = {
+  ...paymentMoneySchema.shape,
+  description: z.string().trim().min(1).max(128),
+  receipt: paymentReceiptSchema,
+};
+export const createPaymentSchema = z.discriminatedUnion('mode', [
+  z.object({ ...paymentFields, mode: z.literal('CHECKOUT'), returnUrl: safeHttps, saveMethod: z.boolean() }).strict(),
+  z.object({ ...paymentFields, mode: z.literal('RENEWAL'), paymentMethodId: z.string().min(1).max(128) }).strict(),
+]);
+export type CreatePayment = z.infer<typeof createPaymentSchema>;
+export type PaymentResult = {
+  reference: import('./providers').ProviderReference;
+  observation: PaymentObservation;
+  confirmationUrl: string | null;
+  savedPaymentMethodId: string | null;
+  receiptStatus: 'PENDING' | 'SUCCEEDED' | 'CANCELED' | null;
+};
+export type PaymentMutationContext = import('./providers').OperationContext & { firstSubmittedAt: string };
+export const refundPaymentSchema = z.discriminatedUnion('mode', [
+  z.object({ ...paymentMoneySchema.shape, description: paymentFields.description, mode: z.literal('FULL') }).strict(),
+  z.object({ ...paymentFields, mode: z.literal('PARTIAL') }).strict(),
+]);
+export type RefundPayment = z.infer<typeof refundPaymentSchema>;
+export type RefundResult = {
+  reference: import('./providers').ProviderReference;
+  paymentExternalId: string;
+  status: 'PENDING' | 'SUCCEEDED' | 'CANCELED';
+  amountMinor: number;
+  currency: 'RUB';
+  receiptStatus: 'PENDING' | 'SUCCEEDED' | 'CANCELED' | null;
+};
