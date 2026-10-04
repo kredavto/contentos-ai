@@ -32,3 +32,8 @@ The provider SDK has retries disabled. A durable STARTED checkpoint precedes sub
 ## Telegram connection inspection
 
 `SocialConnectionProvider` has a real Telegram implementation using getMe, getChat and getChatMember. Only channels with administrator posting rights become ACTIVE. Requests and responses are bounded and validated; errors and structured logs omit tokens and full request URLs. Server-side encrypted credentials support replacement, disconnect and key rotation. No messages are sent by this adapter. Production requires SOCIAL_PROVIDER=telegram and a valid encryption keyring; other platform OAuth and publishing adapters remain pending. See [connection documentation](docs/social-connections.md) and [official API research](docs/publishing-next.md).
+
+
+## Telegram publication
+
+`PublishingProvider` now accepts server-supplied bytes and a normalized channel reference rather than a public media URL. The real Telegram adapter sends plain POST or MP4 SHORT_VIDEO once, validates the returned Message and records its acknowledgement. The interface does not require an invented remote status endpoint: delivery status is persisted by the publishing service. A durable SUBMITTING checkpoint plus RECONCILIATION on unknown outcomes prevents automatic duplicate sends. Configuration, capabilities, tested limits and remaining work: [publishing](docs/publishing.md).

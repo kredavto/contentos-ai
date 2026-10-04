@@ -23,3 +23,4 @@ export * from './video-processing';
 export * from './videos';
 export * from './calendar';
 export * from './social';
+export * from './publishing';

@@ -8,3 +8,4 @@ export * from './ffmpeg';
 export * from './video';
 export * from './captions';
 export * from './telegram';
+export * from './telegram-publishing';

@@ -60,7 +60,9 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     const second=await service.create(userId,tenantId,brandId,{...request(subject),avatarId:look.avatarId},correlationId);
     await processor.run(tenantId,second.id);await due(second.id);await processor.run(tenantId,second.id);
     expect(await database.client`select id from usage_ledger where tenant_id=${tenantId} and type='CAPTURE'`).toHaveLength(2);
-    await service.delete(userId,tenantId,brandId,look.avatarId,correlationId);expect(await service.cleanupOne()).toBe(true);
+    await service.delete(userId,tenantId,brandId,look.avatarId,correlationId);
+    // Make the queued deadline due in the database clock, independent of host/container clock skew.
+    await database.client`update avatars set delete_after=now()-interval '1 second' where id=${look.avatarId}`;expect(await service.cleanupOne()).toBe(true);
     expect((await service.overview(userId,tenantId,brandId)).looks).toHaveLength(0);
   });
   it('does not reactivate queued work when withdrawn consent is granted again',async()=>{
@@ -85,6 +87,7 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     await failing.run(tenantId,rejected.id);expect((await row(rejected.id)).status).toBe('FAILED');
     const queued=await service.create(userId,tenantId,brandId,request(subject),correlationId);const claimed=(await repo.claim(tenantId,queued.id))!;const data=await repo.prepare(claimed,avatarConsentPolicies(),true);
     await service.delete(userId,tenantId,brandId,data.avatar.id,correlationId);
+    await database.client`update avatars set delete_after=now()-interval '1 second' where id=${data.avatar.id}`;
     expect(await repo.claimDeletion(connection.name)).toBeNull();
     await repo.submitted(claimed,await provider.create({photoUrl:'https://storage.example.test/photo.jpg',name:'Fixture'},{tenantId,internalId:claimed.id,idempotencyKey:claimed.idempotencyKey,correlationId,signal:new AbortController().signal}));
     await expect(repo.complete(claimed,avatarConsentPolicies())).rejects.toThrow('CONFLICT');

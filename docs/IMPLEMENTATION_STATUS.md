@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 48 tables with fifteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 50 tables with sixteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -68,11 +68,11 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 ## Full objective still outstanding
 
 - Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
-- Extend the implemented text/avatar/video job engine to publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
-- Official documentation research and real adapters for captions/media, YooKassa, YouTube/TikTok/Meta/VK/Telegram; production configuration and live verification of HeyGen/S3 remain pending.
+- Extend the implemented text/avatar/video/publishing job engine to additional platforms and webhooks, including operator reconciliation and provider pricing configuration.
+- Remaining image/media, YooKassa, YouTube/TikTok/Meta/VK and platform analytics adapters; production configuration and live verification of HeyGen/S3/Telegram remain pending.
 - Remaining AI workflows beyond strategy/ideas/scripts; downstream publishing transitions from the implemented editorial calendar.
 - Private voice cloning/import, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
-- OAuth flows and refresh for additional social platforms, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
+- OAuth flows and refresh for additional social platforms, autopilot, verified/idempotent webhooks, additional delivery-status adapters and normalized/raw analytics.
 - AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
 - Admin/support/audit UI, notifications, privacy export/deletion workflows, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
 - Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
@@ -85,7 +85,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with publishing connections/scheduler and Cover Studio; add operator investigation for expired unknown submissions. Research official APIs first. Keep the complete original scope intact.
+Continue with normalized analytics/Performance Analyst, Cover Studio and operator resolution for uncertain submissions. Additional social providers, payments and all other original requirements remain in scope. Research official APIs first.
 
 ## Local environment notes
 
@@ -155,3 +155,18 @@ Calendar commit 1035d34 passed remote CI run 37204057150.
 Verification for the connection slice: 107 unit/integration/media tests passed, including a concurrent disconnect-versus-inspection regression. Both Playwright scenarios passed in 3.7 minutes with connection creation, empty token field after save, rights refresh, disconnect, reconnection, desktop/mobile screenshots and no horizontal overflow. No live Telegram request was made.
 
 Production build, final workspace/test typecheck and lint passed. The final focused vault/connection regression passed all 7 tests after replacing an ES2024-only test helper with a target-compatible promise gate.
+
+
+## Approval-based Telegram publishing
+
+Migration 0015 adds immutable publishing approval snapshots and publication acknowledgements. The dedicated BullMQ queue uses database eligibility, lease fencing, bounded preparation retries, cancellation before send and recovery of lost delivery. Telegram text and multipart MP4 adapters are real; current channel rights/visibility/discussion settings, exact calendar revision, approver permissions, video/script approval and original consent are rechecked before the durable send marker. Missing configuration disables publication. Unknown external outcomes are held for reconciliation without replay. Pending jobs are canceled on credential replacement/disconnection.
+
+The Publishing tab supports plan/channel review, private video preview, explicit approval, scheduled status, cancellation and saved acknowledgement. The calendar prevents edits to frozen publication revisions. See [publishing design and boundaries](publishing.md). Manual operator resolution, additional platforms, analytics and full deployment remain required.
+
+Initial verification: 117 tests passed across 25 files; workspace/test typecheck and lint passed. Additional video-publication consent-revocation and safe social-summary regressions passed (15 tests). Existing cleanup tests were isolated from previous runs' provider fixtures and made independent of host/database clock skew.
+
+Encrypted-connections commit f7f7bf3 passed remote CI run 37205056767.
+
+Both browser scenarios passed in 4.4 minutes, including scheduled video delivery through the real BullMQ/storage pipeline with the explicitly mocked remote sender, saved publication status, mobile overflow checks and desktop/mobile visual review. The browser run exposed a calendar refresh race: controls now remain pending until refreshed rows arrive, and outdated responses cannot overwrite newer data. No live Telegram message was sent.
+
+Final publishing verification: 118 tests in 25 files, production build, final workspace/test typecheck and lint passed. The published acknowledgement uses the same explicit timezone as the schedule.

@@ -7,3 +7,6 @@ Implemented connection foundation: encrypted tenant/brand social connections, ma
 Next implementation: explicit approval of an immutable calendar/content revision; a durable publishing job with UTC schedule, consent/source revalidation and a stable internal intent. Never expose bot tokens in URLs/logs or frontend responses. Use bounded multipart upload of the private final file. Respect platform limits before enqueueing; reject unsupported privacy/comment options instead of silently ignoring them. Paid broadcasts stay disabled.
 
 The documented sendVideo parameters contain no idempotency key. Therefore mark submission durably before the request, persist the successful Message reference, and hold uncertain transport outcomes for reconciliation rather than blindly resending. A locally idempotent scheduler alone cannot guarantee remote exactly-once delivery. Other requested social providers still require their own documented OAuth/API adapters and capabilities.
+
+
+The first implementation is now in [publishing.md](publishing.md): durable approval, UTC scheduling, Telegram text/video transport and unknown-outcome hold. Next are operator resolution, additional social providers, analytics and notifications.

@@ -4,6 +4,7 @@ import {DomainError,calendarInstant,type CalendarCreate,type CalendarUpdate,type
 import type {Database} from '../index';
 import {calendarEntries,contentItems,brands,videoProjects,auditLogs} from '../schema';
 import {assertMembership,lockTenant,type Transaction} from './ledger';
+import {assertCalendarEditable} from './publishing';
 import {validateVideo} from './videos';
 import type {ConsentPolicy} from './avatars';
 const where=(tenantId:string,brandId:string,id:string)=>and(eq(calendarEntries.tenantId,tenantId),eq(calendarEntries.brandId,brandId),eq(calendarEntries.id,id));
@@ -40,6 +41,7 @@ export class CalendarRepository{
   async update(userId:string,tenantId:string,brandId:string,id:string,input:CalendarUpdate,policies:ConsentPolicy[],correlationId:string){
     const fields=values(input);
     return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [entry]=await tx.select().from(calendarEntries).where(where(tenantId,brandId,id));if(!entry)throw new DomainError('NOT_FOUND',404);
+      await assertCalendarEditable(tx,tenantId,id);
       if(entry.status!=='PLANNED'||entry.revision!==input.revision)throw new DomainError('CONFLICT',409);await validateSource(tx,tenantId,brandId,input,policies);
       await tx.update(calendarEntries).set({...fields,revision:entry.revision+1,updatedAt:new Date()}).where(where(tenantId,brandId,id));
       await tx.update(contentItems).set({title:input.title,type:input.type,status:input.videoProjectId?'APPROVED':'IDEA',revision:entry.revision+1}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,entry.contentItemId)));
@@ -48,6 +50,7 @@ export class CalendarRepository{
   }
   async cancel(userId:string,tenantId:string,brandId:string,id:string,revision:number,correlationId:string){
     await this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [entry]=await tx.select().from(calendarEntries).where(where(tenantId,brandId,id));if(!entry)throw new DomainError('NOT_FOUND',404);if(entry.status==='CANCELLED')return;
+      await assertCalendarEditable(tx,tenantId,id);
       if(entry.revision!==revision)throw new DomainError('CONFLICT',409);
       await tx.update(calendarEntries).set({status:'CANCELLED',revision:entry.revision+1,updatedAt:new Date()}).where(where(tenantId,brandId,id));
       await tx.insert(auditLogs).values({tenantId,userId,action:'CALENDAR_ENTRY_CANCELLED',resourceId:id,correlationId});

@@ -55,8 +55,7 @@ export interface TrendProvider {
   discover(input: { query: string; locale: string }, context: OperationContext): Promise<Array<{ title: string; sourceUrl: string; observedAt: string; evidence: string }>>;
 }
 export interface PublishingProvider {
-  publish(input: { credential: string; mediaUrl: string; caption: string; privacy: string }, context: OperationContext): Promise<{ reference: ProviderReference; status: 'PENDING' | 'PUBLISHED'; url?: string }>;
-  status(reference: ProviderReference, credential: string, context: OperationContext): Promise<'PENDING' | 'PUBLISHED' | 'FAILED'>;
+  publish(input: { credential: string; channel: ProviderReference; type: 'POST'|'SHORT_VIDEO'; bytes?: Uint8Array; caption: string; privacy: 'PUBLIC'|'PRIVATE'; commentsEnabled: boolean }, context: OperationContext): Promise<{ reference: ProviderReference; status: 'PUBLISHED'; url: string|null; publishedAt: string }>;
 }
 export type MetricName = 'views' | 'impressions' | 'reach' | 'likes' | 'comments' | 'shares' | 'saves' | 'watch_time' | 'average_watch_time' | 'completion_rate' | 'clicks' | 'followers_delta';
 export interface AnalyticsProvider {

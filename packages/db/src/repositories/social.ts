@@ -3,13 +3,14 @@ import {DomainError,type EncryptedCredential,type SocialConnectionProvider} from
 import type {Database} from '../index';
 import {socialConnections,brands,auditLogs} from '../schema';
 import {assertMembership,lockTenant,type Transaction} from './ledger';
+import {cancelConnectionPublishing} from './publishing';
 type Inspection=Awaited<ReturnType<SocialConnectionProvider['inspect']>>;
 export type StoredSocialConnection=typeof socialConnections.$inferSelect;
 const where=(tenantId:string,brandId:string,id:string)=>and(eq(socialConnections.tenantId,tenantId),eq(socialConnections.brandId,brandId),eq(socialConnections.id,id));
 async function authorize(tx:Transaction,userId:string,tenantId:string,brandId:string,manage=false){await assertMembership(tx,userId,tenantId,manage?'strategy':'read');const [brand]=await tx.select({id:brands.id}).from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId)));if(!brand)throw new DomainError('NOT_FOUND',404);}
 export class SocialRepository{
   constructor(private readonly db:Database){}
-  async list(userId:string,tenantId:string,brandId:string){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);return tx.select({id:socialConnections.id,name:socialConnections.name,username:socialConnections.username,provider:socialConnections.provider,status:socialConnections.status,revision:socialConnections.revision,lastCheckedAt:socialConnections.lastCheckedAt,errorCode:socialConnections.errorCode}).from(socialConnections).where(and(eq(socialConnections.tenantId,tenantId),eq(socialConnections.brandId,brandId))).orderBy(desc(socialConnections.createdAt)).limit(100);});}
+  async list(userId:string,tenantId:string,brandId:string){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);const rows=await tx.select({reference:socialConnections.reference,id:socialConnections.id,name:socialConnections.name,username:socialConnections.username,provider:socialConnections.provider,status:socialConnections.status,revision:socialConnections.revision,lastCheckedAt:socialConnections.lastCheckedAt,errorCode:socialConnections.errorCode}).from(socialConnections).where(and(eq(socialConnections.tenantId,tenantId),eq(socialConnections.brandId,brandId))).orderBy(desc(socialConnections.createdAt)).limit(100);return rows.map(({reference,...row})=>({...row,privacy:reference.metadata.public===true?'PUBLIC' as const:'PRIVATE' as const,commentsEnabled:reference.metadata.hasLinkedDiscussion===true}));});}
   async intent(userId:string,tenantId:string,brandId:string,key:string,inputHash:string){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId,true);const [existing]=await tx.select().from(socialConnections).where(and(eq(socialConnections.tenantId,tenantId),eq(socialConnections.idempotencyKey,key)));if(existing&&(existing.brandId!==brandId||existing.inputHash!==inputHash||existing.createdBy!==userId))throw new DomainError('CONFLICT',409);return existing?{id:existing.id,status:existing.status,revision:existing.revision}:null;});}
   async create(userId:string,tenantId:string,brandId:string,id:string,key:string,inputHash:string,provider:string,result:Inspection,credential:EncryptedCredential,correlationId:string){
     return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId,true);
@@ -26,6 +27,7 @@ export class SocialRepository{
       if(row.revision!==revision||(!credential&&row.status==='REVOKED'))throw new DomainError('CONFLICT',409);
       if(result.reference.provider!==row.provider||result.reference.externalId!==row.reference.externalId||result.reference.internalId!==row.id)throw new DomainError('CONFLICT',409);
       await tx.update(socialConnections).set({reference:result.reference,name:result.name,username:result.username,status:result.canPublish?'ACTIVE':'LIMITED',revision:revision+1,lastCheckedAt:new Date(),errorCode:null,updatedAt:new Date(),...(credential?{credential,credentialVersion:row.credentialVersion+1}:{})}).where(where(tenantId,brandId,id));
+      if(credential)await cancelConnectionPublishing(tx,tenantId,id,userId);
       await tx.insert(auditLogs).values({tenantId,userId,action:credential?'SOCIAL_CREDENTIAL_REPLACED':'SOCIAL_CHECKED',resourceId:id,correlationId,metadata:{revision:revision+1,status:result.canPublish?'ACTIVE':'LIMITED'}});return {id,revision:revision+1};
     });
   }
@@ -39,6 +41,7 @@ export class SocialRepository{
   async disconnect(userId:string,tenantId:string,brandId:string,id:string,revision:number,correlationId:string){
     await this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId,true);const [row]=await tx.select().from(socialConnections).where(where(tenantId,brandId,id));if(!row)throw new DomainError('NOT_FOUND',404);if(row.status==='REVOKED')return;if(row.revision!==revision)throw new DomainError('CONFLICT',409);
       await tx.update(socialConnections).set({status:'REVOKED',credential:null,credentialVersion:row.credentialVersion+1,revision:revision+1,errorCode:null,updatedAt:new Date()}).where(where(tenantId,brandId,id));
+      await cancelConnectionPublishing(tx,tenantId,id,userId);
       await tx.insert(auditLogs).values({tenantId,userId,action:'SOCIAL_DISCONNECTED',resourceId:id,correlationId});
     });
   }

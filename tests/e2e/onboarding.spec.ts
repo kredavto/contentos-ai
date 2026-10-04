@@ -231,6 +231,36 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByRole('button',{name:'Проверить новый токен',exact:true}).click();
   await expect(channelCard.getByText('Готово',{exact:true})).toBeVisible();
 
+  await page.getByRole('button',{name:'Календарь',exact:true}).click();
+  const publishAt=new Date(Math.ceil((Date.now()+40000)/60000)*60000);
+  await page.getByLabel('Дата календаря',{exact:true}).fill(publishAt.toISOString().slice(0,10));
+  await page.getByRole('button',{name:'Добавить в план',exact:true}).click();
+  await page.getByLabel('Название материала',{exact:true}).fill('Одобренный ролик для Telegram');
+  await page.getByLabel('Тип материала',{exact:true}).selectOption('SHORT_VIDEO');
+  await page.getByLabel('Одобренное видео',{exact:true}).selectOption({label:'Мой проверенный заголовок'});
+  await page.getByLabel('Площадка плана',{exact:true}).selectOption('TELEGRAM');
+  await page.getByLabel('Дата и время',{exact:true}).fill(publishAt.toISOString().slice(0,16));
+  await page.getByLabel('Часовой пояс материала',{exact:true}).selectOption('UTC');
+  await page.getByLabel('Текст публикации',{exact:true}).fill('Тест публикации одобренного ролика');
+  await page.getByLabel('Разрешить комментарии',{exact:true}).uncheck();
+  await page.getByRole('button',{name:'Сохранить план',exact:true}).click();
+  await expect(page.getByText('Материал сохранён в плане',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Публикации',exact:true}).click();
+  await page.getByLabel('Материал для публикации',{exact:true}).selectOption({label:'Одобренный ролик для Telegram'});
+  await page.getByLabel('Канал публикации',{exact:true}).selectOption({label:'Демонстрационный канал (@contentos_demo)'});
+  await page.getByRole('button',{name:'Просмотреть ролик перед публикацией',exact:true}).click();
+  await expect(page.getByLabel('Видео перед публикацией',{exact:true})).toBeVisible();
+  await page.getByLabel('Я проверил материал, канал и время отправки',{exact:true}).check();
+  await page.getByRole('button',{name:'Одобрить и запланировать публикацию',exact:true}).click();
+  await expect(page.getByText('Публикация одобрена и поставлена в очередь',{exact:true})).toBeVisible();
+  const publicationCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Одобренный ролик для Telegram',exact:true})});
+  await expect(publicationCard.getByText('Опубликовано',{exact:true})).toBeVisible({timeout:120000});
+  await page.screenshot({path:'test-results/publishing-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/publishing-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+
   await page.getByRole('button',{name:'Видео',exact:true}).click();
   await videoCard.getByRole('button',{name:'Удалить видео',exact:true}).click();
   await videoCard.getByRole('button',{name:'Подтвердить удаление видео',exact:true}).click();

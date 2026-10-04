@@ -12,3 +12,4 @@ export * from './videos';
 export * from './calendar';
 export * from './credential-vault';
 export * from './social';
+export * from './publishing';

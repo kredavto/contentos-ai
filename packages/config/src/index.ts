@@ -10,6 +10,7 @@ const serverSchema = z.object({
   OPENAI_MODEL: z.string().min(1).optional(),
   AVATAR_PROVIDER: z.enum(['disabled', 'heygen', 'mock']).default('disabled'),
   AVATAR_GENERATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  PUBLISHING_ENABLED:z.enum(['true','false']).default('false'),
   SOCIAL_PROVIDER:z.enum(['disabled','telegram','mock']).default('disabled'),
   CREDENTIAL_ENCRYPTION_KEYS:z.string().min(1).max(4096).optional(),
   CREDENTIAL_ACTIVE_KEY_ID:z.string().regex(/^[a-zA-Z0-9_-]{1,32}$/).optional(),

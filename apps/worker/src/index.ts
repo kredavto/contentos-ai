@@ -2,11 +2,11 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository } from '@contentos/db';
-import { MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService } from '@contentos/core';
+import { createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor } from '@contentos/providers';
+import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
@@ -21,6 +21,11 @@ const videos=new VideoService(new VideoRepository(database.db),videoConnection,s
 const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env));
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
+const publishingRepository=new PublishingRepository(database.db);
+const publishingProcessor=new PublishingProcessor(publishingRepository,publishingFromEnvironment(env),socialFromEnvironment(env),credentialVaultFromEnvironment(env),storage);
+const publishingQueue=new Queue('contentos-publishing',{connection});
+const publishingWorker=new Worker<{tenantId:string;id:string}>('contentos-publishing',delivery=>publishingProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
+publishingWorker.on('error',()=>console.error(JSON.stringify({event:'publishing_worker_error',code:'QUEUE_UNAVAILABLE'})));
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];
 const orchestrator = new GenerationOrchestrator(routes);
 const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-generation', async delivery => {
@@ -53,6 +58,10 @@ async function dispatch() {
   if (dispatching) return;
   dispatching = true;
   try {
+    for(const job of await publishingRepository.due()){
+      await publishingQueue.add('publish',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
+      await publishingRepository.dispatched(job.tenantId,job.id);
+    }
     for (const job of await repository.due()) {
       await queue.add('generate',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await repository.dispatched(job.tenantId,job.id);
@@ -62,7 +71,7 @@ async function dispatch() {
 }
 const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=> {
   if (request.url !== '/health') {response.writeHead(404);response.end();return;}
-  const ready = connection.status === 'ready' && worker.isRunning();
+  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning();
   response.writeHead(ready?200:503, {'Content-Type':'application/json'});response.end(JSON.stringify({status:ready?'ok':'unavailable'}));
 }) : null;
 if (health) health.listen(Number(process.env.WORKER_HEALTH_PORT),'127.0.0.1');
@@ -78,7 +87,7 @@ void dispatch();
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await cleanupTask; await queue.close(); await connection.quit(); storage?.close(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await publishingWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await connection.quit(); storage?.close(); await database.close();
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

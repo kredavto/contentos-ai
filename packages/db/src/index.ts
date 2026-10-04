@@ -20,3 +20,4 @@ export * from './repositories/voices';
 export * from './repositories/videos';
 export * from './repositories/calendar';
 export * from './repositories/social';
+export * from './repositories/publishing';
