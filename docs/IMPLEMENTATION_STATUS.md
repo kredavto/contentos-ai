@@ -192,3 +192,13 @@ Verification: all 135 tests across 28 files passed with real PostgreSQL and FFmp
 The first browser run exposed a pre-existing consent-form race: controls could be changed while a refresh was pending, then a delayed state reset cleared the user's confirmation. Pending controls are now disabled and the reset happens at operation start. The complete browser rerun passed. Prior manual-analytics commit 96dcf75 passed remote CI run 37212147587.
 
 Final production build, workspace/test typecheck and lint passed after the consent-form fix.
+
+## Performance analysis engine foundation
+
+The AI package now validates a bounded publication-evidence snapshot and produces a structured report across all seven required performance dimensions, plus typed strategy experiments. It reuses the real configured LLM adapter and existing metered repair/fallback engine. Validation rejects invented citation IDs, missing metrics, mixed provider/source comparisons, incompatible observation ages and audience-response claims without measured breakdowns. Explicit DEMO fixtures remain development-only. See [implemented boundaries and remaining integration](performance-analysis.md).
+
+This is not yet a complete user-facing slice: the durable OPTIMIZE_STRATEGY job, evidence repository, report/recommendation persistence, acceptance/rejection API and Analytics interface remain to be connected. No strategy or Brand Brain is changed by the engine; no live paid AI request was made. The full MVP and Vercel deployment remain outstanding.
+
+Verification: all 153 tests in 29 files passed against PostgreSQL with real FFmpeg enabled. Eighteen new tests cover evidence/provenance/time/zero-null rules, bounded typed patches, production-safe mock behavior, metered semantic repair, repair exhaustion and missing configuration. Existing generation workflows pass through the shared engine unchanged.
+
+Final workspace/test typecheck, lint, production build and whitespace validation passed. Browser tests were not rerun locally for this engine-only change; no UI, routes or database migrations changed.

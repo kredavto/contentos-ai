@@ -25,3 +25,5 @@ export * from './calendar';
 export * from './social';
 export * from './publishing';
 export * from './analytics';
+
+export * from './performance';
