@@ -83,3 +83,6 @@ export function validatePerformanceOutput(raw:unknown,rawEvidence:PerformanceEvi
     });
   }).safeParse(raw);
 }
+
+export const recommendationDecisionSchema=z.object({recommendationId:z.uuid(),decision:z.enum(['ACCEPTED','REJECTED']),expectedVersion:z.number().int().positive(),idempotencyKey:z.uuid()}).strict();
+export type RecommendationDecision=z.infer<typeof recommendationDecisionSchema>;

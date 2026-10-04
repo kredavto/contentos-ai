@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, env } = services();
+    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +41,10 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if(path[3]&&path[4]==='performance'&&path.length===5){
+          if(request.method==='GET')return ok(await performance.list(user.userId,tenantId,path[3]));
+          if(request.method==='POST')return ok(await performance.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
+        }
         if(path[3]&&path[4]==='channel-analytics'){
           if(path.length===5&&request.method==='GET')return ok(await channelAnalytics.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await channelAnalytics.request(user.userId,tenantId,path[3],await readBody(request),correlationId),202);

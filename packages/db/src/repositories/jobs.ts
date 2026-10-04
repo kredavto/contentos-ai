@@ -4,6 +4,7 @@ import { DomainError, type GenerationInput, type WorkflowType, type GenerationOu
 import type { Database } from '../index';
 import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions } from '../schema';
 import { lockTenant, assertMembership, reserveInTransaction, settleInTransaction, type Transaction } from './ledger';
+import {snapshotPerformance,persistPerformance} from './performance';
 export type StoredJob = typeof jobs.$inferSelect;
 const jobWhere = (tenantId: string, id: string) => and(eq(jobs.tenantId, tenantId), eq(jobs.id,id));
 export async function ownedJob(tx: Transaction, tenantId: string, id: string, leaseToken: string) {
@@ -18,7 +19,7 @@ export class JobRepository {
     // original accepted job even when the brand has subsequently changed.
     const inputHash = createHash('sha256').update(JSON.stringify({ brandId, type, options: input.options })).digest('hex');
     return this.db.transaction(async tx => {
-      await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate');
+      await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,(type === 'GENERATE_STRATEGY' || type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate');
       const [existing] = await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,idempotencyKey)));
       if (existing) { if (existing.inputHash !== inputHash || existing.requestedBy !== userId) throw new DomainError('CONFLICT',409); return existing; }
       const [brand] = await tx.select().from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))).for('share');
@@ -33,6 +34,10 @@ export class JobRepository {
         const [idea] = await tx.select({id:ideas.id}).from(ideas).where(and(eq(ideas.tenantId,tenantId),eq(ideas.brandId,brandId),eq(ideas.id,input.options.ideaId)));
         if (!idea) throw new DomainError('NOT_FOUND',404);
       }
+      if(type==='OPTIMIZE_STRATEGY'){
+        if(!input.options.analysisDays||input.options.scriptId||input.options.ideaId||input.options.edit!=='GENERATE')throw new DomainError('INVALID_INPUT');
+        input={...input,performance:await snapshotPerformance(tx,tenantId,brandId,input.options.analysisDays)};
+      }else if(input.options.analysisDays!==undefined||input.performance)throw new DomainError('INVALID_INPUT');
       const [policy] = await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,type));
       if (!policy) throw new DomainError('CONFIGURATION_REQUIRED',503);
       const reservation = await reserveInTransaction(tx,tenantId,policy.unit,policy.amount,`job:${idempotencyKey}`,correlationId);
@@ -56,7 +61,7 @@ export class JobRepository {
       const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
       if (!job || (job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO') || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
       let permitted = true;
-      try { await assertMembership(tx,job.requestedBy,tenantId,job.type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
+      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
       if (!permitted || job.attempt >= job.maxAttempts) {
         await settleInTransaction(tx,tenantId,job.reservationId,'RELEASE',job.correlationId);
         await tx.update(jobs).set({status:'FAILED',errorCode:permitted ? 'PROVIDER_UNAVAILABLE' : 'NOT_AUTHORIZED',finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null}).where(jobWhere(tenantId,id));
@@ -83,11 +88,13 @@ export class JobRepository {
   async complete(tenantId:string,id:string,leaseToken:string,output:GenerationOutput) {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId); const job = await ownedJob(tx,tenantId,id,leaseToken);
-      await assertMembership(tx,job.requestedBy,tenantId,job.type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate');
+      await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate');
       if ((job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO')) throw new DomainError('INVALID_INPUT');
       const input = generationInputSchema.parse(job.input);
       let result: {internalId:string;version:number};
-      if (job.type === 'GENERATE_STRATEGY') {
+      if(job.type==='OPTIMIZE_STRATEGY'){
+        result=await persistPerformance(tx,job,input,output);
+      } else if (job.type === 'GENERATE_STRATEGY') {
         const content = workflowSchemas.GENERATE_STRATEGY.parse(output);
         let [strategy] = await tx.select().from(strategies).where(and(eq(strategies.tenantId,tenantId),eq(strategies.brandId,job.brandId)));
         if (!strategy) [strategy] = await tx.insert(strategies).values({tenantId,brandId:job.brandId}).returning();
