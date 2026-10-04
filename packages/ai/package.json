@@ -8,5 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@contentos/types": "workspace:*",
+    "zod": "^4.3.6"
   }
 }

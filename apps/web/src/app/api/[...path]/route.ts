@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, env } = services();
+    const { auth, brands, generation, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -39,7 +39,17 @@ async function dispatch(request: Request, context: RouteContext) {
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
+      if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if (path[3] && path[4] === 'content' && path.length === 5 && request.method === 'GET') return ok(await generation.overview(user.userId, tenantId, path[3]));
+        if (path[3] && path[4] === 'jobs' && path.length === 5 && request.method === 'POST') return ok(await generation.enqueue(user.userId, tenantId, path[3], await readBody(request), correlationId), 202);
+        if (path[3] && path[4] === 'scripts' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await generation.history(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') {
+            await auth.throttle('mutation', user.userId);
+            return ok(await generation.editScript(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId));
+          }
+        }
         if (path.length === 3 && request.method === 'POST') return ok(await brands.createBrand(user.userId, tenantId, await readBody(request), correlationId), 201);
         if (path[3] && path.length === 4 && request.method === 'GET') return ok(await brands.getBrandBrain(user.userId, tenantId, path[3]));
         if (path[3] && path[4] === 'onboarding' && path.length === 5 && request.method === 'PUT') {

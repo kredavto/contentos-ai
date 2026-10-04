@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@contentos/types": "workspace:*",
-    "nodemailer": "^10.0.14"
+    "nodemailer": "^10.0.14",
+    "openai": "^7.27.0",
+    "zod": "^4.3.6"
   }
 }

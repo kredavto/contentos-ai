@@ -31,3 +31,11 @@ At-least-once delivery; exactly-once local effects via unique constraints and tr
 
 ## Deployment
 See DEPLOYMENT.md. GitHub repository: https://github.com/kredavto/contentos-ai. Docker web and worker images share one version. Migrations run as a single release job. Health checks separate liveness and dependency readiness. Backups, restore drills, key rotation and rollback are release requirements.
+
+## Generation transaction boundaries
+
+The BFF snapshots normalized Brand Brain and validates its revision when enqueuing. One PostgreSQL transaction reserves credits and inserts job, outbox and audit records. The worker dispatches due database jobs into BullMQ using stable UUIDs, with periodic redispatch to recover lost Redis state. Redis contains only internal job/tenant IDs. Database leases and fencing tokens prevent stale workers committing results. Authorization is rechecked at claim and commit. A terminal failure releases credits; validated result/version and capture commit atomically.
+
+LLM calls are bounded to three schema attempts per job attempt, with a 240s workflow deadline and configurable explicit fallback routes. Each provider call records started/result/units/duration separately. Successfully persisted valid outputs are reused after a worker crash. Provider cost remains null when no authoritative rates are configured. An ambiguous transport outcome is UNKNOWN, not a claim of zero cost or exactly-once provider execution. OpenAI may incur another charge after an ambiguous timeout; durable internal capture is still once. There are at most three persisted job attempts with exponential backoff.
+
+Usage ledger and strategy/script versions reject UPDATE/DELETE through PostgreSQL triggers. Reservation/settlement uniqueness is also database-enforced. Deletion workflows must tombstone identities and redact content through a separately designed retention policy; blindly cascading financial history is prohibited.

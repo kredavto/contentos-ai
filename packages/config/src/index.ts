@@ -5,9 +5,13 @@ const serverSchema = z.object({
   APP_URL: z.url(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.url(),
+  AI_PROVIDER: z.enum(['disabled', 'openai', 'mock']).default('disabled'),
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_MODEL: z.string().min(1).optional(),
   SMTP_URL: z.url().optional(),
   EMAIL_FROM: z.email().optional(),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production' && env.AI_PROVIDER === 'mock') ctx.addIssue({ code: 'custom', path: ['AI_PROVIDER'], message: 'Mock AI is forbidden in production' });
   if (env.NODE_ENV === 'production' && !env.APP_URL.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'Production origin must use HTTPS' });
 });
 export function parseServerEnvironment(source: Record<string, string | undefined>) { return serverSchema.parse(source); }
