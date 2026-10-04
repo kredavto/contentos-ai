@@ -1,6 +1,8 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { BillingRepository, PaymentTaskRepository, RenewalRepository, createDatabase } from '../../packages/db/src/index';
+import { PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, RenewalRepository, createDatabase } from '../../packages/db/src/index';
+import { PaymentWebhookProcessor, PaymentWebhookService } from '../../packages/core/src/payment-webhooks';
+import { YooKassaPaymentProvider } from '../../packages/providers/src/yookassa';
 import { CredentialVault } from '../../packages/core/src/credential-vault';
 import { PaymentProcessor } from '../../packages/core/src/payment-processor';
 import { ProviderRequestError, type PaymentProvider, type PaymentResult } from '../../packages/types/src/index';
@@ -32,13 +34,13 @@ describe.skipIf(!url)('durable payment dispatch', () => {
     const advance = (ms:number) => { now = new Date(now.getTime()+ms); };
     const externalId = randomUUID();
     const result:PaymentResult = { reference:{provider:'yookassa',externalId,internalId:order.id,metadata:{}}, observation:{...merchant,externalId,internalId:order.id,amountMinor:499900,currency:'RUB',status:'PENDING',paid:false}, confirmationUrl:'https://yoomoney.ru/checkout/fixture',savedPaymentMethodId:null,receiptStatus:null };
-    const provider:PaymentProvider = {name:'yookassa',create:vi.fn(async()=>result),get:vi.fn(async()=>result),refund:vi.fn(),getRefund:vi.fn()};
+    const provider:PaymentProvider = {name:'yookassa',inspect:vi.fn(async()=>result),create:vi.fn(async()=>result),get:vi.fn(async()=>result),refund:vi.fn(),getRefund:vi.fn()};
     const processor = new PaymentProcessor(tasks,billing,provider,merchant,null);
     const row = async () => (await database.client`select * from payment_tasks where id=${order.id}`)[0]!;
     const claim = async () => (await tasks.claim(tenantId,order.id))!;
     const prepare = (token:string) => tasks.prepare(tenantId,order.id,token,merchant,true);
     const cancel = () => renewal.cancel(owner,tenantId,{expectedRevision:1,idempotencyKey:randomUUID()},correlation);
-    return {tenantId,owner,order,tasks,billing,merchant,advance,provider,processor,result,row,claim,prepare,cancel};
+    return {clock:()=>now,tenantId,owner,order,tasks,billing,merchant,advance,provider,processor,result,row,claim,prepare,cancel};
   }
   it('creates an atomic outbox and claims duplicate deliveries once', async()=>{
     const f=await fixture(); expect((await f.row()).status).toBe('QUEUED');
@@ -129,4 +131,61 @@ describe.skipIf(!url)('durable payment dispatch', () => {
     await expect(f.tasks.finish(f.tenantId,f.order.id,claimed.leaseToken!)).rejects.toThrow('CONFLICT');
     await f.billing.settle(f.tenantId,f.order.id,paid);await f.tasks.finish(f.tenantId,f.order.id,claimed.leaseToken!);expect((await f.row()).status).toBe('SUCCEEDED');
   });
+  it('passes merchant scope to the real YooKassa adapter when polling known checkout',async()=>{
+    const f=await fixture();let paid=false;
+    const http=vi.fn<typeof fetch>(async()=>Response.json({id:f.result.observation.externalId,status:paid?'succeeded':'pending',paid,amount:{value:'4999.00',currency:'RUB'},recipient:{account_id:f.merchant.merchantId},test:true,metadata:{order_id:f.order.id},...(!paid?{confirmation:{type:'redirect',confirmation_url:f.result.confirmationUrl}}:{})}));
+    const provider=new YooKassaPaymentProvider({shopId:f.merchant.merchantId,secretKey:'fixture-secret',test:true,returnOrigin:'https://contentos.example'},http);
+    const processor=new PaymentProcessor(f.tasks,f.billing,provider,f.merchant,null);
+    await processor.run(f.tenantId,f.order.id);paid=true;f.advance(60000);await processor.run(f.tenantId,f.order.id);
+    expect(http).toHaveBeenCalledTimes(2);expect(http.mock.calls[1]![1]!.method).toBe('GET');expect((await f.row()).status).toBe('SUCCEEDED');
+  });
+  async function webhookFixture(){
+    const f=await fixture(),repository=new PaymentWebhookRepository(database.db,f.clock),service=new PaymentWebhookService(repository,f.merchant);
+    const processor=new PaymentWebhookProcessor(repository,f.billing,f.provider,f.merchant,null);
+    const notification={type:'notification',event:'payment.succeeded',object:{id:f.result.observation.externalId,paid:true,amount:{value:'9999999.99'},metadata:{order_id:randomUUID()},payment_method:{card:{last4:'1234'}}}};
+    const receive=async(raw:unknown=notification)=>{await service.receive(raw,randomUUID());return (await database.client`select * from webhook_events where external_id=${f.result.observation.externalId}`)[0]!;};
+    const eventRow=async(id:string)=>(await database.client`select * from webhook_events where id=${id}`)[0]!;
+    const submitted=async()=>{const task=await f.claim();await f.prepare(task.leaseToken!);await f.tasks.fail(f.tenantId,f.order.id,task.leaseToken!,false);};
+    return {...f,repository,service,webhookProcessor:processor,notification,receive,eventRow,submitted};
+  }
+  it('persists minimal deduplicated receipts and never trusts a claimed paid body',async()=>{
+    const f=await webhookFixture();await f.submitted();const [a,b]=await Promise.all([f.receive(),f.receive()]);expect(a.id).toBe(b.id);
+    expect(JSON.stringify(a)).not.toContain('1234');expect(JSON.stringify(a)).not.toContain('9999999');
+    await f.webhookProcessor.run(a.id);expect(f.provider.inspect).toHaveBeenCalledTimes(1);
+    expect(await database.client`select id from payment_settlements where tenant_id=${f.tenantId}`).toHaveLength(0);expect((await f.eventRow(a.id)).status).toBe('RETRY');
+    vi.mocked(f.provider.inspect).mockResolvedValue({...f.result,observation:{...f.result.observation,status:'SUCCEEDED',paid:true},confirmationUrl:null});f.advance(60000);
+    await f.webhookProcessor.run(a.id);await f.webhookProcessor.run(a.id);expect((await f.eventRow(a.id)).status).toBe('PROCESSED');
+    expect(await database.client`select id from payment_settlements where tenant_id=${f.tenantId}`).toHaveLength(1);
+    expect(await database.client`select id from usage_ledger where tenant_id=${f.tenantId} and type='PURCHASE'`).toHaveLength(2);
+    await expect(database.client`update webhook_events set external_id=${randomUUID()} where id=${a.id}`).rejects.toThrow();
+  });
+  it('recovers a lost create response after replay expiry using authenticated webhook lookup',async()=>{
+    const f=await webhookFixture();await f.submitted();f.advance(24*3600000);
+    const task=await f.claim();expect(await f.prepare(task.leaseToken!)).toBeNull();expect((await f.row()).status).toBe('RECONCILIATION');
+    vi.mocked(f.provider.inspect).mockResolvedValue({...f.result,observation:{...f.result.observation,status:'SUCCEEDED',paid:true},confirmationUrl:null});
+    const event=await f.receive();await f.webhookProcessor.run(event.id);expect((await f.eventRow(event.id)).status).toBe('PROCESSED');
+    expect(f.provider.create).not.toHaveBeenCalled();expect(await database.client`select id from payment_settlements where tenant_id=${f.tenantId}`).toHaveLength(1);
+  });
+  it('rejects wrong merchant, amount, external identity and never-sent orders',async()=>{
+    const f=await webhookFixture(),event=await f.receive();
+    const claimed=await f.repository.claim(event.id,f.merchant);expect(claimed).toBeTruthy();
+    for(const patch of [{merchantId:'123'},{amountMinor:1},{externalId:randomUUID()},{test:false},{}])await expect(f.repository.reconcile(event.id,claimed!.leaseToken!,{...f.result.observation,...patch},null)).rejects.toThrow('CONFLICT');
+    expect(await database.client`select id from payments where tenant_id=${f.tenantId}`).toHaveLength(0);
+  });
+  it('waits for an active checkout lease and fences stale webhook workers',async()=>{
+    const f=await webhookFixture(),task=await f.claim();await f.prepare(task.leaseToken!);const event=await f.receive();
+    const first=await f.repository.claim(event.id,f.merchant);expect(await f.repository.claim(event.id,f.merchant)).toBeNull();
+    await expect(f.repository.reconcile(event.id,first!.leaseToken!,f.result.observation,null)).rejects.toThrow('CONFLICT');
+    f.advance(121000);const second=await f.repository.claim(event.id,f.merchant);
+    await expect(f.repository.finish(event.id,first!.leaseToken!,'PROCESSED')).rejects.toThrow('CONFLICT');
+    expect(await f.repository.reconcile(event.id,second!.leaseToken!,f.result.observation,null)).toEqual({tenantId:f.tenantId,orderId:f.order.id});
+  });
+  it('rearms a bounded unresolved receipt on redelivery without retaining forged order hints',async()=>{
+    const f=await webhookFixture(),event=await f.receive();await database.client`update webhook_events set attempt=24 where id=${event.id}`;
+    expect(await f.repository.claim(event.id,f.merchant)).toBeNull();expect((await f.eventRow(event.id)).status).toBe('RECONCILIATION');
+    await f.receive();expect((await f.eventRow(event.id)).status).toBe('RETRY');expect((await f.eventRow(event.id)).attempt).toBe(0);
+    const disabled=new PaymentWebhookService(f.repository,null);await expect(disabled.receive(f.notification,randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
+    await expect(f.receive({...f.notification,event:'refund.succeeded'})).rejects.toThrow();
+  });
+
 });

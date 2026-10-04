@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   DomainError, ProviderRequestError, createPaymentSchema, refundPaymentSchema, minorToRubles, rublesToMinor,
-  type PaymentProvider, type OperationContext, type PaymentMutationContext, type ProviderReference,
+  type PaymentLookupContext, type PaymentProvider, type OperationContext, type PaymentMutationContext, type ProviderReference,
   type CreatePayment, type PaymentResult, type RefundPayment, type RefundResult,
 } from '@contentos/types';
 
@@ -19,6 +19,7 @@ const refundSchema = z.object({ id: externalId, payment_id: externalId, amount: 
 const configSchema = z.object({ shopId: z.string().regex(/^\d{1,32}$/), secretKey: z.string().min(1).max(512).regex(/^[^\s:]+$/), test: z.boolean(), returnOrigin: z.url() }).strict();
 export type YooKassaConfig = z.infer<typeof configSchema>;
 const statuses = { pending: 'PENDING', waiting_for_capture: 'WAITING_CAPTURE', succeeded: 'SUCCEEDED', canceled: 'CANCELED' } as const;
+type RequestContext = PaymentLookupContext & Partial<Pick<OperationContext, 'internalId' | 'tenantId' | 'idempotencyKey'>>;
 const replayWindowMs = 23 * 60 * 60 * 1000;
 
 /** Single-attempt transport. Retry timing and immutable request storage belong to the durable worker. */
@@ -32,7 +33,7 @@ export class YooKassaPaymentProvider implements PaymentProvider {
     if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new DomainError('CONFIGURATION_REQUIRED', 503);
     this.config = { ...parsed.data, returnOrigin: origin.origin };
   }
-  private reference(id: string, context: OperationContext, metadata: Record<string, unknown> = {}): ProviderReference {
+  private reference(id: string, context: Pick<OperationContext, 'internalId'>, metadata: Record<string, unknown> = {}): ProviderReference {
     return { provider: this.name, externalId: id, internalId: context.internalId, metadata: { merchantId: this.config.shopId, test: this.config.test, ...metadata } };
   }
   private checkReference(reference: ProviderReference, context?: OperationContext) {
@@ -50,7 +51,7 @@ export class YooKassaPaymentProvider implements PaymentProvider {
       items: [{ description: input.description, quantity: '1.000', amount: { value: minorToRubles(input.amountMinor), currency: input.currency }, vat_code: input.receipt.vatCode, payment_mode: input.receipt.mode, payment_subject: input.receipt.subject, measure: 'piece' }],
     };
   }
-  private parsePayment(raw: unknown, context: OperationContext, expectedId?: string): PaymentResult {
+  private parsePayment(raw: unknown, context: Pick<OperationContext, 'internalId'>, expectedId?: string): PaymentResult {
     const payment = paymentSchema.parse(raw);
     if (payment.recipient.account_id !== this.config.shopId || payment.test !== this.config.test || payment.metadata.order_id !== context.internalId || (expectedId && payment.id !== expectedId)) throw new Error('PAYMENT_IDENTITY_MISMATCH');
     if (payment.status === 'succeeded' && !payment.paid) throw new Error('PAYMENT_STATE_MISMATCH');
@@ -68,13 +69,13 @@ export class YooKassaPaymentProvider implements PaymentProvider {
       receiptStatus: payment.receipt_registration ? statuses[payment.receipt_registration] : null,
     };
   }
-  private async request<T>(path: string, method: 'GET' | 'POST', context: OperationContext, parse: (raw: unknown) => T, body?: unknown): Promise<T> {
-    if (![context.internalId, context.tenantId, context.correlationId].every(value => z.uuid().safeParse(value).success)) throw new DomainError('INVALID_INPUT');
+  private async request<T>(path: string, method: 'GET' | 'POST', context: RequestContext, parse: (raw: unknown) => T, body?: unknown): Promise<T> {
+    if (![context.correlationId, ...[context.internalId, context.tenantId].filter(value => value !== undefined)].every(value => z.uuid().safeParse(value).success) || (method === 'POST' && (!context.internalId || !context.tenantId || !context.idempotencyKey))) throw new DomainError('INVALID_INPUT');
     if (context.signal.aborted) throw new ProviderRequestError('PROVIDER_UNAVAILABLE', 503, false);
     const started = Date.now(); let status = 0;
     try {
       const response = await this.transport(`https://api.yookassa.ru/v3/${path}`, {
-        method, headers: { Authorization: `Basic ${Buffer.from(`${this.config.shopId}:${this.config.secretKey}`).toString('base64')}`, 'Content-Type': 'application/json', ...(method === 'POST' ? { 'Idempotence-Key': context.idempotencyKey } : {}) },
+        method, headers: { Authorization: `Basic ${Buffer.from(`${this.config.shopId}:${this.config.secretKey}`).toString('base64')}`, 'Content-Type': 'application/json', ...(method === 'POST' ? { 'Idempotence-Key': context.idempotencyKey! } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         redirect: 'error', signal: AbortSignal.any([context.signal, AbortSignal.timeout(30000)]),
       });
@@ -105,6 +106,13 @@ export class YooKassaPaymentProvider implements PaymentProvider {
       if (result.observation.amountMinor !== input.amountMinor || result.observation.currency !== input.currency || (input.mode === 'CHECKOUT' && result.observation.status === 'PENDING' && !result.confirmationUrl)) throw new Error('PAYMENT_RESPONSE_MISMATCH');
       return result;
     }, { amount: { value: minorToRubles(input.amountMinor), currency: input.currency }, capture: true, description: input.description, metadata: { order_id: context.internalId }, receipt: this.receipt(input), ...(input.mode === 'CHECKOUT' ? { confirmation: { type: 'redirect', return_url: input.returnUrl }, save_payment_method: input.saveMethod } : { payment_method_id: input.paymentMethodId }) });
+  }
+  async inspect(id: string, context: PaymentLookupContext): Promise<PaymentResult> {
+    if (!externalId.safeParse(id).success) throw new DomainError('INVALID_INPUT');
+    return this.request(`payments/${id}`, 'GET', context, raw => {
+      const payment = paymentSchema.parse(raw);
+      return this.parsePayment(payment, { internalId: payment.metadata.order_id }, id);
+    });
   }
   async get(reference: ProviderReference, context: OperationContext): Promise<PaymentResult> {
     this.checkReference(reference, context);

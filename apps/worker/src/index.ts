@@ -2,8 +2,8 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
 import { paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
@@ -26,8 +26,10 @@ const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRe
 const paymentRepository = new PaymentTaskRepository(database.db);
 const paymentProvider = paymentsFromEnvironment(env);
 const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env));
+const paymentWebhookRepository=new PaymentWebhookRepository(database.db);
+const paymentWebhookProcessor=new PaymentWebhookProcessor(paymentWebhookRepository,new BillingRepository(database.db),paymentProvider,paymentProvider&&env.YOOKASSA_SHOP_ID?{provider:paymentProvider.name,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'}:null,credentialVaultFromEnvironment(env));
 const paymentQueue = new Queue('contentos-payments', { connection });
-const paymentWorker = new Worker<{tenantId:string;id:string}>('contentos-payments', delivery => paymentProcessor.run(delivery.data.tenantId, delivery.data.id), { connection, concurrency: 2 });
+const paymentWorker = new Worker<{tenantId:string;id:string}>('contentos-payments', delivery => delivery.name==='webhook'?paymentWebhookProcessor.run(delivery.data.id):paymentProcessor.run(delivery.data.tenantId, delivery.data.id), { connection, concurrency: 2 });
 paymentWorker.on('error', () => console.error(JSON.stringify({ event: 'payment_worker_error', code: 'QUEUE_UNAVAILABLE' })));
 const analyticsQueue=new Queue('contentos-analytics',{connection});
 const analyticsWorker=new Worker<{tenantId:string;id:string}>('contentos-analytics',delivery=>channelAnalyticsProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
@@ -72,6 +74,10 @@ async function dispatch() {
   if (dispatching) return;
   dispatching = true;
   try {
+    if (paymentProvider) for(const event of await paymentWebhookRepository.due()){
+      await paymentQueue.add('webhook',{id:event.id},{jobId:`webhook-${event.id}`,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
+      await paymentWebhookRepository.dispatched(event.id);
+    }
     if (paymentProvider) for (const task of await paymentRepository.dispatchable()) {
       await paymentQueue.add('payment', task, { jobId: task.id, attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: true });
       await paymentRepository.dispatched(task.tenantId, task.id);

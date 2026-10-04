@@ -19,6 +19,14 @@ describe('YooKassa server adapter', () => {
     expect(paymentsFromEnvironment(configured)?.name).toBe('yookassa');
     expect(() => paymentsFromEnvironment({ ...configured, NODE_ENV: 'production' })).toThrow('CONFIGURATION_REQUIRED');
   });
+  it('discovers the internal order only from authenticated payment lookup', async () => {
+    const ctx=context(), body=response(ctx), request=vi.fn<typeof fetch>(async()=>Response.json(body));
+    const provider=new YooKassaPaymentProvider(config,request);
+    const result=await provider.inspect(paymentId,{correlationId:ctx.correlationId,signal:ctx.signal});
+    expect(result.observation.internalId).toBe(ctx.internalId);expect(result.reference.metadata).toMatchObject({merchantId:config.shopId,test:true});
+    expect(request.mock.calls[0]![1]!.method).toBe('GET');
+    await expect(provider.inspect('../../secrets',{correlationId:ctx.correlationId,signal:ctx.signal})).rejects.toThrow('INVALID_INPUT');
+  });
   it('does not send a pre-aborted operation or expose its abort reason', async () => {
     const controller = new AbortController(); controller.abort(new Error(config.secretKey));
     const request = vi.fn<typeof fetch>();

@@ -27,3 +27,4 @@ export * from './repositories/performance';
 export * from './repositories/billing';
 export * from './repositories/renewal';
 export * from './repositories/payment-tasks';
+export * from './repositories/payment-webhooks';

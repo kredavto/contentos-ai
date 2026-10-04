@@ -113,3 +113,11 @@ export const renewalAcceptanceSchema = z.object({
 export const renewalCancellationSchema = z.object({ expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.uuid() }).strict();
 export type RenewalAcceptance = z.infer<typeof renewalAcceptanceSchema>;
 export type RenewalCancellation = z.infer<typeof renewalCancellationSchema>;
+
+/** Retain routing hints only. Status, metadata, card data and amounts from the body are untrusted. */
+export const paymentNotificationSchema = z.object({
+  type: z.literal('notification'),
+  event: z.enum(['payment.succeeded', 'payment.canceled', 'payment.waiting_for_capture']),
+  object: z.object({ id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i).transform(value => value.toLowerCase()) }),
+});
+export type PaymentNotification = z.infer<typeof paymentNotificationSchema>;

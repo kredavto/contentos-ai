@@ -61,8 +61,10 @@ export type MetricName = 'views' | 'impressions' | 'reach' | 'likes' | 'comments
 export interface AnalyticsProvider {
   fetch(reference: ProviderReference, credential: string, context: OperationContext): Promise<{ metrics: Partial<Record<MetricName, number | null>>; observedAt: string; raw: unknown }>;
 }
+export type PaymentLookupContext = Pick<OperationContext, 'correlationId' | 'signal'>;
 export interface PaymentProvider {
   readonly name: string;
+  inspect(externalId: string, context: PaymentLookupContext): Promise<import('./payments').PaymentResult>;
   create(input: import('./payments').CreatePayment, context: import('./payments').PaymentMutationContext): Promise<import('./payments').PaymentResult>;
   get(reference: ProviderReference, context: OperationContext): Promise<import('./payments').PaymentResult>;
   refund(reference: ProviderReference, input: import('./payments').RefundPayment, context: import('./payments').PaymentMutationContext): Promise<import('./payments').RefundResult>;

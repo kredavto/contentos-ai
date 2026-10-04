@@ -21,7 +21,7 @@ export class PaymentProcessor {
       let result: PaymentResult;
       try {
         result = operation.mode === 'READ'
-          ? await this.provider.get({ provider: operation.order.provider, externalId: operation.externalId, internalId: id, metadata: {} }, context)
+          ? await this.provider.get({ provider: operation.order.provider, externalId: operation.externalId, internalId: id, metadata: { merchantId: operation.order.merchantId, test: operation.order.test } }, context)
           : await this.provider.create(operation.order.input, { ...context, idempotencyKey: operation.idempotencyKey, firstSubmittedAt: operation.firstSubmittedAt.toISOString() });
       } catch (error) {
         await this.tasks.fail(tenantId, id, token, operation.mode === 'CREATE' && error instanceof ProviderRequestError && error.definitiveRejection);
