@@ -13,7 +13,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Identity, Brand Brain and rate-limit schema: 24 tables with three SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP is the only implemented external adapter so far.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI execution has not yet been verified.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
 
 ## Verification evidence
 
@@ -49,6 +49,12 @@ Implement immutable ledger + durable jobs/outbox and an actual worker, then stra
 
 ## Local environment notes
 
-Bundled Node: /Users/urijlebedinskij/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node. Add its directory to PATH for tools. Bundled pnpm is 11.19.0; invoke `pnpm dlx pnpm@10.30.3` for project-pinned installs. Development web server started with test PostgreSQL 16 on localhost:55432 and SMTP test sink on 1026 (sink runs only during E2E). For ordinary interactive use, start with .env.example values (PostgreSQL 17 on 5432, Mailpit on 1025).
+Bundled Node: /Users/urijlebedinskij/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node. Add its directory to PATH for tools. Bundled pnpm is 11.19.0; invoke `pnpm dlx pnpm@10.30.3` for project-pinned installs. Task-owned development web server was stopped after tests. PostgreSQL 16 test container remains on 55432; the main Compose stack uses PostgreSQL 17 on 5432 and Mailpit on 1025. Application development uses port 3100; isolated E2E uses 3187 and a test SMTP sink on 1026/8026. Port 3000 is used by another local project and must not be stopped or reused.
 
 Docker public pulls initially hung in docker-credential-desktop. Task-owned hanging helpers were stopped; public pulls succeeded using an isolated empty Docker CLI config at /tmp/contentos-docker-public with the existing Docker socket. User credential configuration was not changed. Compose stack subsequently started normally with cached images.
+
+## Repository and dependency follow-up
+
+- Full source pushed to GitHub main (97f41ba); CI run https://github.com/kredavto/contentos-ai/actions/runs/37195435512 passed every required step.
+- CLI OAuth lacks workflow scope. Connected GitHub connector has workflow permission: initial CI file was created through it, then local history merged and source pushed normally. Future workflow edits may need connector update_file followed by fetch/merge. No user credential settings changed.
+- Production dependency audit found vulnerabilities in initial Nodemailer 7. Upgraded to Nodemailer 10.0.14 (bundled types), confirmed `pnpm audit --prod`: no known vulnerabilities. SMTP registration/verification E2E re-passed in a fresh server against PostgreSQL 17 after upgrade; dedicated test port avoids unrelated projects. Final follow-up commit/push and CI pending.

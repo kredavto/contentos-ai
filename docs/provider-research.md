@@ -7,3 +7,5 @@
 - Drizzle transactions: https://orm.drizzle.team/docs/transactions. Applied and tested PostgreSQL transactions, row locks, concurrent consumption and compound ownership foreign keys.
 
 No OpenAI, HeyGen, social or payment adapter implemented yet. Their current official schemas must be verified before implementation.
+
+- Nodemailer release review: https://github.com/nodemailer/nodemailer/releases — upgraded to 10.0.14, removed obsolete separate type declarations, verified SMTP via E2E and a clean production dependency audit.

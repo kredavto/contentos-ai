@@ -11,9 +11,6 @@
   },
   "dependencies": {
     "@contentos/types": "workspace:*",
-    "nodemailer": "^7.0.13"
-  },
-  "devDependencies": {
-    "@types/nodemailer": "^7.0.11"
+    "nodemailer": "^10.0.14"
   }
 }

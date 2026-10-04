@@ -16,7 +16,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-Open http://localhost:3000. Register with a fictional address and read its confirmation email in [local Mailpit](http://localhost:8025). Passwords require 12–128 characters. After confirmation, sign in, create an organization/brand and complete onboarding. Each step can be saved and resumed. Brand Brain is stored as structured PostgreSQL rows. Current worker entry is scaffold-only; generation is not advertised as working.
+Open http://localhost:3100. Register with a fictional address and read its confirmation email in [local Mailpit](http://localhost:8025). Passwords require 12–128 characters. After confirmation, sign in, create an organization/brand and complete onboarding. Each step can be saved and resumed. Brand Brain is stored as structured PostgreSQL rows. Current worker entry is scaffold-only; generation is not advertised as working.
 
 ## Checks
 
@@ -38,7 +38,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-The integration suite runs when TEST_DATABASE_URL is present; otherwise it is explicitly skipped. Playwright requires it and starts a loopback SMTP sink (1026/8026) plus the web server. Stop any existing development server before running E2E. Use PLAYWRIGHT_CHANNEL=chrome for an installed Google Chrome. CI runs migrations, typecheck (including tests), lint, unit/integration tests, production build and E2E.
+The integration suite runs when TEST_DATABASE_URL is present; otherwise it is explicitly skipped. Playwright requires it and starts a loopback SMTP sink (1026/8026) plus the web server on port 3187. Stop any existing development server before running E2E. Use PLAYWRIGHT_CHANNEL=chrome for an installed Google Chrome. CI runs migrations, typecheck (including tests), lint, unit/integration tests, production build and E2E.
 
 ## Architecture
 
