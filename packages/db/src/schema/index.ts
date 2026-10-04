@@ -14,3 +14,4 @@ export * from './publishing';
 export * from './analytics';
 export * from './channel-analytics';
 export * from './performance';
+export * from './billing';

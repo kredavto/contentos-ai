@@ -1,0 +1,35 @@
+import { sql } from 'drizzle-orm';
+import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, unique, foreignKey, check, index } from 'drizzle-orm/pg-core';
+import { organizations, users } from './identity';
+import type { CreatePayment, PaymentObservation } from '@contentos/types';
+const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
+export const plans = pgTable('plans', {
+  id: uuid('id').primaryKey().defaultRandom(), code: text('code').notNull(), name: text('name').notNull(), enabled: boolean('enabled').notNull().default(false), createdAt: createdAt(),
+}, t => [unique('plan_code_uq').on(t.code), check('plan_code_valid', sql`${t.code} in ('FREE','START','CREATOR','EXPERT','AGENCY')`)]);
+export const planVersions = pgTable('plan_versions', {
+  id: uuid('id').primaryKey().defaultRandom(), planId: uuid('plan_id').notNull().references(() => plans.id), version: integer('version').notNull(),
+  amountMinor: integer('amount_minor').notNull(), currency: text('currency').notNull().default('RUB'), aiCredits: integer('ai_credits').notNull(), videoSeconds: integer('video_seconds').notNull(), createdAt: createdAt(),
+}, t => [unique('plan_version_uq').on(t.planId, t.version), check('plan_version_valid', sql`${t.version} > 0 and ${t.amountMinor} between 0 and 1000000000 and ${t.currency} = 'RUB' and ${t.aiCredits} between 0 and 1000000000 and ${t.videoSeconds} between 0 and 1000000000`)]);
+export const billingOrders = pgTable('billing_orders', {
+  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id), planVersionId: uuid('plan_version_id').notNull().references(() => planVersions.id),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id), kind: text('kind').notNull(), amountMinor: integer('amount_minor').notNull(), currency: text('currency').notNull(),
+  aiCredits: integer('ai_credits').notNull(), videoSeconds: integer('video_seconds').notNull(), provider: text('provider').notNull(), merchantId: text('merchant_id').notNull(), test: boolean('test').notNull(),
+  input: jsonb('input').$type<CreatePayment>().notNull(), inputHash: text('input_hash').notNull(), idempotencyKey: uuid('idempotency_key').notNull(), correlationId: uuid('correlation_id').notNull(), createdAt: createdAt(),
+}, t => [unique('billing_order_tenant_id_uq').on(t.tenantId, t.id), unique('billing_order_intent_uq').on(t.tenantId, t.idempotencyKey), index('billing_order_tenant_created_idx').on(t.tenantId, t.createdAt),
+  check('billing_order_kind_valid', sql`${t.kind} in ('START','RENEWAL','UPGRADE')`), check('billing_order_amount_valid', sql`${t.amountMinor} between 1 and 1000000000 and ${t.currency} = 'RUB' and ${t.aiCredits} between 0 and 1000000000 and ${t.videoSeconds} between 0 and 1000000000`),
+  check('billing_order_input_valid', sql`${t.input}->>'currency' = ${t.currency} and (${t.input}->>'amountMinor')::numeric = ${t.amountMinor}`),
+]);
+export const payments = pgTable('payments', {
+  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), orderId: uuid('order_id').notNull(), provider: text('provider').notNull(), merchantId: text('merchant_id').notNull(), test: boolean('test').notNull(),
+  externalId: text('external_id').notNull(), createdAt: createdAt(),
+}, t => [unique('payment_tenant_id_uq').on(t.tenantId, t.id), unique('payment_order_uq').on(t.tenantId, t.orderId), unique('payment_external_uq').on(t.provider, t.merchantId, t.test, t.externalId),
+  foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [billingOrders.tenantId, billingOrders.id] }),
+]);
+export const paymentSettlements = pgTable('payment_settlements', {
+  id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), orderId: uuid('order_id').notNull(), paymentId: uuid('payment_id').notNull(),
+  observation: jsonb('observation').$type<PaymentObservation>().notNull(), correlationId: uuid('correlation_id').notNull(), createdAt: createdAt(),
+}, t => [unique('payment_settlement_order_uq').on(t.tenantId, t.orderId), unique('payment_settlement_payment_uq').on(t.tenantId, t.paymentId),
+  foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [billingOrders.tenantId, billingOrders.id] }),
+  foreignKey({ columns: [t.tenantId, t.paymentId], foreignColumns: [payments.tenantId, payments.id] }),
+  check('payment_settlement_paid_valid', sql`${t.observation}->>'status' = 'SUCCEEDED' and ${t.observation}->>'paid' = 'true'`),
+]);
