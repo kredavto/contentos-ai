@@ -17,3 +17,4 @@ export * from './repositories/consent';
 export * from './repositories/media';
 export * from './repositories/avatars';
 export * from './repositories/voices';
+export * from './repositories/videos';

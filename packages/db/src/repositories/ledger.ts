@@ -34,14 +34,22 @@ export async function reserveInTransaction(tx: Transaction, tenantId: string, un
   await tx.insert(usageLedger).values({ tenantId, unit, amount, type: 'RESERVE', availableDelta: -amount, reservedDelta: amount, reservationId: reservation.id, idempotencyKey: `reserve:${reservation.id}`, correlationId });
   return reservation;
 }
-export async function settleInTransaction(tx: Transaction, tenantId: string, reservationId: string, outcome: 'CAPTURE' | 'RELEASE', correlationId: string) {
+export async function settleInTransaction(tx: Transaction, tenantId: string, reservationId: string, outcome: 'CAPTURE' | 'RELEASE', correlationId: string, capturedAmount?: number) {
   const [reservation] = await tx.select().from(usageReservations).where(and(eq(usageReservations.tenantId, tenantId), eq(usageReservations.id, reservationId))).for('update');
   if (!reservation) throw new DomainError('NOT_FOUND', 404);
+  const amount = outcome === 'CAPTURE' ? capturedAmount ?? reservation.amount : reservation.amount;
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > reservation.amount || (outcome === 'RELEASE' && capturedAmount !== undefined)) throw new DomainError('INVALID_INPUT');
   if (reservation.status !== 'HELD') {
     if (reservation.status !== (outcome === 'CAPTURE' ? 'CAPTURED' : 'RELEASED')) throw new DomainError('CONFLICT', 409);
+    const [settled] = await tx.select({amount:usageLedger.amount}).from(usageLedger).where(and(eq(usageLedger.tenantId,tenantId),eq(usageLedger.idempotencyKey,`settle:${reservationId}`)));
+    if (!settled || settled.amount !== amount) throw new DomainError('CONFLICT',409);
     return;
   }
-  await tx.insert(usageLedger).values({ tenantId, unit: reservation.unit, amount: reservation.amount, type: outcome, availableDelta: outcome === 'RELEASE' ? reservation.amount : 0, reservedDelta: -reservation.amount, reservationId, idempotencyKey: `settle:${reservationId}`, correlationId });
+  await tx.insert(usageLedger).values({ tenantId, unit: reservation.unit, amount, type: outcome, availableDelta: outcome === 'RELEASE' ? amount : 0, reservedDelta: -amount, reservationId, idempotencyKey: `settle:${reservationId}`, correlationId });
+  if (outcome === 'CAPTURE' && amount < reservation.amount) {
+    const remainder = reservation.amount - amount;
+    await tx.insert(usageLedger).values({tenantId,unit:reservation.unit,amount:remainder,type:'RELEASE',availableDelta:remainder,reservedDelta:-remainder,reservationId,idempotencyKey:`remainder:${reservationId}`,correlationId});
+  }
   await tx.update(usageReservations).set({ status: outcome === 'CAPTURE' ? 'CAPTURED' : 'RELEASED' }).where(eq(usageReservations.id, reservationId));
 }
 export class LedgerRepository {
@@ -60,9 +68,12 @@ export class LedgerRepository {
       // A unique user grant prevents farming free credits by creating organizations.
       const [policy] = await tx.select().from(usagePolicies).where(eq(usagePolicies.operation, 'TRIAL'));
       if (!policy) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+      const [videoPolicy] = await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,'TRIAL_VIDEO_SECONDS'));
+      if (!videoPolicy || videoPolicy.unit !== 'VIDEO_SECONDS') throw new DomainError('CONFIGURATION_REQUIRED',503);
       const [grant] = await tx.insert(trialGrants).values({ userId, tenantId }).onConflictDoNothing().returning();
       if (!grant) return { granted: false };
       await tx.insert(usageLedger).values({ tenantId, unit: policy.unit, amount: policy.amount, type: 'GRANT', availableDelta: policy.amount, reservedDelta: 0, idempotencyKey: `trial:${userId}`, correlationId });
+      await tx.insert(usageLedger).values({tenantId,unit:videoPolicy.unit,amount:videoPolicy.amount,type:'GRANT',availableDelta:videoPolicy.amount,reservedDelta:0,idempotencyKey:`trial-video:${grant.id}`,correlationId});
       await tx.insert(auditLogs).values({ tenantId, userId, action: 'TRIAL_CREDITS_GRANTED', resourceId: grant.id, correlationId, metadata: { amount: policy.amount, unit: policy.unit } });
       return { granted: true };
     });
@@ -82,7 +93,7 @@ export class LedgerRepository {
   async reserve(tenantId: string, unit: UsageUnit, amount: number, key: string, correlationId: string) {
     return this.db.transaction(async tx => { await lockTenant(tx, tenantId); return reserveInTransaction(tx, tenantId, unit, amount, key, correlationId); });
   }
-  async settle(tenantId: string, reservationId: string, outcome: 'CAPTURE' | 'RELEASE', correlationId: string) {
-    return this.db.transaction(async tx => { await lockTenant(tx, tenantId); await settleInTransaction(tx, tenantId, reservationId, outcome, correlationId); });
+  async settle(tenantId: string, reservationId: string, outcome: 'CAPTURE' | 'RELEASE', correlationId: string, capturedAmount?: number) {
+    return this.db.transaction(async tx => { await lockTenant(tx, tenantId); await settleInTransaction(tx, tenantId, reservationId, outcome, correlationId, capturedAmount); });
   }
 }

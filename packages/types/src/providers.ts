@@ -38,12 +38,13 @@ export interface VoiceCatalogProvider {
   listPublicVoicePage(cursor:string|undefined,context:OperationContext):Promise<{voices:Array<{reference:ProviderReference;name:string;language:string|null;previewUrl:string|null}>;nextCursor:string|null}>;
 }
 export interface VideoProvider {
+  download(url:string,context:OperationContext):Promise<Uint8Array>;
   submit(input: { script: string; avatar: ProviderReference; voice: ProviderReference; width: number; height: number }, context: OperationContext): Promise<ProviderReference>;
   status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; downloadUrl?: string; errorCode?: string }>;
 }
 export interface CaptionSegment { start: number; end: number; text: string }
 export interface VideoProcessingProvider {
-  process(input:{bytes:Uint8Array;options:import('./video-processing').VideoProcessingOptions},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
+  process(input:{bytes:Uint8Array;options:import('./video-processing').VideoProcessingOptions;onStage?:(stage:'CAPTIONS_GENERATING'|'BROLL_PROCESSING'|'COVER_GENERATING'|'QC',details:Record<string,unknown>)=>Promise<void>},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
 }
 export interface CaptionProvider {
   transcribe(input: { bytes: Uint8Array; mimeType: string; language: string }, context: OperationContext): Promise<CaptionSegment[]>;

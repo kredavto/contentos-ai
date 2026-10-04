@@ -25,7 +25,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 
 ## Consent and provider foundation
 
-- Versioned, subject-scoped consent center: explicit acceptance, immutable evidence, idempotency, tenant and role checks, withdrawal of duplicate active grants, audit history and reload persistence. Avatar execution enforces original consent evidence; video execution remains pending.
+- Versioned, subject-scoped consent center: explicit acceptance, immutable evidence, idempotency, tenant and role checks, withdrawal of duplicate active grants, audit history and reload persistence. Avatar execution enforces original consent evidence; video execution enforces the same evidence and the approved script version.
 - Official HeyGen v3 adapter: photo avatars/looks, public catalogs, voices, video submission/status and private avatar deletion. Bounded requests, validated responses, safe errors and idempotency propagation; contract-tested without paid requests.
 - S3 adapter: tenant-prefixed private objects, bounded transfer sizes, MIME restrictions and short-lived signed downloads; SDK tested against a local HTTP fixture. Now wired to the private photo library.
 - Authorized HeyGen account verified through the connected plugin. User selected their private avatar and a short test was submitted through the HeyGen plugin; provider accepted it and returned processing status. This does not verify the application server adapter end to end. The separate server API key is unavailable until the account completes API funding; no payment or key creation was performed.
@@ -41,7 +41,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Tenant/brand-owned private avatars and looks, consent-bound source selection, configurable credit reservation, outbox jobs and persistent worker processing. Additional looks share a verified owned group.
 - Stable HeyGen keys with a conservative 23-hour replay window, submission markers, three consecutive-error budget, separate normal status polling and explicit reconciliation state. Late references are retained for cancellation cleanup; unknown operations never automatically regenerate under a new key.
 - Russian Avatar tab, readiness/progress, explicit development DEMO, manager resume and group deletion. Production mock forbidden; missing server credentials remain CONFIGURATION_REQUIRED. See [avatar workflow](avatar-jobs.md).
-- Expired unknown submissions still need an operator investigation workflow; voice profiles, video generation and provider configuration UI remain pending.
+- Expired unknown submissions still need an operator investigation workflow; private voice cloning/import and provider configuration UI remain pending.
 
 ## Public voice selection
 
@@ -53,7 +53,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 
 - Real worker-only FFmpeg processor: MP4 probing, bounded input/output, three orientations, 720p/1080p, crop/contain, H.264/AAC, audio normalization, metadata removal, Unicode subtitle burn-in and separate JPEG cover frame. No watermark is added.
 - Local paths/filter arguments are generated internally; shell/network inputs are disallowed, MOV external references disabled, subprocess environment excludes credentials, timeouts/cancellation and temporary cleanup are enforced. Final codecs/dimensions/duration are checked.
-- Six real media tests passed with FFmpeg/FFprobe 9.0.2; CI now installs FFmpeg before tests. See [processing boundaries](video-processing.md). This is not yet connected to durable video projects or a user-facing render workflow.
+- Six real media tests passed with FFmpeg/FFprobe 9.0.2; CI now installs FFmpeg before tests. See [processing boundaries](video-processing.md). This is now connected to durable video projects and the Video Studio workflow.
 
 ## Verification evidence
 
@@ -68,10 +68,10 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 ## Full objective still outstanding
 
 - Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
-- Extend the implemented text-job engine to video, publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
+- Extend the implemented text/avatar/video job engine to publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
 - Official documentation research and real adapters for captions/media, YooKassa, YouTube/TikTok/Meta/VK/Telegram; production configuration and live verification of HeyGen/S3 remain pending.
 - Remaining AI workflows beyond strategy/ideas/scripts; content calendar with drag/drop and downstream content transitions.
-- Voice profiles, video consent enforcement, video state machine, FFmpeg processing, captions editor, cover studio, B-roll and video/audio media library.
+- Private voice cloning/import, captions editor, cover studio, B-roll and general video/audio media library; generated-video deletion and operator reconciliation tools.
 - Social OAuth token encryption/refresh, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
 - AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
 - Admin/support/audit UI, notifications, privacy export/deletion workflows, encryption/rotation, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
@@ -85,7 +85,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with consent-bound avatar/video jobs and video state machine/FFmpeg. Research official APIs first. Keep the complete original scope intact.
+Continue with video lifecycle/deletion and reconciliation, then captions/Cover Studio and content calendar/publishing. Research official APIs first. Keep the complete original scope intact.
 
 ## Local environment notes
 
@@ -105,4 +105,15 @@ Docker public pulls initially hung in docker-credential-desktop. Task-owned hang
 
 - Avatar Studio commit 0ae5c7b passed remote CI run 37200140389.
 
-- Public voice selection passed both browser tests (1.6 minutes), including persistence after reopening Avatar Studio; mobile layout inspected. FFmpeg/FFprobe 9.0.2 binaries from the macOS distributor linked by ffmpeg.org are available locally at /tmp/contentos-ffmpeg/ffmpeg and /tmp/contentos-ffmpeg/ffprobe; both version commands succeeded. They are not yet integrated into the worker or CI.
+- Public voice selection passed both browser tests (1.6 minutes), including persistence after reopening Avatar Studio; mobile layout inspected. FFmpeg/FFprobe 9.0.2 binaries from the macOS distributor linked by ffmpeg.org are available locally at /tmp/contentos-ffmpeg/ffmpeg and /tmp/contentos-ffmpeg/ffprobe; both version commands succeeded. They are integrated into the worker; CI installs distribution FFmpeg before media tests.
+
+
+## Basic Video Factory
+
+- Durable GENERATE_VIDEO jobs snapshot the approved script version, avatar/voice references and exact original consent evidence. Every ordered stage transition is append-only. Unknown submissions replay only with the same key inside the documented window; exhausted uncertainty holds the reservation for reconciliation.
+- The persistent worker downloads provider MP4 through a restricted HTTPS/public-IP boundary, stores the original, runs FFmpeg and stores the final MP4 and JPEG cover privately. A known remote render is reused on processing retries.
+- VIDEO_SECONDS reserve twice the planned duration, capped by the database policy; completion captures ceil(actual duration) and atomically releases the remainder. Database triggers prevent duplicate settlement and reservation reopening. The one-time starter grant includes configurable video seconds. Migrations through 0010 applied locally.
+- Video Studio supports approved script/avatar/voice selection, three orientations, 720p/1080p, crop/contain, private playback, approval and stage history. Disabled captions/B-roll are explicitly identified. Production credentials are still unconfigured; no duplicate paid HeyGen test was sent.
+- Verification: 77 unit/integration/media tests, typecheck and lint passed; both Playwright scenarios passed (2.2 minutes), including real FFmpeg, S3 fixture transport, playback metadata and approval. Mobile screenshot reviewed, with no horizontal overflow. Four additional transport-boundary tests passed, as did the production build and final lint/typecheck.
+
+Still pending: video deletion/retention, operator reconciliation controls, auto/editable captions, cover design, background music, B-roll, intro/outro, optional watermark, calendar/publishing and the remaining full SaaS scope above.

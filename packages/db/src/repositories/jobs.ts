@@ -54,7 +54,7 @@ export class JobRepository {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId);
       const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
-      if (!job || job.type === 'CREATE_AVATAR' || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
+      if (!job || (job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO') || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
       let permitted = true;
       try { await assertMembership(tx,job.requestedBy,tenantId,job.type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
       if (!permitted || job.attempt >= job.maxAttempts) {
@@ -84,7 +84,7 @@ export class JobRepository {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId); const job = await ownedJob(tx,tenantId,id,leaseToken);
       await assertMembership(tx,job.requestedBy,tenantId,job.type === 'GENERATE_STRATEGY' ? 'strategy' : 'generate');
-      if (job.type === 'CREATE_AVATAR') throw new DomainError('INVALID_INPUT');
+      if ((job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO')) throw new DomainError('INVALID_INPUT');
       const input = generationInputSchema.parse(job.input);
       let result: {internalId:string;version:number};
       if (job.type === 'GENERATE_STRATEGY') {

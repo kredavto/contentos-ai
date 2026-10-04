@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, integer, timestamp, jsonb, unique, index, foreignKey, check, bigint } from 'drizzle-orm/pg-core';
 import { organizations, users, brands } from './identity';
-import type { GenerationInput, GenerationOutput, JobState, UsageUnit, JobType, AvatarJobInput } from '@contentos/types';
+import type { GenerationInput, GenerationOutput, JobState, UsageUnit, JobType, AvatarJobInput, VideoJobInput } from '@contentos/types';
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 export const usagePolicies = pgTable('usage_policies', {
   operation: text('operation').primaryKey(), unit: text('unit').$type<UsageUnit>().notNull(), amount: integer('amount').notNull(),
@@ -35,7 +35,7 @@ export const trialGrants = pgTable('trial_grants', {
 export const jobs = pgTable('jobs', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id), brandId: uuid('brand_id').notNull(),
   requestedBy: uuid('requested_by').notNull().references(() => users.id), type: text('type').$type<JobType>().notNull(), status: text('status').$type<JobState>().notNull().default('QUEUED'),
-  input: jsonb('input').$type<GenerationInput | AvatarJobInput>().notNull(), inputHash: text('input_hash').notNull(), idempotencyKey: uuid('idempotency_key').notNull(),
+  input: jsonb('input').$type<GenerationInput | AvatarJobInput | VideoJobInput>().notNull(), inputHash: text('input_hash').notNull(), idempotencyKey: uuid('idempotency_key').notNull(),
   reservationId: uuid('reservation_id').notNull(), attempt: integer('attempt').notNull().default(0), maxAttempts: integer('max_attempts').notNull().default(3), consecutiveFailures: integer('consecutive_failures').notNull().default(0), pollCount: integer('poll_count').notNull().default(0),
   provider: text('provider').notNull(), model: text('model').notNull(), externalJobId: text('external_job_id'), progress: integer('progress').notNull().default(0),
   errorCode: text('error_code'), errorMessage: text('error_message'), leaseToken: uuid('lease_token'), leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),

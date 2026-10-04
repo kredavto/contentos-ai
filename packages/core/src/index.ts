@@ -8,3 +8,4 @@ export * from './consent';
 export * from './media';
 export * from './avatars';
 export * from './voices';
+export * from './videos';

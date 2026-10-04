@@ -10,6 +10,11 @@ const serverSchema = z.object({
   OPENAI_MODEL: z.string().min(1).optional(),
   AVATAR_PROVIDER: z.enum(['disabled', 'heygen', 'mock']).default('disabled'),
   AVATAR_GENERATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  VIDEO_PROVIDER: z.enum(['disabled','heygen','mock']).default('disabled'),
+  VIDEO_GENERATION_ENABLED: z.enum(['true','false']).default('false'),
+  FFMPEG_PATH: z.string().min(1).optional(),
+  FFPROBE_PATH: z.string().min(1).optional(),
+  MOCK_VIDEO_FILE: z.string().min(1).optional(),
   HEYGEN_API_KEY: z.string().min(1).optional(),
   STORAGE_PROVIDER: z.enum(['disabled', 's3']).default('disabled'),
   S3_REGION: z.string().min(1).optional(),
@@ -23,6 +28,7 @@ const serverSchema = z.object({
   SMTP_URL: z.url().optional(),
   EMAIL_FROM: z.email().optional(),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production' && env.VIDEO_PROVIDER === 'mock') ctx.addIssue({code:'custom',path:['VIDEO_PROVIDER'],message:'Mock video is forbidden in production'});
   if (env.NODE_ENV === 'production' && env.AVATAR_PROVIDER === 'mock') ctx.addIssue({ code: 'custom', path: ['AVATAR_PROVIDER'], message: 'Mock avatars are forbidden in production' });
   if (env.NODE_ENV === 'production' && env.AI_PROVIDER === 'mock') ctx.addIssue({ code: 'custom', path: ['AI_PROVIDER'], message: 'Mock AI is forbidden in production' });
   if (env.NODE_ENV === 'production' && !env.APP_URL.startsWith('https://')) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'Production origin must use HTTPS' });

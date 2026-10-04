@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {downloadProviderVideo} from './video-download';
 import { DomainError, ProviderRequestError, type AvatarProvider, type VideoProvider, type OperationContext, type ProviderReference } from '@contentos/types';
 const externalId = z.string().min(1).max(255);
 const httpsUrl = z.url().refine(value=>new URL(value).protocol === 'https:');
@@ -68,6 +69,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 }
 export class HeyGenVideoProvider implements VideoProvider {
+  download(url:string,context:OperationContext){return downloadProviderVideo(url,context);}
   constructor(private readonly client:HeyGenClient) {}
   async listPublicVoicePage(cursor:string|undefined,context:OperationContext) {
     if(cursor!==undefined)z.string().min(1).max(2048).parse(cursor);

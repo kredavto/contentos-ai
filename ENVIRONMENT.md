@@ -19,3 +19,11 @@ Local: copy `.env.example` to `.env`, choose `AI_PROVIDER=mock` for a no-cost wa
 ## Photo storage
 
 See [private media configuration](docs/media-storage.md). Both web and worker require the same private S3 bucket settings. `.env.example` lists the complete allowlist. Storage is disabled by default; no cloud credentials are bundled.
+
+## Video worker
+
+Set `VIDEO_PROVIDER=heygen`, `VIDEO_GENERATION_ENABLED=true`, `HEYGEN_API_KEY` and private S3 settings on web and worker. Install FFmpeg/FFprobe on the persistent worker and set absolute `FFMPEG_PATH`/`FFPROBE_PATH`; the BFF never runs those binaries. Keep the worker healthy before enabling generation. A missing executable fails the job with CONFIGURATION_REQUIRED; no synthetic production result is returned.
+
+For local/CI only, `VIDEO_PROVIDER=mock` plus an absolute `MOCK_VIDEO_FILE` uses a fixture render and real FFmpeg post-processing. Production rejects mock mode. Playwright creates a one-second synthetic MP4 via FFmpeg and runs the complete queue/storage/approval flow without a paid API call.
+
+Starter allowance includes the database-configured TRIAL_VIDEO_SECONDS grant, once per owner account. GENERATE_VIDEO is the maximum reservation policy (initially 180 seconds). A request reserves twice the planned script duration, capped by that policy. Final duration is rounded upward to seconds; the unused reservation is released atomically. Oversized renders fail without capture.

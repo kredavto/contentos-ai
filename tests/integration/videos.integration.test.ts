@@ -1,0 +1,110 @@
+import {randomUUID} from 'node:crypto';
+import sharp from 'sharp';
+import {beforeAll,afterAll,describe,it,expect} from 'vitest';
+import {createDatabase,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {AvatarService,AvatarProcessor} from '../../packages/core/src/avatars';
+import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
+import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
+import {MediaService} from '../../packages/core/src/media';
+import {MockAvatarProvider} from '../../packages/providers/src/avatar';
+import {DomainError,ProviderRequestError,videoStages,type VideoProvider,type VideoProcessingProvider,type StorageProvider} from '../../packages/types/src/index';
+const url=process.env.TEST_DATABASE_URL;
+describe.skipIf(!url)('durable consent-bound video factory',()=>{
+  if(url&&!new URL(url).pathname.endsWith('_test'))throw new Error('Dedicated test database required');
+  const database=createDatabase(url??'postgresql://localhost/unused_test');
+  const tenantId=randomUUID(),userId=randomUUID(),viewerId=randomUUID(),workspaceId=randomUUID(),brandId=randomUUID(),correlationId=randomUUID();
+  const repo=new VideoRepository(database.db),ledger=new LedgerRepository(database.db),consent=new ConsentService(new ConsentRepository(database.db));
+  const objects=new Map<string,Uint8Array>();let lookId='',consentId='',submissions=0;
+  const storage:StorageProvider={put:async(key,bytes)=>{objects.set(key,bytes);},delete:async key=>{objects.delete(key);},signedDownload:async key=>`https://storage.example.test/${key}`};
+  const provider:VideoProvider={submit:async(_input,context)=>{submissions++;return {provider:'mock-avatar',internalId:context.internalId,externalId:`test:${context.internalId}`,metadata:{}};},status:async()=>({status:'READY',downloadUrl:'mock://fixture'}),download:async()=>Buffer.from('original-fixture')};
+  const processing:VideoProcessingProvider={process:async input=>{for(const stage of ['CAPTIONS_GENERATING','BROLL_PROCESSING','COVER_GENERATING','QC'] as const)await input.onStage?.(stage,{fixture:true});return {bytes:Buffer.from('final-fixture'),thumbnail:Buffer.from('cover-fixture'),durationSeconds:11.2,width:720,height:1280};}};
+  const service=new VideoService(repo,{name:'mock-avatar',provider},storage,true);
+  const processor=new VideoProcessor(database.db,{name:'mock-avatar',provider},storage,processing,true);
+  const due=async(id:string)=>{await database.client`update jobs set next_attempt_at=now()-interval '1 second' where id=${id}`;};
+  const row=async(id:string)=>(await database.client`select * from jobs where id=${id}`)[0]!;
+  async function request(){
+    const scriptId=randomUUID(),contentId=randomUUID();
+    await database.client`insert into content_items(id,tenant_id,brand_id,title,type,status) values(${contentId},${tenantId},${brandId},'Fixture','SHORT_VIDEO','APPROVED_SCRIPT')`;
+    await database.client`insert into scripts(id,tenant_id,brand_id,content_item_id,current_version,approved_version,approved_by,platform,duration) values(${scriptId},${tenantId},${brandId},${contentId},1,1,${userId},'YOUTUBE',30)`;
+    await database.client`insert into script_versions(tenant_id,script_id,version,content,created_by) values(${tenantId},${scriptId},1,${JSON.stringify({hook:'Hook',context:'Context',core:'Core',proof:'Proof',cta:'CTA',factCheckNotes:[]})}::jsonb,${userId})`;
+    return {scriptId,scriptVersion:1,lookId,orientation:'9:16' as const,resolution:'720p' as const,fit:'crop' as const,idempotencyKey:randomUUID()};
+  }
+  beforeAll(async()=>{
+    await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${userId},${`video-${userId}@example.test`},'unusable','Owner',now()),(${viewerId},${`video-${viewerId}@example.test`},'unusable','Viewer',now())`;
+    await database.client`insert into organizations(id,name) values(${tenantId},'Video tests')`;
+    await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenantId},${userId},'OWNER'),(${tenantId},${viewerId},'VIEWER')`;
+    await database.client`insert into workspaces(id,tenant_id,name) values(${workspaceId},${tenantId},'Fixture')`;
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${brandId},${tenantId},${workspaceId},'Fixture')`;
+    await ledger.adjust(tenantId,'AI_CREDITS',100,randomUUID(),correlationId);await ledger.adjust(tenantId,'VIDEO_SECONDS',2000,randomUUID(),correlationId);
+    const subjectId=(await consent.createSubject(userId,tenantId,brandId,{name:'Fictional subject',type:'PERSON'},correlationId)).id;
+    for(const type of ['OWN_LIKENESS','CROSS_BORDER_PROCESSING'] as const){const policy=consentPolicy(type);const record=await consent.accept(userId,tenantId,brandId,{subjectId,type,version:policy.version,textHash:policy.textHash,accepted:true,idempotencyKey:randomUUID()},{ip:'127.0.0.1',userAgent:'fixture'},correlationId);if(type==='OWN_LIKENESS')consentId=record.id;}
+    const photo=await sharp({create:{width:100,height:100,channels:3,background:'#aaddff'}}).png().toBuffer();
+    const asset=await new MediaService(new MediaRepository(database.db),storage).upload(userId,tenantId,brandId,{name:'Fixture.png',mimeType:'image/png',idempotencyKey:randomUUID()},photo,correlationId);
+    const connection={name:'mock-avatar',provider:new MockAvatarProvider('test')};
+    const avatars=new AvatarService(new AvatarRepository(database.db),connection,storage,true),avatarProcessor=new AvatarProcessor(database.db,connection,storage,true);
+    const avatarJob=await avatars.create(userId,tenantId,brandId,{name:'Fixture',sourceAssetId:asset.id,subjectId,likenessType:'OWN_LIKENESS',idempotencyKey:randomUUID()},correlationId);
+    await due(avatarJob.id);await avatarProcessor.run(tenantId,avatarJob.id);await due(avatarJob.id);await avatarProcessor.run(tenantId,avatarJob.id);
+    const look=(await avatars.overview(userId,tenantId,brandId)).looks[0]!;lookId=look.id;
+    const voices=new VoiceRepository(database.db);await voices.savePage(userId,tenantId,brandId,'mock-avatar',[{name:'Public fixture',language:'Russian',previewUrl:null,reference:{provider:'mock-avatar',externalId:'test-voice',internalId:randomUUID(),metadata:{public:true}}}]);
+    const voice=(await voices.list(userId,tenantId,brandId))[0]!;await voices.select(userId,tenantId,brandId,look.avatarId,voice.id,correlationId);
+  });
+  afterAll(()=>database.close());
+  it('requires permission, tenant ownership and the current approved script version',async()=>{
+    const input=await request();
+    await expect(service.create(viewerId,tenantId,brandId,input,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(service.create(userId,tenantId,randomUUID(),input,correlationId)).rejects.toThrow('NOT_FOUND');
+    await expect(service.create(userId,tenantId,brandId,{...input,scriptVersion:2},correlationId)).rejects.toThrow('CONFLICT');
+    expect(await database.client`select id from video_projects where tenant_id=${tenantId}`).toHaveLength(0);
+  });
+  it('stores both renders, records every stage, bills actual duration once and approves privately',async()=>{
+    const input=await request(),before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS.available;
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);
+    expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    await expect(service.create(userId,tenantId,brandId,{...input,orientation:'1:1'},correlationId)).rejects.toThrow('CONFLICT');
+    await due(job.id);await processor.run(tenantId,job.id);expect((await row(job.id)).status).toBe('WAITING_EXTERNAL');
+    await due(job.id);await processor.run(tenantId,job.id);await processor.run(tenantId,job.id);
+    expect((await row(job.id)).status).toBe('SUCCEEDED');
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual({available:before-12,reserved:0});
+    const project=(await service.overview(userId,tenantId,brandId)).projects[0]!;
+    expect(project.durationMs).toBe(11200);expect(JSON.stringify(project)).not.toContain('externalId');
+    const history=await service.history(userId,tenantId,brandId,project.id);expect(history.map(item=>item.to)).toEqual(videoStages.slice(0,-1));
+    expect(Buffer.from(objects.get(`${tenantId}/videos/${project.id}/original.mp4`)!).toString()).toBe('original-fixture');
+    expect(Buffer.from(objects.get(`${tenantId}/videos/${project.id}/final.mp4`)!).toString()).toBe('final-fixture');
+    await expect(service.approve(viewerId,tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await service.approve(userId,tenantId,brandId,project.id,correlationId);await service.approve(userId,tenantId,brandId,project.id,correlationId);
+    expect((await service.overview(userId,tenantId,brandId)).projects[0]?.approvedAt).not.toBeNull();
+    expect((await service.download(userId,tenantId,brandId,project.id,correlationId)).expiresIn).toBe(120);
+    await expect(service.download(randomUUID(),tenantId,brandId,project.id,correlationId)).rejects.toThrow('NOT_FOUND');
+    await expect(database.client`update video_transitions set details='{}' where project_id=${project.id}`).rejects.toThrow('Append-only');
+    expect(await database.client`select id from usage_ledger where reservation_id=${(await row(job.id)).reservation_id} and type='CAPTURE'`).toHaveLength(1);
+  });
+  it('retries local failures using the existing render without another paid submission',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId),before=submissions;
+    await due(job.id);await processor.run(tenantId,job.id);
+    let writes=0;const flaky={...storage,put:async(key:string,bytes:Uint8Array,mime:string,context:Parameters<StorageProvider['put']>[3])=>{if(++writes===1)throw new DomainError('PROVIDER_UNAVAILABLE',503);await storage.put(key,bytes,mime,context);}};
+    const retrying=new VideoProcessor(database.db,{name:'mock-avatar',provider},flaky,processing,true);
+    await due(job.id);await retrying.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RETRY');
+    await due(job.id);await retrying.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(submissions-before).toBe(1);
+  });
+  it('holds uncertain submissions for reconciliation after the replay window and refunds definitive rejection',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId);const keys:string[]=[];
+    const uncertain={...provider,submit:async(_input:Parameters<VideoProvider['submit']>[0],context:Parameters<VideoProvider['submit']>[1])=>{keys.push(context.idempotencyKey);throw new DomainError('PROVIDER_UNAVAILABLE');}};
+    const failing=new VideoProcessor(database.db,{name:'mock-avatar',provider:uncertain},storage,processing,true);
+    await due(job.id);await failing.run(tenantId,job.id);await due(job.id);await failing.run(tenantId,job.id);expect(keys[0]).toBe(keys[1]);
+    await database.client`update video_projects set first_submitted_at=now()-interval '24 hours' where job_id=${job.id}`;
+    await due(job.id);await failing.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RECONCILIATION');expect(keys).toHaveLength(2);
+    const [reservation]=await database.client`select status from usage_reservations where id=${(await row(job.id)).reservation_id}`;expect(reservation?.status).toBe('HELD');
+    const rejected=await service.create(userId,tenantId,brandId,await request(),correlationId);
+    const rejecting=new VideoProcessor(database.db,{name:'mock-avatar',provider:{...provider,submit:async()=>{throw new ProviderRequestError('PROVIDER_REJECTED',502,true);}}},storage,processing,true);
+    await due(rejected.id);await rejecting.run(tenantId,rejected.id);expect((await row(rejected.id)).status).toBe('FAILED');
+    const [released]=await database.client`select status from usage_reservations where id=${(await row(rejected.id)).reservation_id}`;expect(released?.status).toBe('RELEASED');
+  });
+  it('blocks stale approved scripts and revoked consent before remote submission',async()=>{
+    const input=await request(),stale=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;
+    await database.client`update scripts set approved_version=null where id=${input.scriptId}`;
+    await due(stale.id);await processor.run(tenantId,stale.id);expect((await row(stale.id)).status).toBe('FAILED');
+    const revoked=await service.create(userId,tenantId,brandId,await request(),correlationId);
+    await consent.revoke(userId,tenantId,brandId,consentId,correlationId);
+    await due(revoked.id);await processor.run(tenantId,revoked.id);expect((await row(revoked.id)).error_code).toBe('CONSENT_REQUIRED');expect(submissions).toBe(before);
+  });
+});

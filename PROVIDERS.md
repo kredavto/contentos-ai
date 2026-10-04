@@ -14,7 +14,7 @@ Before implementing an adapter, review current official documentation and record
 
 ## HeyGen v3
 
-Real photo avatar, public avatar/voice discovery, avatar status/deletion and direct video submission/status adapters are implemented with contract tests. They are not yet wired to a consent-gated media job flow or used with live credentials. See [API evidence and remaining integration work](docs/heygen-integration.md).
+Real photo avatar, public avatar/voice discovery, avatar status/deletion and direct video submission/status adapters are implemented with contract tests. Avatar and video adapters are wired to consent-gated durable jobs, with public voice selection and private render ingestion. The server adapter has not yet been exercised with live credentials. See [API evidence and remaining integration work](docs/heygen-integration.md).
 
 ## Private S3 photos
 

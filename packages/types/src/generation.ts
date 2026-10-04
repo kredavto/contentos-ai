@@ -3,7 +3,7 @@ import { onboardingSchema } from './onboarding';
 const text = z.string().min(1).max(4000);
 const list = z.array(text).min(1).max(30);
 export const workflowTypes = ['GENERATE_STRATEGY', 'GENERATE_IDEAS', 'GENERATE_SCRIPT'] as const;
-export type JobType = WorkflowType | 'CREATE_AVATAR';
+export type JobType = WorkflowType | 'CREATE_AVATAR' | 'GENERATE_VIDEO';
 export type WorkflowType = (typeof workflowTypes)[number];
 export const platformSchema = z.enum(['YOUTUBE', 'TIKTOK', 'INSTAGRAM', 'VK', 'TELEGRAM']);
 export const funnelSchema = z.enum(['AWARENESS', 'CONSIDERATION', 'CONVERSION', 'RETENTION']);

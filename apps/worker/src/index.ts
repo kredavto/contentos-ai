@@ -3,10 +3,10 @@ import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
 import { createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository } from '@contentos/db';
-import { MediaService, AvatarService, AvatarProcessor } from '@contentos/core';
+import { MediaService, AvatarService, AvatarProcessor, VideoProcessor } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment } from '@contentos/providers';
+import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, FFmpegVideoProcessor } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
@@ -16,14 +16,16 @@ const media = new MediaService(new MediaRepository(database.db),storage);
 const avatarConnection = avatarFromEnvironment(env);
 const avatars = new AvatarService(new AvatarRepository(database.db),avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true');
 const avatarProcessor = new AvatarProcessor(database.db,avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true');
+const videoProcessor = new VideoProcessor(database.db,videoFromEnvironment(env),storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true');
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];
 const orchestrator = new GenerationOrchestrator(routes);
 const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-generation', async delivery => {
+  if(delivery.data.type==='GENERATE_VIDEO'){await videoProcessor.run(delivery.data.tenantId,delivery.data.id);return;}
   if(delivery.data.type==='CREATE_AVATAR'){await avatarProcessor.run(delivery.data.tenantId,delivery.data.id);return;}
   const job = await repository.claim(delivery.data.tenantId,delivery.data.id);
-  if (!job?.leaseToken || job.type === 'CREATE_AVATAR') return;
+  if (!job?.leaseToken || (job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO')) return;
   const leaseToken = job.leaseToken;
   const workflowType = job.type;
   const abort = new AbortController();

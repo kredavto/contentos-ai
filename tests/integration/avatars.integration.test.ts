@@ -27,7 +27,7 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     return {subject,records};
   }
   const request=(subjectId:string)=>({name:'Fictional look',sourceAssetId:assetId,subjectId,likenessType:'OWN_LIKENESS',idempotencyKey:randomUUID()});
-  const due=async(id:string)=>{await database.client`update jobs set next_attempt_at=now() where id=${id}`;};
+  const due=async(id:string)=>{await database.client`update jobs set next_attempt_at=now()-interval '1 second' where id=${id}`;};
   const row=async(id:string)=>(await database.client`select * from jobs where id=${id}`)[0]!;
   beforeAll(async()=>{
     await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${userId},${`avatar-${userId}@example.test`},'test-unusable','Owner',now()),(${viewerId},${`avatar-${viewerId}@example.test`},'test-unusable','Viewer',now())`;

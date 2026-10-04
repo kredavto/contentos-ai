@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, env } = services();
+    const { auth, brands, generation, consent, media, avatars, voices, videos, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +41,15 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if(path[3]&&path[4]==='videos'){
+          if(path.length===5&&request.method==='GET')return ok(await videos.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST')return ok(await videos.create(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
+          if(path[5]&&path.length===7){
+            if(path[6]==='download'&&request.method==='GET')return ok(await videos.download(user.userId,tenantId,path[3],path[5],correlationId));
+            if(path[6]==='history'&&request.method==='GET')return ok(await videos.history(user.userId,tenantId,path[3],path[5]));
+            if(path[6]==='approve'&&request.method==='POST')return ok(await videos.approve(user.userId,tenantId,path[3],path[5],correlationId));
+          }
+        }
         if (path[3] && path[4] === 'voices') {
           if(path.length===5&&request.method==='GET')return ok(await voices.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await voices.refresh(user.userId,tenantId,path[3],await readBody(request),correlationId));

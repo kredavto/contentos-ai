@@ -10,3 +10,5 @@
 .media-library input[type=file]{max-width:100%}
 
 @media(max-width:500px){.studio-tabs{flex-wrap:wrap;overflow:visible;gap:2px}.studio-tabs button{flex:1 0 28%;padding:10px 8px}}
+
+.video-preview { width: 100%; max-height: 560px; border-radius: 12px; background: #111; }

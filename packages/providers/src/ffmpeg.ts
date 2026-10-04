@@ -42,12 +42,16 @@ export class FFmpegVideoProcessor implements VideoProcessingProvider {
       if(options.captions.some(segment=>segment.end>source.duration+.05))throw new DomainError('INVALID_INPUT');
       const {width,height}=videoDimensions(options.orientation,options.resolution);
       const scale=options.fit==='crop'?`scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`:`scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
+      await input.onStage?.('CAPTIONS_GENERATING',{mode:options.captions.length?'provided-segments':'disabled'});
       if(options.captions.length)await writeFile(join(directory,'captions.ass'),captionAss(options,width,height),{mode:0o600});
+      await input.onStage?.('BROLL_PROCESSING',{mode:'disabled'});
       const videoFilter=`${scale},setsar=1,fps=30${options.captions.length?',ass=filename=captions.ass':''}`;
       await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-filter_threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-i','source.mp4','-map','0:v:0','-map','0:a:0','-map_metadata','-1','-map_chapters','-1','-vf',videoFilter,'-af','loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000','-c:v','libx264','-preset','fast','-crf','22','-pix_fmt','yuv420p','-threads','2','-c:a','aac','-b:a','128k','-ac','2','-t',String(maxDuration),'-fs',String(maxBytes),'-movflags','+faststart','-f','mp4','final.mp4'],directory,context);
+      await input.onStage?.('COVER_GENERATING',{mode:'first-frame'});
+      await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-protocol_whitelist','file,pipe','-f','mov','-i','final.mp4','-frames:v','1','-vf','scale=480:-2','-q:v','3','-update','1','cover.jpg'],directory,context,30_000);
+      await input.onStage?.('QC',{});
       const final=await this.inspect('final.mp4',directory,context);
       if(final.video.width!==width||final.video.height!==height||final.video.codec_name!=='h264'||final.audio.codec_name!=='aac'||final.video.pix_fmt!=='yuv420p'||Math.abs(final.duration-source.duration)>.3)throw new DomainError('INVALID_MEDIA',422);
-      await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-protocol_whitelist','file,pipe','-f','mov','-i','final.mp4','-frames:v','1','-vf','scale=480:-2','-q:v','3','-update','1','cover.jpg'],directory,context,30_000);
       const [videoStat,coverStat]=await Promise.all([stat(join(directory,'final.mp4')),stat(join(directory,'cover.jpg'))]);
       if(!videoStat.size||videoStat.size>=maxBytes||!coverStat.size||coverStat.size>3*1024*1024)throw new DomainError('INVALID_MEDIA',422);
       const [bytes,thumbnail]=await Promise.all([readFile(join(directory,'final.mp4')),readFile(join(directory,'cover.jpg'))]);outcome='SUCCEEDED';

@@ -1,6 +1,6 @@
 # Video post-processing
 
-`FFmpegVideoProcessor` is a worker-only implementation of `VideoProcessingProvider`. It accepts MP4 bytes and validated rendering options, never browser-controlled paths, URLs, executable names or filter expressions. The job orchestration/storage integration is still pending.
+`FFmpegVideoProcessor` is a worker-only implementation of `VideoProcessingProvider`. It accepts MP4 bytes and validated rendering options, never browser-controlled paths, URLs, executable names or filter expressions. The durable VideoProcessor runs it from BullMQ and stores original/final MP4 objects and the cover under separate private keys.
 
 Implemented: 9:16, 1:1 and 16:9 at 720p/1080p; crop or contain with padding; square pixels; 30 fps; H.264/yuv420p and stereo AAC; EBU R128 loudness filtering; fast-start MP4; metadata removal; optional Unicode ASS captions in clean/bold styles; separate JPEG cover frame. No default watermark. Caption segments must be ordered and non-overlapping, fit the actual duration and contain at most 500 characters each. User text cannot inject ASS override commands or filter options.
 
@@ -10,6 +10,6 @@ FFmpeg is native code and must run in the dedicated worker container with OS-lev
 
 Local development binaries: `/tmp/contentos-ffmpeg/ffmpeg` and `/tmp/contentos-ffmpeg/ffprobe`, version 9.0.2 from the macOS distributor linked by ffmpeg.org. Tests use `FFMPEG_PATH` and `FFPROBE_PATH`; CI defaults to `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` and must install them before running tests.
 
-Still pending: durable video projects/transitions, original/final object storage, generation and editing of captions in the UI, background music, intro/outro, B-roll, optional watermark, editable cover design and full video approval/publishing. A standalone processor test is not proof that the Video Factory user journey is finished.
+Still pending: generation and editing of captions in the UI, background music, intro/outro, B-roll, optional watermark, editable cover design and publishing. Video approval is implemented separately from publishing.
 
 References: https://ffmpeg.org/ffmpeg.html, https://ffmpeg.org/ffprobe.html, https://ffmpeg.org/ffmpeg-filters.html. Installed binary help (`-h filter=scale`, `-h filter=loudnorm`, `-h demuxer=mov`) was checked against the actual executable.

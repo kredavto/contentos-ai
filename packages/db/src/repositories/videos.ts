@@ -1,0 +1,135 @@
+import {randomUUID,createHash} from 'node:crypto';
+import {and,eq,desc} from 'drizzle-orm';
+import {DomainError,avatarJobInputSchema,videoJobInputSchema,videoProcessingSchema,videoStages,videoReservationSeconds,type VideoRequest,type VideoStage,type ProviderReference} from '@contentos/types';
+import type {Database} from '../index';
+import {videoProjects,videoTransitions,jobs,outbox,scripts,scriptVersions,avatars,avatarLooks,voiceProfiles,usagePolicies,auditLogs,aiCalls} from '../schema';
+import {lockTenant,assertMembership,reserveInTransaction,settleInTransaction,type Transaction} from './ledger';
+import {ownedJob,type StoredJob} from './jobs';
+import {requireConsent} from './consent';
+import type {ConsentPolicy} from './avatars';
+export type StoredVideo=typeof videoProjects.$inferSelect;
+const projectWhere=(tenantId:string,id:string)=>and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.id,id));
+const jobWhere=(job:Pick<StoredJob,'tenantId'|'id'>)=>and(eq(jobs.tenantId,job.tenantId),eq(jobs.id,job.id));
+async function projectFor(tx:Transaction,job:StoredJob){
+  if(job.type!=='GENERATE_VIDEO')throw new DomainError('INVALID_INPUT');const input=videoJobInputSchema.parse(job.input);
+  const [project]=await tx.select().from(videoProjects).where(and(projectWhere(job.tenantId,input.projectId),eq(videoProjects.jobId,job.id),eq(videoProjects.brandId,job.brandId)));
+  if(!project)throw new DomainError('NOT_FOUND',404);return project;
+}
+async function validate(tx:Transaction,project:StoredVideo,policies:ConsentPolicy[]){
+  if(project.consent.requirements.some(requirement=>!policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash)))throw new DomainError('CONSENT_REQUIRED',403);
+  await requireConsent(tx,project.tenantId,project.consent.subjectId,project.consent.requirements);
+  const [look]=await tx.select({look:avatarLooks,avatar:avatars}).from(avatarLooks).innerJoin(avatars,and(eq(avatars.tenantId,avatarLooks.tenantId),eq(avatars.id,avatarLooks.avatarId))).where(and(eq(avatarLooks.tenantId,project.tenantId),eq(avatarLooks.id,project.lookId),eq(avatars.brandId,project.brandId)));
+  if(!look||look.avatar.status!=='ACTIVE'||look.look.status!=='READY'||!look.look.reference||look.look.reference.externalId!==project.avatarReference.externalId||look.avatar.subjectId!==project.consent.subjectId)throw new DomainError('CONSENT_REQUIRED',403);
+  const [script]=await tx.select().from(scripts).where(and(eq(scripts.tenantId,project.tenantId),eq(scripts.id,project.scriptId),eq(scripts.brandId,project.brandId)));
+  if(!script||script.currentVersion!==project.scriptVersion||script.approvedVersion!==project.scriptVersion)throw new DomainError('CONFLICT',409);
+}
+async function transition(tx:Transaction,project:StoredVideo,next:VideoStage,correlationId:string,details:Record<string,unknown>={}){
+  if(project.stage===next)return project;
+  const currentIndex=videoStages.indexOf(project.stage),nextIndex=videoStages.indexOf(next);
+  if(project.stage==='READY'||project.stage==='FAILED'||(next!=='FAILED'&&nextIndex!==currentIndex+1))throw new DomainError('CONFLICT',409);
+  const revision=project.stageRevision+1;
+  await tx.insert(videoTransitions).values({tenantId:project.tenantId,projectId:project.id,revision,fromStage:project.stage,toStage:next,details,correlationId});
+  const [updated]=await tx.update(videoProjects).set({stage:next,stageRevision:revision}).where(projectWhere(project.tenantId,project.id)).returning();return updated!;
+}
+export class VideoRepository {
+  constructor(private readonly db:Database){}
+  async enqueue(userId:string,tenantId:string,brandId:string,input:VideoRequest,policies:ConsentPolicy[],provider:string,correlationId:string){
+    const inputHash=createHash('sha256').update(JSON.stringify({brandId,...input})).digest('hex');
+    return this.db.transaction(async tx=>{
+      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
+      const [existing]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,input.idempotencyKey)));
+      if(existing){if(existing.type!=='GENERATE_VIDEO'||existing.inputHash!==inputHash||existing.requestedBy!==userId)throw new DomainError('CONFLICT',409);return {id:existing.id,status:existing.status};}
+      const [script]=await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId),eq(scripts.id,input.scriptId)));
+      if(!script)throw new DomainError('NOT_FOUND',404);
+      if(script.currentVersion!==input.scriptVersion||script.approvedVersion!==input.scriptVersion)throw new DomainError('CONFLICT',409);
+      const [version]=await tx.select().from(scriptVersions).where(and(eq(scriptVersions.tenantId,tenantId),eq(scriptVersions.scriptId,script.id),eq(scriptVersions.version,input.scriptVersion)));
+      const [owned]=await tx.select({look:avatarLooks,avatar:avatars,input:jobs.input}).from(avatarLooks).innerJoin(avatars,and(eq(avatars.tenantId,avatarLooks.tenantId),eq(avatars.id,avatarLooks.avatarId))).innerJoin(jobs,and(eq(jobs.tenantId,avatarLooks.tenantId),eq(jobs.id,avatarLooks.jobId))).where(and(eq(avatarLooks.tenantId,tenantId),eq(avatarLooks.id,input.lookId),eq(avatars.brandId,brandId),eq(avatars.status,'ACTIVE'),eq(avatarLooks.status,'READY')));
+      if(!version||!owned?.look.reference||!owned.avatar.voiceId)throw new DomainError('INVALID_INPUT');
+      const [voice]=await tx.select().from(voiceProfiles).where(and(eq(voiceProfiles.tenantId,tenantId),eq(voiceProfiles.brandId,brandId),eq(voiceProfiles.id,owned.avatar.voiceId)));
+      if(!voice||voice.provider!==provider||owned.avatar.provider!==provider||voice.reference.metadata.public!==true)throw new DomainError('INVALID_INPUT');
+      const consent=avatarJobInputSchema.parse(owned.input);
+      if(consent.requirements.some(requirement=>!policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash)))throw new DomainError('CONSENT_REQUIRED',403);
+      await requireConsent(tx,tenantId,consent.subjectId,consent.requirements);
+      const [policy]=await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,'GENERATE_VIDEO'));
+      if(!policy||policy.unit!=='VIDEO_SECONDS'||policy.amount>180)throw new DomainError('CONFIGURATION_REQUIRED',503);
+      const budget=videoReservationSeconds(script.duration,policy.amount);
+      const reservation=await reserveInTransaction(tx,tenantId,policy.unit,budget,`job:${input.idempotencyKey}`,correlationId);
+      const projectId=randomUUID(),jobId=randomUUID(),prefix=`${tenantId}/videos/${projectId}`;
+      const [job]=await tx.insert(jobs).values({id:jobId,tenantId,brandId,requestedBy:userId,type:'GENERATE_VIDEO',input:{projectId},inputHash,idempotencyKey:input.idempotencyKey,reservationId:reservation.id,provider,model:'avatar-video',correlationId}).returning();
+      const text=[version.content.hook,version.content.context,version.content.core,version.content.proof,version.content.cta].join('\n\n');
+      if(text.length>20000)throw new DomainError('INVALID_INPUT');
+      await tx.insert(videoProjects).values({id:projectId,tenantId,brandId,jobId,scriptId:script.id,scriptVersion:input.scriptVersion,lookId:owned.look.id,voiceId:voice.id,scriptText:text,title:version.content.hook.slice(0,200),platform:script.platform,plannedDuration:script.duration,avatarReference:owned.look.reference,voiceReference:voice.reference,consent:{subjectId:consent.subjectId,requirements:consent.requirements},options:videoProcessingSchema.parse({orientation:input.orientation,resolution:input.resolution,fit:input.fit}),maxDurationSeconds:budget,provider,originalKey:`${prefix}/original.mp4`,finalKey:`${prefix}/final.mp4`,coverKey:`${prefix}/cover.jpg`});
+      await tx.insert(videoTransitions).values({tenantId,projectId,revision:0,toStage:'VIDEO_REQUESTED',correlationId});await tx.insert(outbox).values({tenantId,jobId});
+      await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_QUEUED',resourceId:projectId,correlationId,metadata:{jobId,scriptVersion:input.scriptVersion,maxVideoSeconds:budget}});return {id:job!.id,status:job!.status};
+    });
+  }
+  async list(userId:string,tenantId:string,brandId:string){
+    return this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);return tx.select({id:videoProjects.id,jobId:videoProjects.jobId,title:videoProjects.title,scriptId:videoProjects.scriptId,scriptVersion:videoProjects.scriptVersion,lookId:videoProjects.lookId,voiceId:videoProjects.voiceId,stage:videoProjects.stage,options:videoProjects.options,provider:videoProjects.provider,durationMs:videoProjects.durationMs,approvedAt:videoProjects.approvedAt,createdAt:videoProjects.createdAt,jobStatus:jobs.status,errorCode:jobs.errorCode}).from(videoProjects).innerJoin(jobs,and(eq(jobs.tenantId,videoProjects.tenantId),eq(jobs.id,videoProjects.jobId))).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.brandId,brandId))).orderBy(desc(videoProjects.createdAt)).limit(50);});
+  }
+  async claim(tenantId:string,id:string){
+    return this.db.transaction(async tx=>{
+      await lockTenant(tx,tenantId);const [job]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,id),eq(jobs.type,'GENERATE_VIDEO'))).for('update');
+      if(!job||!['QUEUED','RETRY','WAITING_EXTERNAL','RUNNING'].includes(job.status)||job.nextAttemptAt.getTime()>Date.now()||(job.status==='RUNNING'&&job.leaseExpiresAt&&job.leaseExpiresAt.getTime()>Date.now()))return null;
+      const project=await projectFor(tx,job);
+      if(project.mutationState==='STARTED')await tx.update(videoProjects).set({mutationState:'UNKNOWN'}).where(projectWhere(tenantId,project.id));
+      await tx.update(aiCalls).set({status:'UNKNOWN',errorCode:'WORKER_INTERRUPTED'}).where(and(eq(aiCalls.tenantId,tenantId),eq(aiCalls.jobId,id),eq(aiCalls.status,'STARTED')));
+      const [claimed]=await tx.update(jobs).set({status:'RUNNING',attempt:job.attempt+1,consecutiveFailures:job.consecutiveFailures+(job.status==='RUNNING'?1:0),pollCount:job.pollCount+(project.reference?1:0),leaseToken:randomUUID(),leaseExpiresAt:new Date(Date.now()+300_000),startedAt:job.startedAt??new Date()}).where(jobWhere(job)).returning();return claimed??null;
+    });
+  }
+  async prepare(job:StoredJob,policies:ConsentPolicy[],markSubmitting=false){
+    return this.db.transaction(async tx=>{
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');let project=await projectFor(tx,active);await validate(tx,project,policies);
+      if(active.consecutiveFailures>=active.maxAttempts||(!project.reference&&project.firstSubmittedAt&&Date.now()-project.firstSubmittedAt.getTime()>23*3600_000))throw new DomainError('RECONCILIATION_REQUIRED',409);
+      if(project.stage==='VIDEO_REQUESTED')project=await transition(tx,project,'VOICE_PREPARING',job.correlationId,{voiceId:project.voiceId,publicVoice:true});
+      if(project.stage==='VOICE_PREPARING')project=await transition(tx,project,'AVATAR_RENDERING',job.correlationId);
+      if(markSubmitting&&!project.reference)await tx.update(videoProjects).set({firstSubmittedAt:project.firstSubmittedAt??new Date(),mutationState:project.firstSubmittedAt?'UNKNOWN':'STARTED'}).where(projectWhere(job.tenantId,project.id));
+      return project;
+    });
+  }
+  async submitted(job:StoredJob,reference:ProviderReference){
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const project=await projectFor(tx,job);
+      if(reference.provider!==job.provider||!reference.externalId||(project.reference&&project.reference.externalId!==reference.externalId))throw new DomainError('RECONCILIATION_REQUIRED',409);
+      await tx.update(videoProjects).set({reference:{...reference,internalId:project.id},mutationState:'ACCEPTED'}).where(projectWhere(job.tenantId,project.id));await tx.update(jobs).set({externalJobId:reference.externalId}).where(jobWhere(job));
+    });
+  }
+  async wait(job:StoredJob){
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await tx.update(jobs).set({status:active.pollCount>=360?'RECONCILIATION':'WAITING_EXTERNAL',errorCode:active.pollCount>=360?'RECONCILIATION_REQUIRED':null,consecutiveFailures:0,leaseToken:null,leaseExpiresAt:null,nextAttemptAt:new Date(Date.now()+10_000),progress:35}).where(jobWhere(job));});
+  }
+  async stage(job:StoredJob,next:VideoStage,details:Record<string,unknown>={}){
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);const project=await projectFor(tx,active);
+      // Retried local processing may revisit a completed intermediate stage.
+      if(videoStages.indexOf(next)<videoStages.indexOf(project.stage))return;
+      await transition(tx,project,next,job.correlationId,details);await tx.update(jobs).set({progress:Math.min(95,40+videoStages.indexOf(next)*6)}).where(jobWhere(job));
+    });
+  }
+  async complete(job:StoredJob,policies:ConsentPolicy[],durationSeconds:number,bytes:number){
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);await validate(tx,project,policies);
+      const charged=Math.ceil(durationSeconds);if(!Number.isSafeInteger(charged)||charged<1||charged>project.maxDurationSeconds||!Number.isSafeInteger(bytes)||bytes<1||bytes>256*1024*1024)throw new DomainError('INVALID_MEDIA',422);
+      await settleInTransaction(tx,job.tenantId,job.reservationId,'CAPTURE',job.correlationId,charged);
+      await transition(tx,project,'READY',job.correlationId,{durationMs:Math.round(durationSeconds*1000),chargedSeconds:charged});
+      await tx.update(videoProjects).set({durationMs:Math.round(durationSeconds*1000),finalBytes:bytes}).where(projectWhere(job.tenantId,project.id));
+      await tx.update(jobs).set({status:'SUCCEEDED',progress:100,result:{internalId:project.id,version:1},finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null,errorCode:null}).where(jobWhere(job));
+      await tx.insert(auditLogs).values({tenantId:job.tenantId,action:'VIDEO_READY',resourceId:project.id,correlationId:job.correlationId,metadata:{chargedSeconds:charged}});
+    });
+  }
+  async fail(job:StoredJob,code:string,definitive=false){
+    await this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);const project=await projectFor(tx,active);
+      const rejected=definitive&&project.mutationState==='STARTED'&&!project.reference,uncertain=!project.reference&&!!project.firstSubmittedAt&&!rejected&&project.mutationState!=='REJECTED';const failures=active.consecutiveFailures+1;
+      const retry=code==='PROVIDER_UNAVAILABLE'&&failures<active.maxAttempts&&(!!project.reference||!project.firstSubmittedAt||Date.now()-project.firstSubmittedAt.getTime()<23*3600_000);
+      const reconcile=!retry&&(uncertain||code==='RECONCILIATION_REQUIRED'||(!!project.reference&&code==='PROVIDER_UNAVAILABLE'));
+      if(!retry&&!reconcile){await settleInTransaction(tx,job.tenantId,job.reservationId,'RELEASE',job.correlationId);await transition(tx,project,'FAILED',job.correlationId,{code});}
+      if(rejected||uncertain)await tx.update(videoProjects).set({mutationState:rejected?'REJECTED':'UNKNOWN'}).where(projectWhere(job.tenantId,project.id));
+      await tx.update(jobs).set({status:retry?'RETRY':reconcile?'RECONCILIATION':'FAILED',errorCode:reconcile?'RECONCILIATION_REQUIRED':code,consecutiveFailures:failures,leaseToken:null,leaseExpiresAt:null,nextAttemptAt:new Date(Date.now()+5000*2**Math.min(failures-1,6)),finishedAt:retry||reconcile?null:new Date()}).where(jobWhere(job));
+      await tx.insert(auditLogs).values({tenantId:job.tenantId,action:reconcile?'VIDEO_RECONCILIATION_REQUIRED':retry?'VIDEO_RETRY':'VIDEO_FAILED',resourceId:project.id,correlationId:job.correlationId,metadata:{code}});
+    });
+  }
+  async ready(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[],approve=false,correlationId:string=randomUUID()){
+    return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,approve?'approve':'read');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId),eq(videoProjects.stage,'READY')));if(!project)throw new DomainError('NOT_FOUND',404);await validate(tx,project,policies);
+      if(approve&&!project.approvedAt){await tx.update(videoProjects).set({approvedBy:userId,approvedAt:new Date()}).where(projectWhere(tenantId,id));await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_APPROVED',resourceId:id,correlationId,metadata:{scriptVersion:project.scriptVersion}});}return project;
+    });
+  }
+  async history(userId:string,tenantId:string,brandId:string,id:string){
+    await this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);const [project]=await tx.select({id:videoProjects.id}).from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId)));if(!project)throw new DomainError('NOT_FOUND',404);});
+    return this.db.select({revision:videoTransitions.revision,from:videoTransitions.fromStage,to:videoTransitions.toStage,details:videoTransitions.details,createdAt:videoTransitions.createdAt}).from(videoTransitions).where(and(eq(videoTransitions.tenantId,tenantId),eq(videoTransitions.projectId,id))).orderBy(videoTransitions.revision);
+  }
+}

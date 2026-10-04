@@ -1,6 +1,6 @@
 # CONTENTOS AI
 
-AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script generation, script approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Videos, subscriptions and publishing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
+AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script generation, script approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Avatar/voice selection and basic video generation, FFmpeg processing, storage and approval are implemented. Rich video editing, subscriptions and publishing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
 
 Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web deployment target: Vercel team digagency. Long-running media/queue work requires a separate worker service. No production deployment yet.
 
@@ -46,4 +46,4 @@ The integration suite runs when TEST_DATABASE_URL is present; otherwise it is ex
 
 ## Private photo library
 
-The brand content studio includes a Media tab for private photo uploads, short-lived previews and durable deletion. Configure the same private S3 bucket on web and worker using `.env.example`. Details and limits: [media storage](docs/media-storage.md). Without storage credentials the UI reports that configuration is required. Avatar/video jobs remain in development.
+The brand content studio includes a Media tab for private photo uploads, short-lived previews and durable deletion. Configure the same private S3 bucket on web and worker using `.env.example`. Details and limits: [media storage](docs/media-storage.md). Without storage credentials the UI reports that configuration is required. Avatar/video jobs use the same storage and durable worker. See ENVIRONMENT.md for video configuration.
