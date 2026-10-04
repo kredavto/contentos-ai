@@ -17,3 +17,4 @@ export * from './analytics';
 export * from './channel-analytics';
 export * from './performance';
 export * from './payment-methods';
+export * from './payment-processor';

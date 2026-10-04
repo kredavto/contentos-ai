@@ -3,7 +3,7 @@ import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import { z } from 'zod';
 import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, monthlyBillingBoundary, type PaymentObservation, type CreatePayment, type EncryptedCredential } from '@contentos/types';
 import type { Database } from '../index';
-import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms, renewalConsents, renewalPreferences, paymentMethods } from '../schema';
+import { plans, planVersions, billingOrders, payments, paymentSettlements, usageLedger, auditLogs, subscriptions, subscriptionTerms, renewalConsents, renewalPreferences, paymentMethods, paymentTasks } from '../schema';
 import { assertMembership, lockTenant, type Transaction } from './ledger';
 
 const merchantSchema = z.object({ provider: z.literal('yookassa'), merchantId: z.string().regex(/^\d{1,32}$/), test: z.boolean() }).strict();
@@ -58,6 +58,7 @@ export class BillingRepository {
       const frozen = createPaymentSchema.parse({ ...request, amountMinor: quote.amountMinor, currency: quote.currency, description: `Subscription ${plan.code}` });
       const [order] = await tx.insert(billingOrders).values({ tenantId, planVersionId, requestedBy: userId, kind: 'START', amountMinor: quote.amountMinor, currency: quote.currency, aiCredits: quote.aiCredits, videoSeconds: quote.videoSeconds, ...configured, renewalConsentId: renewal?.consentId ?? null, renewalRevision: renewal?.revision ?? null, input: frozen, inputHash: hash, idempotencyKey: key, correlationId }).returning();
       if (!order) throw new Error('Billing order insert failed');
+      await tx.insert(paymentTasks).values({ id: order.id, tenantId });
       await tx.insert(auditLogs).values({ tenantId, userId, action: 'BILLING_ORDER_CREATED', resourceId: order.id, correlationId, metadata: { planVersionId, amountMinor: order.amountMinor, currency: order.currency } });
       return order;
     });

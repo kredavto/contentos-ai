@@ -2,11 +2,11 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
+import { paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
@@ -23,6 +23,12 @@ const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const channelAnalyticsRepository=new ChannelAnalyticsRepository(database.db);
 const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env));
+const paymentRepository = new PaymentTaskRepository(database.db);
+const paymentProvider = paymentsFromEnvironment(env);
+const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env));
+const paymentQueue = new Queue('contentos-payments', { connection });
+const paymentWorker = new Worker<{tenantId:string;id:string}>('contentos-payments', delivery => paymentProcessor.run(delivery.data.tenantId, delivery.data.id), { connection, concurrency: 2 });
+paymentWorker.on('error', () => console.error(JSON.stringify({ event: 'payment_worker_error', code: 'QUEUE_UNAVAILABLE' })));
 const analyticsQueue=new Queue('contentos-analytics',{connection});
 const analyticsWorker=new Worker<{tenantId:string;id:string}>('contentos-analytics',delivery=>channelAnalyticsProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
 analyticsWorker.on('error',()=>console.error(JSON.stringify({event:'analytics_worker_error',code:'QUEUE_UNAVAILABLE'})));
@@ -66,6 +72,10 @@ async function dispatch() {
   if (dispatching) return;
   dispatching = true;
   try {
+    if (paymentProvider) for (const task of await paymentRepository.dispatchable()) {
+      await paymentQueue.add('payment', task, { jobId: task.id, attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: true });
+      await paymentRepository.dispatched(task.tenantId, task.id);
+    }
     for(const job of await channelAnalyticsRepository.due()){
       await analyticsQueue.add('fetch',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await channelAnalyticsRepository.dispatched(job.tenantId,job.id);
@@ -83,7 +93,7 @@ async function dispatch() {
 }
 const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=> {
   if (request.url !== '/health') {response.writeHead(404);response.end();return;}
-  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning();
+  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning() && paymentWorker.isRunning();
   response.writeHead(ready?200:503, {'Content-Type':'application/json'});response.end(JSON.stringify({status:ready?'ok':'unavailable'}));
 }) : null;
 if (health) health.listen(Number(process.env.WORKER_HEALTH_PORT),'127.0.0.1');
@@ -99,7 +109,7 @@ void dispatch();
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await connection.quit(); storage?.close(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await connection.quit(); storage?.close(); await database.close();
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));
