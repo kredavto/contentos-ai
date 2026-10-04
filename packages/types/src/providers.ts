@@ -42,6 +42,9 @@ export interface VideoProvider {
   status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; downloadUrl?: string; errorCode?: string }>;
 }
 export interface CaptionSegment { start: number; end: number; text: string }
+export interface VideoProcessingProvider {
+  process(input:{bytes:Uint8Array;options:import('./video-processing').VideoProcessingOptions},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
+}
 export interface CaptionProvider {
   transcribe(input: { bytes: Uint8Array; mimeType: string; language: string }, context: OperationContext): Promise<CaptionSegment[]>;
 }

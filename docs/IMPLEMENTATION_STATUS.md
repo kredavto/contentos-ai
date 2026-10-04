@@ -49,11 +49,17 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Avatar voice selection checks writer role, brand and matching provider. Optional public sample playback; no private account voices are discovered or exposed. Cloning remains pending and will require VOICE_CLONING evidence.
 - Server credentials use the same configured HeyGen connection. No live catalog request was made without the missing API key; development uses an explicit demo voice.
 
+## Video processing foundation
+
+- Real worker-only FFmpeg processor: MP4 probing, bounded input/output, three orientations, 720p/1080p, crop/contain, H.264/AAC, audio normalization, metadata removal, Unicode subtitle burn-in and separate JPEG cover frame. No watermark is added.
+- Local paths/filter arguments are generated internally; shell/network inputs are disallowed, MOV external references disabled, subprocess environment excludes credentials, timeouts/cancellation and temporary cleanup are enforced. Final codecs/dimensions/duration are checked.
+- Six real media tests passed with FFmpeg/FFprobe 9.0.2; CI now installs FFmpeg before tests. See [processing boundaries](video-processing.md). This is not yet connected to durable video projects or a user-facing render workflow.
+
 ## Verification evidence
 
 - Typecheck for all 9 workspace packages and test sources passed.
 - ESLint passed.
-- 63 tests in 13 Vitest files passed against real PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts, consent evidence/revocation, HeyGen/S3 contracts, safe photo decoding, upload idempotency, tenant/brand media access, avatar reservation/capture/release, consent-bound jobs, expired replay windows, late references, normal polling and durable deletion/fencing.
+- 69 tests in 14 Vitest files passed against real PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts, consent evidence/revocation, HeyGen/S3 contracts, safe photo decoding, upload idempotency, tenant/brand media access, avatar reservation/capture/release, consent-bound jobs, expired replay windows, late references, normal polling and durable deletion/fencing.
 - 2 Playwright tests passed in installed Chrome: register → SMTP email → verify → login → organization → brand → 15 onboarding steps → save/reload/resume → Brand Brain → starter credits → strategy/30-day plan → ideas → script → manual edit/version history → approval → mobile logout, consent acceptance → revocation → reload persistence, photo upload → signed preview → consent grant → avatar job → ready → credit capture → public voice selection/reopen persistence → worker group deletion → photo deletion, plus CSRF/anonymous request rejection. HttpOnly/SameSite cookie assertions and no browser page errors.
 - Agent-browser verified homepage renders, navigation exists and no Next error overlay/browser errors. Desktop/mobile dashboard, media-library and avatar screenshots visually inspected; mobile overflow check passed.
 - Production Next.js build passed for implemented routes.

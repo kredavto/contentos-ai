@@ -19,3 +19,4 @@ export * from './avatars';
 export class ProviderRequestError extends DomainError {
   constructor(code: ErrorCode, status: number, public readonly definitiveRejection: boolean) { super(code,status); }
 }
+export * from './video-processing';
