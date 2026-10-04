@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, env } = services();
+    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +41,16 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if(path[3]&&path[4]==='social'){
+          if(path.length===5&&request.method==='GET')return ok(await social.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST')return ok(await social.connect(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          if(path[5]&&path.length===7&&request.method==='POST'){
+            if(path[6]==='refresh')return ok(await social.refresh(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+            if(path[6]==='reconnect')return ok(await social.reconnect(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+            if(path[6]==='disconnect'){await social.disconnect(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({disconnected:true});}
+            if(path[6]==='rewrap'){await social.rewrap(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({rotated:true});}
+          }
+        }
         if(path[3]&&path[4]==='calendar'){
           if(path.length===5&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await calendar.list(user.userId,tenantId,path[3],{from:query.get('from'),to:query.get('to')}));}
           if(path.length===5&&request.method==='POST')return ok(await calendar.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);

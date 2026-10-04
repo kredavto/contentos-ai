@@ -10,3 +10,5 @@ export * from './avatars';
 export * from './voices';
 export * from './videos';
 export * from './calendar';
+export * from './credential-vault';
+export * from './social';

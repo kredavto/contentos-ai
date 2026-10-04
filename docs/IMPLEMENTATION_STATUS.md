@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 47 tables with fourteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 48 tables with fifteen SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -71,10 +71,10 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Extend the implemented text/avatar/video job engine to publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
 - Official documentation research and real adapters for captions/media, YooKassa, YouTube/TikTok/Meta/VK/Telegram; production configuration and live verification of HeyGen/S3 remain pending.
 - Remaining AI workflows beyond strategy/ideas/scripts; downstream publishing transitions from the implemented editorial calendar.
-- Private voice cloning/import, captions editor, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
-- Social OAuth token encryption/refresh, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
+- Private voice cloning/import, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
+- OAuth flows and refresh for additional social platforms, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
 - AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
-- Admin/support/audit UI, notifications, privacy export/deletion workflows, encryption/rotation, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
+- Admin/support/audit UI, notifications, privacy export/deletion workflows, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
 - Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
 - Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
 - Vercel deployment and verification. No deployment has happened; scaffold/partial functionality is not represented as the finished product.
@@ -142,3 +142,16 @@ Migration 0013 adds tenant/brand content plans with UTC timestamps, IANA zones, 
 The calendar does not yet publish: the UI explicitly distinguishes planning from external delivery. Publishing jobs, social connections, analytics and all other outstanding SaaS modules remain required. Next: implement the real publishing connection, durable approval scheduler and status workflow; initial Telegram research is recorded in publishing-next.md.
 
 97 tests passed; additional approved-video attachment coverage also passed. Both Playwright scenarios passed (4.0 minutes), including approved-video planning, native drag/drop, optimistic date persistence, all three views, cancellation and mobile layout. Production build, final typecheck and lint passed. Caption commit 669e43c passed remote CI run 37203378533.
+
+
+## Encrypted Telegram connections
+
+Migration 0014 adds tenant/brand social connections. The real Telegram adapter checks the bot identity, channel and administrator posting rights through getMe/getChat/getChatMember. Tokens use AES-256-GCM with tenant/brand/connection/provider authentication, versioned keys and explicit rewrapping. Safe connection summaries exclude tokens, ciphertext and external references. Manager-only connection, rights refresh, token replacement and disconnection are audited and revision-fenced; disconnect erases the saved credential. Missing or invalid vault configuration disables credential operations without taking down unrelated application features.
+
+The Integrations tab supports these operations with explicit local-demo labeling. This slice does not send messages. Publishing approval, scheduler and remote delivery remain outstanding. See [connection configuration and security](social-connections.md).
+
+Calendar commit 1035d34 passed remote CI run 37204057150.
+
+Verification for the connection slice: 107 unit/integration/media tests passed, including a concurrent disconnect-versus-inspection regression. Both Playwright scenarios passed in 3.7 minutes with connection creation, empty token field after save, rights refresh, disconnect, reconnection, desktop/mobile screenshots and no horizontal overflow. No live Telegram request was made.
+
+Production build, final workspace/test typecheck and lint passed. The final focused vault/connection regression passed all 7 tests after replacing an ES2024-only test helper with a target-compatible promise gate.

@@ -10,6 +10,9 @@ const serverSchema = z.object({
   OPENAI_MODEL: z.string().min(1).optional(),
   AVATAR_PROVIDER: z.enum(['disabled', 'heygen', 'mock']).default('disabled'),
   AVATAR_GENERATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  SOCIAL_PROVIDER:z.enum(['disabled','telegram','mock']).default('disabled'),
+  CREDENTIAL_ENCRYPTION_KEYS:z.string().min(1).max(4096).optional(),
+  CREDENTIAL_ACTIVE_KEY_ID:z.string().regex(/^[a-zA-Z0-9_-]{1,32}$/).optional(),
   CAPTION_PROVIDER: z.enum(['disabled','openai','mock']).default('disabled'),
   CAPTION_MODEL: z.literal('whisper-1').default('whisper-1'),
   VIDEO_PROVIDER: z.enum(['disabled','heygen','mock']).default('disabled'),
@@ -30,6 +33,7 @@ const serverSchema = z.object({
   SMTP_URL: z.url().optional(),
   EMAIL_FROM: z.email().optional(),
 }).superRefine((env, ctx) => {
+  if(env.NODE_ENV==='production'&&env.SOCIAL_PROVIDER==='mock')ctx.addIssue({code:'custom',path:['SOCIAL_PROVIDER'],message:'Mock social connections are forbidden in production'});
   if(env.NODE_ENV==='production'&&env.CAPTION_PROVIDER==='mock')ctx.addIssue({code:'custom',path:['CAPTION_PROVIDER'],message:'Mock captions are forbidden in production'});
   if (env.NODE_ENV === 'production' && env.VIDEO_PROVIDER === 'mock') ctx.addIssue({code:'custom',path:['VIDEO_PROVIDER'],message:'Mock video is forbidden in production'});
   if (env.NODE_ENV === 'production' && env.AVATAR_PROVIDER === 'mock') ctx.addIssue({ code: 'custom', path: ['AVATAR_PROVIDER'], message: 'Mock avatars are forbidden in production' });

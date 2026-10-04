@@ -79,3 +79,6 @@ export interface EmailProvider {
 export interface ErrorReporter {
   capture(error: Error, context: { correlationId: string; code: string; jobId?: string }): void;
 }
+export interface SocialConnectionProvider {
+  inspect(credential:string,target:string,context:OperationContext):Promise<{reference:ProviderReference;name:string;username:string|null;canPublish:boolean}>;
+}

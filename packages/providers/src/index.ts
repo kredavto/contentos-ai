@@ -7,3 +7,4 @@ export * from './avatar';
 export * from './ffmpeg';
 export * from './video';
 export * from './captions';
+export * from './telegram';
