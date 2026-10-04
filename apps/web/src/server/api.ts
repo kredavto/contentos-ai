@@ -1,12 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
-import { DomainError } from '@contentos/types';
+import { DomainError, maxPhotoUploadBytes, mediaUploadSchema } from '@contentos/types';
 const messages: Record<string, string> = {
   NOT_AUTHORIZED: 'Нет доступа. Проверьте данные входа и вашу роль.', NOT_FOUND: 'Объект не найден.',
   INVALID_INPUT: 'Проверьте поля формы. Ссылка также могла истечь или уже использоваться.', CONFLICT: 'Данные изменились. Обновите страницу и повторите действие.',
   CONFIGURATION_REQUIRED: 'Сервис ещё не настроен. Администратор должен подключить необходимые службы.',
   RATE_LIMITED: 'Слишком много попыток. Попробуйте через 15 минут.', PROVIDER_UNAVAILABLE: 'Внешний сервис временно недоступен. Повторите позже.',
+  INVALID_MEDIA: 'Выберите корректный файл JPEG, PNG или WebP размером до 3 МБ и до 16 мегапикселей.',
+  CONSENT_REQUIRED: 'Для этой операции требуется действующее согласие.',
+  PLAN_LIMIT_REACHED: 'Достигнут лимит хранилища. Удалите ненужные файлы.',
 };
+export async function readPhotoUpload(request: Request) {
+  let name: string;
+  try { name = decodeURIComponent(request.headers.get('x-file-name') ?? ''); } catch { throw new DomainError('INVALID_INPUT'); }
+  const input = mediaUploadSchema.parse({name,mimeType:request.headers.get('content-type'),idempotencyKey:request.headers.get('idempotency-key')});
+  const declared = request.headers.get('content-length');
+  if (declared && (!/^\d+$/.test(declared) || Number(declared) > maxPhotoUploadBytes)) throw new DomainError('INVALID_MEDIA',413);
+  const reader = request.body?.getReader(); if (!reader) throw new DomainError('INVALID_MEDIA');
+  const chunks: Uint8Array[] = []; let size = 0;
+  try {
+    for (;;) { const {done,value} = await reader.read(); if (done) break; size += value.byteLength; if (size > maxPhotoUploadBytes) throw new DomainError('INVALID_MEDIA',413); chunks.push(value); }
+  } finally { await reader.cancel(); }
+  if (!size) throw new DomainError('INVALID_MEDIA');
+  return {input,bytes:new Uint8Array(Buffer.concat(chunks))};
+}
 export async function readBody(request: Request): Promise<unknown> {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw new DomainError('INVALID_INPUT', 415);
   const reader = request.body?.getReader();

@@ -26,11 +26,19 @@ export class AuthService {
     });
   }
   async register(raw: unknown, ip: string, correlationId: string) {
+    const started = performance.now();
+    const progress = (stage: string) => console.info(JSON.stringify({event:'auth_register_progress',correlationId,stage,durationMs:Math.round(performance.now()-started)}));
     const input = registerSchema.parse(raw);
+    progress('validated');
     await this.throttle('register', ip, input.email);
+    progress('throttled');
+    const passwordHash = await hashPassword(input.password);
+    progress('hashed');
     const token = createOpaqueToken();
-    const user = await this.repository.register({ email: input.email, name: input.name, passwordHash: await hashPassword(input.password), tokenHash: token.hash, correlationId });
+    const user = await this.repository.register({ email: input.email, name: input.name, passwordHash, tokenHash: token.hash, correlationId });
+    progress('persisted');
     if (user) await this.sendToken(user.email, token.token, 'VERIFY_EMAIL', correlationId);
+    progress('completed');
     return { message: 'Если адрес доступен для регистрации, письмо с подтверждением отправлено. Если вы уже зарегистрированы, войдите или восстановите пароль.' };
   }
   async login(raw: unknown, ip: string, correlationId: string) {

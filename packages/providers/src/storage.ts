@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { DomainError,type StorageProvider,type OperationContext } from '@contentos/types';
 const settingsSchema=z.object({region:z.string().min(1),bucket:z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),accessKeyId:z.string().min(1),secretAccessKey:z.string().min(1),endpoint:z.url().optional(),forcePathStyle:z.boolean().default(false),production:z.boolean().default(true),encryption:z.enum(['AES256','aws:kms']).optional(),kmsKeyId:z.string().optional()});
 export type S3Settings=z.input<typeof settingsSchema>;
+export function storageFromEnvironment(env: Record<string, string | undefined>) {
+  if (env.STORAGE_PROVIDER !== 's3' || !env.S3_REGION || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) return null;
+  return new S3StorageProvider({region:env.S3_REGION,bucket:env.S3_BUCKET,accessKeyId:env.S3_ACCESS_KEY_ID,secretAccessKey:env.S3_SECRET_ACCESS_KEY,endpoint:env.S3_ENDPOINT,forcePathStyle:env.S3_FORCE_PATH_STYLE==='true',production:env.NODE_ENV!=='development'&&env.NODE_ENV!=='test',encryption:env.S3_ENCRYPTION as S3Settings['encryption'],kmsKeyId:env.S3_KMS_KEY_ID});
+}
 const maxObjectBytes=256*1024*1024;
 /** A private bucket is mandatory; no ACL is ever set to public. */
 export class S3StorageProvider implements StorageProvider {

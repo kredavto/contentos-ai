@@ -2,14 +2,17 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { createDatabase, JobRepository, AICallRepository } from '@contentos/db';
+import { createDatabase, JobRepository, AICallRepository, MediaRepository } from '@contentos/db';
+import { MediaService } from '@contentos/core';
 import { DomainError, workflowSchemas } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { OpenAILLMProvider, MockLLMProvider } from '@contentos/providers';
+import { OpenAILLMProvider, MockLLMProvider, storageFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
 const repository = new JobRepository(database.db);
+const storage = storageFromEnvironment(env);
+const media = new MediaService(new MediaRepository(database.db),storage);
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];
@@ -55,11 +58,18 @@ const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=
 }) : null;
 if (health) health.listen(Number(process.env.WORKER_HEALTH_PORT),'127.0.0.1');
 const timer = setInterval(()=>void dispatch(),2000);
+let cleaning = false;
+let cleanupTask: Promise<void> = Promise.resolve();
+const cleanupTimer = setInterval(() => {
+  if (cleaning) return;
+  cleaning = true;
+  cleanupTask = media.cleanupOne().then(()=>{}).catch(()=>console.error(JSON.stringify({event:'media_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).finally(()=>{cleaning=false;});
+},2000);
 void dispatch();
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); health?.close(); await worker.close(); await queue.close(); await connection.quit(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await cleanupTask; await queue.close(); await connection.quit(); storage?.close(); await database.close();
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

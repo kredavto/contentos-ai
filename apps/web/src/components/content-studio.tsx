@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ArrowLeft, Sparkles, LoaderCircle, Check, History } from 'lucide-react';
 import type { GenerationService } from '@contentos/core';
 import { generationOptionsSchema, type GenerationOptions, type ScriptOutput, type WorkflowType } from '@contentos/types';
+import { MediaLibrary } from './media-library';
 import { ConsentCenter } from './consent-center';
 import { api } from '../lib/api-client';
 type Overview = Awaited<ReturnType<GenerationService['overview']>>;
@@ -14,7 +15,7 @@ const edits: Array<[GenerationOptions['edit'],string]> = [['GENERATE','Новы�
 export function ContentStudio({tenantId,brandId,brandName,role,verified}:{tenantId:string;brandId:string;brandName:string;role:string;verified:boolean}) {
   const base = `organizations/${tenantId}/brands/${brandId}`;
   const [data,setData] = useState<Overview|null>(null); const [error,setError] = useState(''); const [pending,setPending] = useState(false);
-  const [tab,setTab] = useState<'strategy'|'ideas'|'scripts'|'jobs'|'consents'>('strategy');
+  const [tab,setTab] = useState<'strategy'|'ideas'|'scripts'|'jobs'|'consents'|'media'>('strategy');
   const [options,setOptions] = useState<GenerationOptions>(()=>generationOptionsSchema.parse({}));
   const [selected,setSelected] = useState<Script|null>(null); const [draft,setDraft] = useState<ScriptOutput|null>(null);
   const [history,setHistory] = useState<Array<{version:number;content:ScriptOutput}>>([]);
@@ -48,7 +49,8 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified}:{tenant
     {data&&!data.configuration.ready?<p className="notice warning">CONFIGURATION_REQUIRED: AI-провайдер ещё не настроен.</p>:null}
     {!verified?<p className="notice warning">Подтвердите email для генерации и одобрения контента.</p>:null}
     {error?<p className="notice error" role="alert">{error}</p>:null}
-    <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия']] as const).map(([key,label])=><button className={tab===key?'active':''} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+    <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+    {tab==='media'?<MediaLibrary base={base} canWrite={canGenerate}/>:null}
     {tab==='consents'?<ConsentCenter base={base} role={role}/>:null}
     {!data?<div className="loading" role="status"><LoaderCircle className="spin"/>Загружаем контент…</div>:null}
     {tab==='strategy'&&data?<section><div className="section-heading"><h2>Маркетинговая стратегия</h2><button className="button primary" disabled={pending||!canStrategy||!data.configuration.ready} onClick={()=>generate('GENERATE_STRATEGY')}><Sparkles size={16}/>Создать стратегию · {cost('GENERATE_STRATEGY')} кр.</button></div>{strategyContent?<><label>Версия стратегии<select value={strategy?.version} onChange={e=>setStrategyVersion(Number(e.target.value))}>{data.strategies.map(item=><option key={item.id} value={item.version}>Версия {item.version}</option>)}</select></label><div className="panel"><h3>Позиционирование</h3><p className="preserve-lines">{strategyContent.positioning}</p><div className="summary-grid">{[['Аудитория',strategyContent.audienceSegments],['Боли',strategyContent.pains],['Желания',strategyContent.desires],['Возражения',strategyContent.objections],['Форматы',strategyContent.formats],['Воронка',strategyContent.funnelStages],['CTA',strategyContent.ctas],['Лид-магниты',strategyContent.leadMagnets],['Гипотезы',strategyContent.hypotheses],['Каналы',strategyContent.recommendedChannels]].map(([title,values])=><div key={String(title)}><h3>{title}</h3><ul>{(values as string[]).map((value,i)=><li className="preserve-lines" key={i}>{value}</li>)}</ul></div>)}</div><h3>Голос бренда</h3><p>{strategyContent.toneOfVoice}</p><h3>Частота</h3><p>{strategyContent.frequency}</p><h3>Контентные направления</h3>{strategyContent.contentPillars.map((pillar,i)=><p key={i}><strong>{pillar.name}:</strong> {pillar.purpose}</p>)}</div><h2>План на 30 дней</h2><div className="plan-grid">{strategyContent.plan.map(day=><article className="panel" key={day.day}><span className="badge">День {day.day} · {day.platform}</span><h3>{day.topic}</h3><p>{day.format} · {day.funnelStage}</p><small>{day.cta}</small></article>)}</div></>:<div className="panel empty">Создайте первую стратегию на основе Brand Brain. Каждая новая версия сохранится отдельно.</div>}</section>:null}

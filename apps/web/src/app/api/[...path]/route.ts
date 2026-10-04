@@ -1,12 +1,12 @@
 import { cookies } from 'next/headers';
 import { DomainError } from '@contentos/types';
 import { services, sessionCookie } from '../../../server/services';
-import { apiResponse, assertOrigin, clientAddress, readBody } from '../../../server/api';
+import { apiResponse, assertOrigin, clientAddress, readBody, readPhotoUpload } from '../../../server/api';
 export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, env } = services();
+    const { auth, brands, generation, consent, media, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +41,16 @@ async function dispatch(request: Request, context: RouteContext) {
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if (path[3] && path[4] === 'media') {
+          if (path.length === 5 && request.method === 'GET') return ok(await media.overview(user.userId,tenantId,path[3]));
+          if (path.length === 5 && request.method === 'POST') {
+            await media.authorizeUpload(user.userId,tenantId,path[3]);
+            const upload = await readPhotoUpload(request);
+            return ok(await media.upload(user.userId,tenantId,path[3],upload.input,upload.bytes,correlationId),201);
+          }
+          if (path[5] && path[6] === 'download' && path.length === 7 && request.method === 'GET') return ok(await media.download(user.userId,tenantId,path[3],path[5],correlationId));
+          if (path[5] && path[6] === 'delete' && path.length === 7 && request.method === 'POST') return ok(await media.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+        }
         if (path[3] && path[4] === 'consents') {
           if (path.length === 5 && request.method === 'GET') return ok(await consent.overview(user.userId, tenantId, path[3]));
           if (path.length === 5 && request.method === 'POST') return ok(await consent.accept(user.userId, tenantId, path[3], await readBody(request), {ip, userAgent: request.headers.get('user-agent') ?? ''}, correlationId), 201);

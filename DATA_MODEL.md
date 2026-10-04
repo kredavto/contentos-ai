@@ -1,5 +1,7 @@
 # Data model
 
+This is the target model. The current schema and completed subsets are recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md); not all tables below have been implemented.
+
 UUID keys and timestamptz timestamps throughout. `tenant_id` refers to organizations. OrganizationMember joins user/organization with OWNER, ADMIN, MANAGER, EDITOR, CLIENT_APPROVER or VIEWER; unique membership per pair. Workspaces belong to organizations; brands belong to workspace and organization. All tenant-owned child relations use matching tenant IDs and composite foreign keys.
 
 Identity: users, sessions, auth_tokens, organizations, organization_members, workspaces, brands.
@@ -12,3 +14,5 @@ Billing: plans, subscriptions, payments, usage_ledger, usage_reservations. Price
 Operations: jobs, outbox, webhook_events, notifications, audit_logs, feature_flags, deletion_requests. Unique provider/event key; audit keeps safe metadata rather than secret or sensitive content.
 
 Indexes prioritize tenant + parent/status/scheduled_at. Monetary values use integer minor units plus currency. Missing metrics remain null/unavailable. Hard deletion follows ordered domain workflow; audit entries retain only minimal non-sensitive action metadata.
+
+Implemented media slice: `media_assets` has a tenant/brand foreign key, tenant-scoped upload-idempotency uniqueness, upload and deletion leases, content validation constraints and cleanup indexes. `consent_subjects` and immutable `consent_records` retain exact policy evidence and revocation.

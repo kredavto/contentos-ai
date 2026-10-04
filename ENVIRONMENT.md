@@ -15,3 +15,7 @@ Implemented identity slice: SMTP_URL (smtp/smtps connection URI), EMAIL_FROM. Us
 Set `AI_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL` on both web and worker for real generation. Model selection is explicit; no model or API key is silently provisioned. Missing configuration returns `CONFIGURATION_REQUIRED`. Use `AI_PROVIDER=mock` only for local/CI fixture generation; production validation rejects it. The UI identifies mock output visibly. `WORKER_HEALTH_PORT` optionally serves loopback `/health`; expose via an internal proxy only. Web and worker must use the same PostgreSQL, Redis and AI configuration.
 
 Local: copy `.env.example` to `.env`, choose `AI_PROVIDER=mock` for a no-cost walkthrough, run `pnpm db:migrate`, then `pnpm dev` to run web and worker. Request starter credits once from the content studio after verifying email. Credit prices come from `usage_policies`, not UI constants. The starter grant is one per verified owner account across organizations.
+
+## Photo storage
+
+See [private media configuration](docs/media-storage.md). Both web and worker require the same private S3 bucket settings. `.env.example` lists the complete allowlist. Storage is disabled by default; no cloud credentials are bundled.

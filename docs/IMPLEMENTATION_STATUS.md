@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Identity, Brand Brain and rate-limit schema: 39 tables with five SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 40 tables with six SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -27,16 +27,22 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 
 - Versioned, subject-scoped consent center: explicit acceptance, immutable evidence, idempotency, tenant and role checks, withdrawal of duplicate active grants, audit history and reload persistence. Media execution enforcement remains to be wired.
 - Official HeyGen v3 adapter: photo avatars/looks, public catalogs, voices, video submission/status and private avatar deletion. Bounded requests, validated responses, safe errors and idempotency propagation; contract-tested without paid requests.
-- S3 adapter: tenant-prefixed private objects, bounded transfer sizes, MIME restrictions and short-lived signed downloads; SDK tested against a local HTTP fixture. Not yet wired to media UI.
+- S3 adapter: tenant-prefixed private objects, bounded transfer sizes, MIME restrictions and short-lived signed downloads; SDK tested against a local HTTP fixture. Now wired to the private photo library.
 - Authorized HeyGen account verified through the connected plugin. User selected their private avatar and a short test was submitted through the HeyGen plugin; provider accepted it and returned processing status. This does not verify the application server adapter end to end. The separate server API key is unavailable until the account completes API funding; no payment or key creation was performed.
+
+## Private photo library
+
+- Tenant/brand-owned photo uploads, stream/body limits, real raster decoding and MIME checks, orientation, metadata removal, private JPEG storage, signed previews and writer-role checks.
+- Upload intent idempotency and lease fencing; database-backed deletion with retries, abandoned-upload cleanup and late-write sweeps. See [media workflow](media-storage.md).
+- The Media tab supports upload, preview and deletion; mobile tabs wrap to keep every section visible. Real cloud bucket configuration remains outstanding.
 
 ## Verification evidence
 
 - Typecheck for all 9 workspace packages and test sources passed.
 - ESLint passed.
-- 45 tests in 10 Vitest files passed against real PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts.
-- 2 Playwright tests passed in installed Chrome: register → SMTP email → verify → login → organization → brand → 15 onboarding steps → save/reload/resume → Brand Brain → starter credits → strategy/30-day plan → ideas → script → manual edit/version history → approval → mobile logout, consent acceptance → revocation → reload persistence, plus CSRF/anonymous request rejection. HttpOnly/SameSite cookie assertions and no browser page errors.
-- Agent-browser verified homepage renders, navigation exists and no Next error overlay/browser errors. Desktop/mobile dashboard screenshots visually inspected; mobile overflow check passed.
+- 52 tests in 12 Vitest files passed against real PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts, consent evidence/revocation, HeyGen/S3 contracts, safe photo decoding, upload idempotency, tenant/brand media access and durable deletion/fencing.
+- 2 Playwright tests passed in installed Chrome: register → SMTP email → verify → login → organization → brand → 15 onboarding steps → save/reload/resume → Brand Brain → starter credits → strategy/30-day plan → ideas → script → manual edit/version history → approval → mobile logout, consent acceptance → revocation → reload persistence, photo upload → signed preview → worker deletion, plus CSRF/anonymous request rejection. HttpOnly/SameSite cookie assertions and no browser page errors.
+- Agent-browser verified homepage renders, navigation exists and no Next error overlay/browser errors. Desktop/mobile dashboard and media-library screenshots visually inspected; mobile overflow check passed.
 - Production Next.js build passed for implemented routes.
 - Browser tests caught and fixed Strict Mode token clearing and textarea label association after reload.
 
@@ -46,10 +52,10 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Extend the implemented text-job engine to video, publishing and webhooks, including external-operation reconciliation and provider pricing configuration.
 - Official documentation research and real adapters for captions/media, YooKassa, YouTube/TikTok/Meta/VK/Telegram; production configuration and live verification of HeyGen/S3 remain pending.
 - Remaining AI workflows beyond strategy/ideas/scripts; content calendar with drag/drop and downstream content transitions.
-- Consent enforcement in media jobs, avatars/looks/voices, video state machine, FFmpeg processing, captions editor, cover studio, B-roll and media library.
+- Consent enforcement in media jobs, avatars/looks/voices, video state machine, FFmpeg processing, captions editor, cover studio, B-roll and video/audio media library.
 - Social OAuth token encryption/refresh, publishing approval/autopilot, UTC scheduler, verified/idempotent webhooks, publication status and normalized/raw analytics.
 - AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
-- Admin/support/audit UI, notifications, privacy export/deletion workflows, encryption/rotation, signed media URLs, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
+- Admin/support/audit UI, notifications, privacy export/deletion workflows, encryption/rotation, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
 - Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
 - Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
 - Vercel deployment and verification. No deployment has happened; scaffold/partial functionality is not represented as the finished product.
@@ -60,7 +66,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with tenant-owned media uploads, consent-bound avatar/video jobs and video state machine/FFmpeg. Research official APIs first. Keep the complete original scope intact.
+Continue with consent-bound avatar/video jobs and video state machine/FFmpeg. Research official APIs first. Keep the complete original scope intact.
 
 ## Local environment notes
 
@@ -73,3 +79,5 @@ Docker public pulls initially hung in docker-credential-desktop. Task-owned hang
 - Full source pushed to GitHub main (97f41ba); CI run https://github.com/kredavto/contentos-ai/actions/runs/37195435512 passed every required step.
 - CLI OAuth lacks workflow scope. Connected GitHub connector has workflow permission: initial CI file was created through it, then local history merged and source pushed normally. Future workflow edits may need connector update_file followed by fetch/merge. No user credential settings changed.
 - Production dependency audit found vulnerabilities in initial Nodemailer 7. Upgraded to Nodemailer 10.0.14 (bundled types), confirmed `pnpm audit --prod`: no known vulnerabilities. SMTP registration/verification E2E re-passed in a fresh server against PostgreSQL 17 after upgrade; dedicated test port avoids unrelated projects. Follow-up committed as 7a1d85b. Generation slice pushed in main at 012616c; CI run 37196472249 passed. Local environment correction 285b683 also passed CI (37196498738).
+
+- Consent/provider foundation df2b98f passed remote CI run 37197301005. Photo-library local verification passed 52 Vitest tests and both Playwright scenarios (including upload/preview/deletion). Browser tests now wait for the actual API route to compile, rather than only the lightweight liveness endpoint. On the 8 GiB development machine, password hashing took about 15 seconds during concurrent browser activity versus under a second in a direct HTTP check; safe phase timings were added without changing the password KDF. Run typechecking and browser tests sequentially. Turbo typecheck concurrency and Vitest worker count are capped at two to reduce memory pressure.

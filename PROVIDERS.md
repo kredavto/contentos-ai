@@ -15,3 +15,7 @@ Before implementing an adapter, review current official documentation and record
 ## HeyGen v3
 
 Real photo avatar, public avatar/voice discovery, avatar status/deletion and direct video submission/status adapters are implemented with contract tests. They are not yet wired to a consent-gated media job flow or used with live credentials. See [API evidence and remaining integration work](docs/heygen-integration.md).
+
+## Private S3 photos
+
+The real AWS SDK S3 adapter now backs the brand photo library with bounded uploads, signed GET URLs and persistent deletion retries. Core services decode and sanitize photos before storage. Loopback transport tests cover the UI and worker; no production bucket is connected. See [media workflow and configuration](docs/media-storage.md).

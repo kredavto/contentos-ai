@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 test('register, verify email, create organization and resume 15-step onboarding', async ({ page, request }) => {
   const email = `browser-${randomUUID()}@example.test`;
   const errors: string[] = [];
@@ -102,6 +103,21 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await expect(page.getByText('Действует',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Отозвать согласие',exact:true}).click();
   await expect(page.getByText('Отозвано',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Медиа',exact:true}).click();
+  const photo=await sharp({create:{width:320,height:480,channels:3,background:'#7bbaa7'}}).png().toBuffer();
+  await page.getByLabel('Фотография',{exact:true}).setInputFiles({name:'Тестовая фотография.png',mimeType:'image/png',buffer:photo});
+  await page.getByRole('button',{name:'Загрузить фотографию',exact:true}).click();
+  await expect(page.getByRole('status')).toHaveText('Фотография сохранена');
+  await page.getByRole('button',{name:'Открыть фотографию',exact:true}).click();
+  const preview=page.getByRole('img',{name:'Предпросмотр: Тестовая фотография.png',exact:true});
+  await expect(preview).toBeVisible();
+  await expect.poll(()=>preview.evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBe(320);
+  await page.screenshot({path:'test-results/media-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/media-mobile.png',fullPage:true});
+  await page.getByRole('button',{name:'Удалить фотографию',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Тестовая фотография.png',exact:true})).toHaveCount(0,{timeout:20000});
   await page.reload();
   await page.getByRole('button',{name:'Согласия',exact:true}).click();
   await expect(page.getByText('Отозвано',{exact:true})).toBeVisible();

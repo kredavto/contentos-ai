@@ -38,8 +38,12 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-The integration suite runs when TEST_DATABASE_URL is present; otherwise it is explicitly skipped. Playwright requires it and starts a loopback SMTP sink (1026/8026) plus the web server on port 3187. Stop any existing development server before running E2E. Use PLAYWRIGHT_CHANNEL=chrome for an installed Google Chrome. CI runs migrations, typecheck (including tests), lint, unit/integration tests, production build and E2E.
+The integration suite runs when TEST_DATABASE_URL is present; otherwise it is explicitly skipped. Playwright requires it and starts a loopback SMTP sink (1026/8026), an S3 transport fixture (8027), and the web server on port 3187. Stop any existing development server before running E2E. Use PLAYWRIGHT_CHANNEL=chrome for an installed Google Chrome. CI runs migrations, typecheck (including tests), lint, unit/integration tests, production build and E2E.
 
 ## Architecture
 
 [Architecture](ARCHITECTURE.md) · [Data model](DATA_MODEL.md) · [Security](SECURITY.md) · [Providers](PROVIDERS.md) · [Deployment](DEPLOYMENT.md) · [Environment](ENVIRONMENT.md) · [Engineering rules](AGENTS.md).
+
+## Private photo library
+
+The brand content studio includes a Media tab for private photo uploads, short-lived previews and durable deletion. Configure the same private S3 bucket on web and worker using `.env.example`. Details and limits: [media storage](docs/media-storage.md). Without storage credentials the UI reports that configuration is required. Avatar/video jobs remain in development.

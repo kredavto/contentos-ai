@@ -14,3 +14,4 @@ export * from './repositories/jobs';
 export * from './repositories/ai-calls';
 export * from './repositories/content';
 export * from './repositories/consent';
+export * from './repositories/media';

@@ -13,3 +13,4 @@ export * from './providers';
 export * from './onboarding';
 export * from './generation';
 export * from './consent';
+export * from './media';
