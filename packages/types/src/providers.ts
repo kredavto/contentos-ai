@@ -34,6 +34,9 @@ export interface AvatarProvider {
 export interface VoiceProvider {
   synthesize(input: { text: string; voice: ProviderReference }, context: OperationContext): Promise<{ bytes: Uint8Array; mimeType: string; durationSeconds: number }>;
 }
+export interface VoiceCatalogProvider {
+  listPublicVoicePage(cursor:string|undefined,context:OperationContext):Promise<{voices:Array<{reference:ProviderReference;name:string;language:string|null;previewUrl:string|null}>;nextCursor:string|null}>;
+}
 export interface VideoProvider {
   submit(input: { script: string; avatar: ProviderReference; voice: ProviderReference; width: number; height: number }, context: OperationContext): Promise<ProviderReference>;
   status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; downloadUrl?: string; errorCode?: string }>;

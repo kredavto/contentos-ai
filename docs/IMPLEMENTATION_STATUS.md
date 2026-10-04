@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 42 tables with seven SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 43 tables with eight SQL migrations. Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -43,12 +43,18 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Russian Avatar tab, readiness/progress, explicit development DEMO, manager resume and group deletion. Production mock forbidden; missing server credentials remain CONFIGURATION_REQUIRED. See [avatar workflow](avatar-jobs.md).
 - Expired unknown submissions still need an operator investigation workflow; voice profiles, video generation and provider configuration UI remain pending.
 
+## Public voice selection
+
+- Paginated HeyGen public voice catalog with tenant/brand-owned internal profile IDs, stable refresh, bounded responses and 30 refresh requests per tenant per minute.
+- Avatar voice selection checks writer role, brand and matching provider. Optional public sample playback; no private account voices are discovered or exposed. Cloning remains pending and will require VOICE_CLONING evidence.
+- Server credentials use the same configured HeyGen connection. No live catalog request was made without the missing API key; development uses an explicit demo voice.
+
 ## Verification evidence
 
 - Typecheck for all 9 workspace packages and test sources passed.
 - ESLint passed.
-- 61 tests in 13 Vitest files passed against real PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts, consent evidence/revocation, HeyGen/S3 contracts, safe photo decoding, upload idempotency, tenant/brand media access, avatar reservation/capture/release, consent-bound jobs, expired replay windows, late references, normal polling and durable deletion/fencing.
-- 2 Playwright tests passed in installed Chrome: register → SMTP email → verify → login → organization → brand → 15 onboarding steps → save/reload/resume → Brand Brain → starter credits → strategy/30-day plan → ideas → script → manual edit/version history → approval → mobile logout, consent acceptance → revocation → reload persistence, photo upload → signed preview → consent grant → avatar job → ready → credit capture → worker group deletion → photo deletion, plus CSRF/anonymous request rejection. HttpOnly/SameSite cookie assertions and no browser page errors.
+- 63 tests in 13 Vitest files passed against real PostgreSQL 17. Coverage: role policy, foreign-key tenant isolation, concurrent token consumption, sessions/password reset, stale login prevention, atomic rate limits, normalized onboarding and revision conflicts, consent evidence/revocation, HeyGen/S3 contracts, safe photo decoding, upload idempotency, tenant/brand media access, avatar reservation/capture/release, consent-bound jobs, expired replay windows, late references, normal polling and durable deletion/fencing.
+- 2 Playwright tests passed in installed Chrome: register → SMTP email → verify → login → organization → brand → 15 onboarding steps → save/reload/resume → Brand Brain → starter credits → strategy/30-day plan → ideas → script → manual edit/version history → approval → mobile logout, consent acceptance → revocation → reload persistence, photo upload → signed preview → consent grant → avatar job → ready → credit capture → public voice selection/reopen persistence → worker group deletion → photo deletion, plus CSRF/anonymous request rejection. HttpOnly/SameSite cookie assertions and no browser page errors.
 - Agent-browser verified homepage renders, navigation exists and no Next error overlay/browser errors. Desktop/mobile dashboard, media-library and avatar screenshots visually inspected; mobile overflow check passed.
 - Production Next.js build passed for implemented routes.
 - Browser tests caught and fixed Strict Mode token clearing and textarea label association after reload.
@@ -90,3 +96,7 @@ Docker public pulls initially hung in docker-credential-desktop. Task-owned hang
 - Consent/provider foundation df2b98f passed remote CI run 37197301005. Photo-library local verification passed 52 Vitest tests and both Playwright scenarios (including upload/preview/deletion). Browser tests now wait for the actual API route to compile, rather than only the lightweight liveness endpoint. On the 8 GiB development machine, password hashing took about 15 seconds during concurrent browser activity versus under a second in a direct HTTP check; safe phase timings were added without changing the password KDF. Run typechecking and browser tests sequentially. Turbo typecheck concurrency and Vitest worker count are capped at two to reduce memory pressure.
 
 - Photo-library commit 82560cd passed CI run 37199129058. Avatar development now has 61 passing tests and both Playwright scenarios passed (1.4 minutes), including avatar completion/credits/deletion. The browser check exposed ambiguous select labels; explicit accessible names fixed the consent/avatar forms. Fresh production build passed (9 seconds).
+
+- Avatar Studio commit 0ae5c7b passed remote CI run 37200140389.
+
+- Public voice selection passed both browser tests (1.6 minutes), including persistence after reopening Avatar Studio; mobile layout inspected. FFmpeg/FFprobe 9.0.2 binaries from the macOS distributor linked by ffmpeg.org are available locally at /tmp/contentos-ffmpeg/ffmpeg and /tmp/contentos-ffmpeg/ffprobe; both version commands succeeded. They are not yet integrated into the worker or CI.

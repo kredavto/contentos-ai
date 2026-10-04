@@ -131,6 +131,12 @@ test('register, verify email, create organization and resume 15-step onboarding'
   const avatarCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Вымышленный тестовый образ',exact:true})});
   await expect(avatarCard.getByText('Готово',{exact:true})).toBeVisible({timeout:60000});
   await expect(page.getByText('80 AI-кредитов',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Обновить каталог голосов',exact:true}).click();
+  await avatarCard.getByLabel('Голос для Вымышленный тестовый образ',{exact:true}).selectOption({label:'Демо-голос · Russian'});
+  await expect(page.getByRole('status')).toHaveText('Голос сохранён');
+  await page.getByRole('button',{name:'Медиа',exact:true}).click();
+  await page.getByRole('button',{name:'Аватары',exact:true}).click();
+  await expect(avatarCard.getByLabel('Голос для Вымышленный тестовый образ',{exact:true})).not.toHaveValue('');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/avatars-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});

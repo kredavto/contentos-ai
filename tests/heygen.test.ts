@@ -54,4 +54,11 @@ describe('HeyGen v3 adapters',()=>{
       await expect(provider.status(ref,context)).rejects.toThrow('PROVIDER_REJECTED');
     }
   });
+  it('loads one public voice page, encodes cursors and excludes private voices',async()=>{
+    const provider=new HeyGenVideoProvider(new HeyGenClient('test',async(url)=>{
+      expect(String(url)).toContain('type=public&limit=50&token=next%2Fpage');
+      return response({data:[{voice_id:'public-1',name:'Public fixture',type:'public',language:'Russian'},{voice_id:'private-1',name:'Private fixture',type:'private'}],has_more:false,next_token:null});
+    }));
+    const page=await provider.listPublicVoicePage('next/page',context);expect(page.voices).toHaveLength(1);expect(page.voices[0]?.reference.metadata.public).toBe(true);expect(page.nextCursor).toBeNull();
+  });
 });

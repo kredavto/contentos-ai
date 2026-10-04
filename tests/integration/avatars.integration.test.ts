@@ -1,7 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {createDatabase,AvatarRepository,ConsentRepository,MediaRepository,LedgerRepository} from '../../packages/db/src/index';
+import {createDatabase,AvatarRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {VoiceService} from '../../packages/core/src/voices';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
 import {MediaService} from '../../packages/core/src/media';
@@ -94,5 +95,21 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     const pending=new AvatarProcessor(database.db,{name:connection.name,provider:{...provider,status:async()=>({status:'PROCESSING',previewUrl:null})}},storage,true);
     for(let i=0;i<5;i++){await due(job.id);await pending.run(tenantId,job.id);}
     expect((await row(job.id)).status).toBe('WAITING_EXTERNAL');await due(job.id);await processor.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');
+  });
+  it('keeps public voice IDs stable and restricts assignment by brand, tenant and role',async()=>{
+    const catalog={name:connection.name,provider:{listPublicVoicePage:async()=>({voices:[{name:'Public fixture',language:'Russian',previewUrl:null,reference:{provider:connection.name,externalId:'public-test',internalId:randomUUID(),metadata:{public:true}}}],nextCursor:null})}};
+    const voices=new VoiceService(new VoiceRepository(database.db),catalog);
+    await expect(voices.refresh(viewerId,tenantId,brandId,{},correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await voices.refresh(userId,tenantId,brandId,{},correlationId);const first=(await voices.overview(userId,tenantId,brandId)).voices[0]!;
+    await voices.refresh(userId,tenantId,brandId,{},correlationId);expect((await voices.overview(userId,tenantId,brandId)).voices[0]?.id).toBe(first.id);
+    expect(JSON.stringify(first)).not.toContain('externalId');
+    const {subject}=await person();const job=await service.create(userId,tenantId,brandId,request(subject),correlationId);
+    const look=(await service.overview(userId,tenantId,brandId)).looks.find(look=>look.jobId===job.id)!;
+    await expect(voices.select(viewerId,tenantId,brandId,look.avatarId,{voiceId:first.id},correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(voices.select(userId,tenantId,randomUUID(),look.avatarId,{voiceId:first.id},correlationId)).rejects.toThrow('NOT_FOUND');
+    await voices.select(userId,tenantId,brandId,look.avatarId,{voiceId:first.id},correlationId);
+    expect((await service.overview(userId,tenantId,brandId)).looks.find(item=>item.id===look.id)?.voiceId).toBe(first.id);
+    const unsafe=new VoiceService(new VoiceRepository(database.db),{name:connection.name,provider:{listPublicVoicePage:async()=>({voices:[{name:'Private',language:null,previewUrl:null,reference:{provider:connection.name,externalId:'private',internalId:randomUUID(),metadata:{public:false}}}],nextCursor:null})}});
+    await expect(unsafe.refresh(userId,tenantId,brandId,{},correlationId)).rejects.toThrow('PROVIDER_REJECTED');
   });
 });

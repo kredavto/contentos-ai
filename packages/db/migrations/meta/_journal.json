@@ -50,6 +50,13 @@
       "when": 1791114200831,
       "tag": "0006_even_whiplash",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791114808178,
+      "tag": "0007_smart_nick_fury",
+      "breakpoints": true
     }
   ]
 }

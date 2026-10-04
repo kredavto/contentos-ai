@@ -3,8 +3,8 @@ import { DomainError, ProviderRequestError, type AvatarProvider, type VideoProvi
 const externalId = z.string().min(1).max(255);
 const httpsUrl = z.url().refine(value=>new URL(value).protocol === 'https:');
 const lookSchema = z.object({id:externalId,name:z.string(),group_id:externalId,status:z.enum(['processing','completed','failed']),preview_image_url:httpsUrl.nullish()});
-const pageSchema = <T extends z.ZodType>(item:T)=>z.object({data:z.array(item),has_more:z.boolean(),next_token:z.string().nullish()});
-const voiceSchema = z.object({voice_id:externalId,name:z.string(),language:z.string().nullish(),type:z.enum(['public','private']),preview_audio_url:httpsUrl.nullish()});
+const pageSchema = <T extends z.ZodType>(item:T)=>z.object({data:z.array(item).max(100),has_more:z.boolean(),next_token:z.string().nullish()});
+const voiceSchema = z.object({voice_id:externalId,name:z.string().min(1).max(200),language:z.string().max(100).nullish(),type:z.enum(['public','private']),preview_audio_url:httpsUrl.nullish()});
 function reference(context:OperationContext,id:string,metadata:Record<string,unknown>={}):ProviderReference{return {provider:'heygen',externalId:id,internalId:context.internalId,metadata};}
 function checkReference(value:ProviderReference){if(value.provider!=='heygen')throw new DomainError('INVALID_INPUT');return encodeURIComponent(externalId.parse(value.externalId));}
 /** Official v3 transport. No implicit mutation retries; durable jobs own replay. */
@@ -69,6 +69,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 }
 export class HeyGenVideoProvider implements VideoProvider {
   constructor(private readonly client:HeyGenClient) {}
+  async listPublicVoicePage(cursor:string|undefined,context:OperationContext) {
+    if(cursor!==undefined)z.string().min(1).max(2048).parse(cursor);
+    const result=await this.client.request(`/v3/voices?type=public&limit=50${cursor?`&token=${encodeURIComponent(cursor)}`:''}`,'GET',pageSchema(voiceSchema),context);
+    if(result.has_more&&(!result.next_token||result.next_token===cursor))throw new DomainError('PROVIDER_REJECTED',502);
+    return {voices:result.data.filter(voice=>voice.type==='public').map(voice=>({reference:reference(context,voice.voice_id,{public:true}),name:voice.name,language:voice.language??null,previewUrl:voice.preview_audio_url??null})),nextCursor:result.has_more?result.next_token!:null};
+  }
   async submit(input:Parameters<VideoProvider['submit']>[0],context:OperationContext) {
     checkReference(input.avatar);checkReference(input.voice);
     const ratio=input.width/input.height;

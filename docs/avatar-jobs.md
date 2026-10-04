@@ -15,3 +15,7 @@ Deletion immediately blocks use and cancels pending work. A persistent cleanup w
 Unresolved limitation: an expired unknown submission requires operator investigation with HeyGen. No user-facing/manual reference injection or automatic duplicate creation is provided. The broader support/admin reconciliation workflow and retention policy are still pending. Do not represent such a task as successful or deleted.
 
 Official contracts: https://developers.heygen.com/reference/create-avatar, https://developers.heygen.com/reference/get-avatar-look, https://developers.heygen.com/reference/delete-avatar-group.
+
+## Voice selection
+
+The avatar stores an internal voice profile ID, selected from the server-verified public catalog. POST /voices refreshes one page (at most 50 requested records, capped at 100 accepted records), GET /voices returns up to 500 recently refreshed brand profiles, and POST /avatars/:id/voice checks same tenant, brand and provider. Public catalog IDs remain stable across refreshes. Refresh is limited to 30 requests per tenant per minute. Catalog pagination is explicit; browser input cannot inject a private external reference. Audio samples are optional public HTTPS URLs supplied by the provider. Personal voice cloning is still pending. Future video jobs must snapshot the selected profile and recheck applicable consent; this selection alone does not start a render.

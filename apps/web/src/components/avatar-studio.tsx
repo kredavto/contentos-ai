@@ -1,21 +1,23 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
-import type {AvatarService,ConsentService,MediaService} from '@contentos/core';
+import type {AvatarService,ConsentService,MediaService,VoiceService} from '@contentos/core';
 import {api} from '../lib/api-client';
 type Overview=Awaited<ReturnType<AvatarService['overview']>>;
-type Sources={media:Awaited<ReturnType<MediaService['overview']>>;consents:Awaited<ReturnType<ConsentService['overview']>>};
+type Voices=Awaited<ReturnType<VoiceService['overview']>>;
+type Sources={voices:Voices;media:Awaited<ReturnType<MediaService['overview']>>;consents:Awaited<ReturnType<ConsentService['overview']>>};
 const labels={QUEUED:'В очереди',PROCESSING:'Обрабатывается',READY:'Готово',FAILED:'Ошибка',RECONCILIATION:'Требуется проверка'};
 export function AvatarStudio({base,canWrite,canManage,cost}:{base:string;canWrite:boolean;canManage:boolean;cost?:number}){
   const [data,setData]=useState<Overview|null>(null),[sources,setSources]=useState<Sources|null>(null);
   const [name,setName]=useState(''),[subjectId,setSubjectId]=useState(''),[sourceAssetId,setSourceAssetId]=useState(''),[avatarId,setAvatarId]=useState('');
   const [likenessType,setLikenessType]=useState<'OWN_LIKENESS'|'THIRD_PARTY_LIKENESS'>('OWN_LIKENESS');
   const [pending,setPending]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [voiceCursor,setVoiceCursor]=useState<string|null|undefined>(undefined);
   const intent=useRef<{payload:string;key:string}|null>(null);
   useEffect(()=>{
     let active=true;let timer:ReturnType<typeof setTimeout>;
     async function poll(){try{
-      const [overview,media,consents]=await Promise.all([api<Overview>(`${base}/avatars`),api<Sources['media']>(`${base}/media`),api<Sources['consents']>(`${base}/consents`)]);
-      if(active){setData(overview);setSources({media,consents});}
+      const [overview,media,consents,voices]=await Promise.all([api<Overview>(`${base}/avatars`),api<Sources['media']>(`${base}/media`),api<Sources['consents']>(`${base}/consents`),api<Voices>(`${base}/voices`)]);
+      if(active){setData(overview);setSources({media,consents,voices});}
     }catch(failure){if(active)setError(failure instanceof Error?failure.message:'Не удалось загрузить аватары');}
     finally{if(active)timer=setTimeout(()=>void poll(),5000);}}
     void poll();return()=>{active=false;clearTimeout(timer);};
@@ -46,8 +48,14 @@ export function AvatarStudio({base,canWrite,canManage,cost}:{base:string;canWrit
       <button className="button primary" disabled={pending||!data?.configuration.ready||!consentReady||!sourceAssetId||!name.trim()||cost===undefined}>Создать образ · {cost??'—'} кр.</button>
     </form>:null}
     {data&&!data.looks.length?<div className="panel empty">Здесь появятся ваши аватары и их образы.</div>:null}
+    <div className="panel stack"><h3>Голоса для аватаров</h3><p className="muted">Публичные голоса провайдера. Клонирование личного голоса пока не подключено.</p>{canWrite?<button className="button secondary" disabled={pending||!sources?.voices.configuration.ready} onClick={()=>void perform(async()=>{
+      const result=await api<{nextCursor:string|null}>(`${base}/voices`,'POST',voiceCursor?{cursor:voiceCursor}:{});setVoiceCursor(result.nextCursor);
+      const voices=await api<Voices>(`${base}/voices`);setSources(current=>current?{...current,voices}:current);
+    })}>{voiceCursor?'Загрузить ещё голоса':'Обновить каталог голосов'}</button>:null}</div>
     <div className="plan-grid">{data?.looks.map(look=><article className="panel stack" key={look.id}>
       <span className="badge">{look.avatarStatus==='DELETE_PENDING'?'Удаляется':labels[look.status]}</span><h3>{look.name}</h3><small>{look.avatarName}</small>
+      {look.avatarStatus==='ACTIVE'?<label>Голос аватара<select aria-label={`Голос для ${look.name}`} disabled={pending||!canWrite} value={look.voiceId??''} onChange={event=>{const voiceId=event.target.value;if(voiceId)void perform(async()=>{await api(`${base}/avatars/${look.avatarId}/voice`,'POST',{voiceId});setNotice('Голос сохранён');});}}><option value="">Выберите голос</option>{sources?.voices.voices.map(voice=><option key={voice.id} value={voice.id}>{voice.name}{voice.language?` · ${voice.language}`:''}</option>)}</select></label>:null}
+      {look.avatarStatus==='ACTIVE'&&sources?.voices.voices.find(voice=>voice.id===look.voiceId)?.previewUrl?<audio style={{width:'100%'}} controls preload="none" aria-label={`Образец голоса для ${look.name}`} src={sources.voices.voices.find(voice=>voice.id===look.voiceId)!.previewUrl!}/>:null}
       {!look.consentValid?<p className="notice warning">Согласие отозвано или устарело. Использование этого образа заблокировано.</p>:null}
       {look.status==='FAILED'&&look.avatarStatus==='ACTIVE'?<p className="notice error">Создать образ не удалось. Зарезервированные кредиты возвращены.</p>:null}
       {look.status==='RECONCILIATION'?<p className="notice warning">Результат запроса требует проверки. Кредиты остаются зарезервированы. Не создавайте дубликат; обратитесь к администратору, если повторная проверка недоступна.</p>:null}
