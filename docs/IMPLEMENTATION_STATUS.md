@@ -170,3 +170,13 @@ Encrypted-connections commit f7f7bf3 passed remote CI run 37205056767.
 Both browser scenarios passed in 4.4 minutes, including scheduled video delivery through the real BullMQ/storage pipeline with the explicitly mocked remote sender, saved publication status, mobile overflow checks and desktop/mobile visual review. The browser run exposed a calendar refresh race: controls now remain pending until refreshed rows arrive, and outdated responses cannot overwrite newer data. No live Telegram message was sent.
 
 Final publishing verification: 118 tests in 25 files, production build, final workspace/test typecheck and lint passed. The published acknowledgement uses the same explicit timezone as the schedule.
+
+## Manual publication analytics
+
+Migration 0016 adds immutable, tenant-scoped publication observations with all twelve normalized metrics, explicit nulls, MANUAL provenance, source note, author and observation/recording times. Managers can record a full observation or correction idempotently; histories cannot be overwritten. The Analytics tab displays recent publications, latest observations and bounded history with browser-timezone input, clear demo labels, empty/error/loading states and no fabricated zeros or summation across snapshots. See [analytics scope and remaining provider work](analytics.md).
+
+Automatic FETCH_ANALYTICS, channel metrics, raw provider payloads and AI recommendations are not implemented by this slice. Payments, additional workflows and deployment remain outstanding. Publishing commit 4cafeb7 passed remote CI run 37206257515.
+
+Verification: all 124 tests across 26 files passed with PostgreSQL and real FFmpeg enabled. The final analytics/publishing regression passed 13 tests, including zero/null semantics, invalid values, time bounds, immutable history, concurrent idempotency and real organization/brand isolation. Both Playwright scenarios passed in 5.6 minutes, including manual observation entry, persistence after reload, history, desktop/mobile screenshots and no horizontal overflow. The initial browser run exposed an exact-label lookup issue in the new publication selector; an explicit accessible label fixed it. No live Telegram request was made.
+
+Final production build, workspace/test typecheck and lint passed after the browser fix and Unicode source-note validation.

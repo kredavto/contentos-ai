@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ArrowLeft, Sparkles, LoaderCircle, Check, History } from 'lucide-react';
 import type { GenerationService } from '@contentos/core';
 import { generationOptionsSchema, type GenerationOptions, type ScriptOutput, type WorkflowType } from '@contentos/types';
+import {AnalyticsStudio} from './analytics-studio';
 import {PublishingStudio} from './publishing-studio';
 import {SocialIntegrations} from './social-integrations';
 import {ContentCalendar} from './content-calendar';
@@ -20,7 +21,7 @@ const edits: Array<[GenerationOptions['edit'],string]> = [['GENERATE','Новы�
 export function ContentStudio({tenantId,brandId,brandName,role,verified}:{tenantId:string;brandId:string;brandName:string;role:string;verified:boolean}) {
   const base = `organizations/${tenantId}/brands/${brandId}`;
   const [data,setData] = useState<Overview|null>(null); const [error,setError] = useState(''); const [pending,setPending] = useState(false);
-  const [tab,setTab] = useState<'strategy'|'ideas'|'scripts'|'jobs'|'consents'|'media'|'avatars'|'videos'|'calendar'|'integrations'|'publishing'>('strategy');
+  const [tab,setTab] = useState<'strategy'|'ideas'|'scripts'|'jobs'|'consents'|'media'|'avatars'|'videos'|'calendar'|'integrations'|'publishing'|'analytics'>('strategy');
   const [options,setOptions] = useState<GenerationOptions>(()=>generationOptionsSchema.parse({}));
   const [selected,setSelected] = useState<Script|null>(null); const [draft,setDraft] = useState<ScriptOutput|null>(null);
   const [history,setHistory] = useState<Array<{version:number;content:ScriptOutput}>>([]);
@@ -54,7 +55,8 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified}:{tenant
     {data&&!data.configuration.ready?<p className="notice warning">CONFIGURATION_REQUIRED: AI-провайдер ещё не настроен.</p>:null}
     {!verified?<p className="notice warning">Подтвердите email для генерации и одобрения контента.</p>:null}
     {error?<p className="notice error" role="alert">{error}</p>:null}
-    <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео'],['calendar','Календарь'],['integrations','Интеграции'],['publishing','Публикации']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+    <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео'],['calendar','Календарь'],['integrations','Интеграции'],['publishing','Публикации'],['analytics','Аналитика']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+    {tab==='analytics'?<AnalyticsStudio base={base} canManage={canStrategy}/>:null}
     {tab==='publishing'?<PublishingStudio base={base} canPublish={canStrategy}/>:null}
       {tab==='integrations'?<SocialIntegrations base={base} canManage={canStrategy}/>:null}
     {tab==='calendar'?<ContentCalendar base={base} canWrite={canGenerate}/>:null}

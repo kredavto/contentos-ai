@@ -1,10 +1,10 @@
 import {randomUUID,randomBytes} from 'node:crypto';
 import {describe,it,expect,beforeAll,afterAll} from 'vitest';
-import {createDatabase,PublishingRepository,CalendarRepository,SocialRepository} from '../../packages/db/src/index';
+import {createDatabase,AnalyticsRepository,PublishingRepository,CalendarRepository,SocialRepository} from '../../packages/db/src/index';
 import {PublishingProcessor} from '../../packages/core/src/publishing';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {SocialService} from '../../packages/core/src/social';
-import {calendarCreateSchema,calendarUpdateSchema,DomainError,ProviderRequestError,type PublishingProvider,type SocialConnectionProvider} from '../../packages/types/src/index';
+import {manualMetricsSchema,calendarCreateSchema,calendarUpdateSchema,DomainError,ProviderRequestError,type PublishingProvider,type SocialConnectionProvider} from '../../packages/types/src/index';
 const url=process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)('durable approval publishing',()=>{
   if(url&&!new URL(url).pathname.endsWith('_test'))throw new Error('Dedicated test database required');
@@ -67,4 +67,51 @@ describe.skipIf(!url)('durable approval publishing',()=>{
     const channel=await socialRepo.managed(owner,tenantId,brandId,connectionId);await social.disconnect(owner,tenantId,brandId,connectionId,{revision:channel.revision},correlation);
     await expect(repo.begin(job,[])).rejects.toThrow('CONFLICT');expect((await state(job.id)).status).toBe('CANCELLED');
   });
+  it('stores manual analytics idempotently with tenant and role boundaries',async()=>{
+    const analytics=new AnalyticsRepository(database.db,()=>new Date('2030-01-02T00:00:00Z'));
+    const rows=await analytics.overview(owner,tenantId,brandId),target=rows[0]!;
+    expect(target.latest).toBeNull();expect(JSON.stringify(rows)).not.toContain('finalKey');
+    const input=manualMetricsSchema.parse({publicationId:target.id,idempotencyKey:randomUUID(),observedAt:'2030-01-01T20:00:00Z',sourceNote:'Fixture observed statistics',metrics:{views:0}});
+    await expect(analytics.record(editor,tenantId,brandId,input,correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(analytics.record(owner,tenantId,randomUUID(),input,correlation)).rejects.toThrow('NOT_FOUND');
+    await expect(analytics.overview(randomUUID(),tenantId,brandId)).rejects.toThrow('NOT_FOUND');
+    const saved=await Promise.all([analytics.record(owner,tenantId,brandId,input,correlation),analytics.record(owner,tenantId,brandId,input,correlation)]);expect(saved[0]).toEqual(saved[1]);
+    await expect(analytics.record(owner,tenantId,brandId,{...input,sourceNote:'Changed'},correlation)).rejects.toThrow('CONFLICT');
+    const history=await analytics.history(editor,tenantId,brandId,target.id);expect(history).toHaveLength(1);expect(history[0]!.metrics).toMatchObject({views:0,likes:null});expect(history[0]!.source).toBe('MANUAL');
+    await expect(database.client`update publication_metrics set source_note='changed' where id=${saved[0]!.id}`).rejects.toThrow();
+    await expect(database.client`delete from publication_metrics where id=${saved[0]!.id}`).rejects.toThrow();
+  });
+  it('selects the latest observation without summing history or filling absent values',async()=>{
+    const analytics=new AnalyticsRepository(database.db,()=>new Date('2030-01-02T00:00:00Z'));
+    const target=(await analytics.overview(owner,tenantId,brandId))[0]!;
+    const input=manualMetricsSchema.parse({publicationId:target.id,idempotencyKey:randomUUID(),observedAt:'2030-01-01T21:00:00Z',sourceNote:'Later observation',metrics:{likes:5}});
+    await analytics.record(owner,tenantId,brandId,input,correlation);
+    await analytics.record(owner,tenantId,brandId,{...input,idempotencyKey:randomUUID(),observedAt:'2030-01-01T19:00:00Z',metrics:{...input.metrics,views:100}},correlation);
+    expect((await analytics.overview(owner,tenantId,brandId))[0]!.latest!.metrics).toMatchObject({views:null,likes:5});
+    await analytics.record(owner,tenantId,brandId,{...input,idempotencyKey:randomUUID(),metrics:{...input.metrics,likes:6}},correlation);
+    expect((await analytics.overview(owner,tenantId,brandId))[0]!.latest!.metrics.likes).toBe(6);
+    expect(await analytics.history(owner,tenantId,brandId,target.id)).toHaveLength(4);
+    for(const observedAt of ['2030-01-01T00:00:00Z','2030-01-03T00:00:00Z'])await expect(analytics.record(owner,tenantId,brandId,{...input,idempotencyKey:randomUUID(),observedAt},correlation)).rejects.toThrow('INVALID_INPUT');
+    await expect(analytics.history(owner,tenantId,randomUUID(),target.id)).rejects.toThrow('NOT_FOUND');
+    await expect(analytics.record(owner,tenantId,brandId,{...input,idempotencyKey:randomUUID(),publicationId:randomUUID()},correlation)).rejects.toThrow('NOT_FOUND');
+  });
+
+  it('does not expose observations across real brand or organization boundaries',async()=>{
+    const analytics=new AnalyticsRepository(database.db,()=>new Date('2030-01-02T00:00:00Z'));
+    const target=(await analytics.overview(owner,tenantId,brandId))[0]!,otherBrand=randomUUID(),otherTenant=randomUUID(),otherWorkspace=randomUUID(),foreignBrand=randomUUID();
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${otherBrand},${tenantId},${workspaceId},'Other brand')`;
+    await database.client`insert into organizations(id,name) values(${otherTenant},'Other organization')`;
+    await database.client`insert into organization_members(tenant_id,user_id,role) values(${otherTenant},${owner},'OWNER')`;
+    await database.client`insert into workspaces(id,tenant_id,name) values(${otherWorkspace},${otherTenant},'Other workspace')`;
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${foreignBrand},${otherTenant},${otherWorkspace},'Foreign brand')`;
+    expect(await analytics.overview(owner,tenantId,otherBrand)).toEqual([]);
+    expect(await analytics.overview(owner,otherTenant,foreignBrand)).toEqual([]);
+    const input=manualMetricsSchema.parse({publicationId:target.id,idempotencyKey:randomUUID(),observedAt:'2030-01-01T21:00:00Z',sourceNote:'Wrong target',metrics:{views:1}});
+    for(const [tenant,brand] of [[tenantId,otherBrand],[otherTenant,foreignBrand]] as const){
+      await expect(analytics.history(owner,tenant,brand,target.id)).rejects.toThrow('NOT_FOUND');
+      await expect(analytics.record(owner,tenant,brand,input,correlation)).rejects.toThrow('NOT_FOUND');
+    }
+    await expect(database.client`insert into publication_metrics(tenant_id,publication_id,source_note,metrics,observed_at,recorded_by,idempotency_key,input_hash) values(${otherTenant},${target.id},'Foreign metrics','{}',now(),${owner},${randomUUID()},'invalid')`).rejects.toThrow();
+  });
+
 });

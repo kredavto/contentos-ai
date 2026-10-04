@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 test('register, verify email, create organization and resume 15-step onboarding', async ({ page, request }) => {
+  test.setTimeout(420_000); // Includes the scheduled send and persisted analytics round-trip.
   const email = `browser-${randomUUID()}@example.test`;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -259,6 +260,30 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/publishing-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+
+  await page.getByRole('button',{name:'Аналитика',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Аналитика публикаций',exact:true})).toBeVisible();
+  const analyticsCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Одобренный ролик для Telegram',exact:true})});
+  await expect(analyticsCard.getByText('Наблюдений пока нет.',{exact:true})).toBeVisible();
+  await page.getByLabel('Публикация для аналитики',{exact:true}).selectOption({label:'Одобренный ролик для Telegram · ДЕМО'});
+  const observedAt=await page.evaluate(()=>{const date=new Date();date.setMilliseconds(0);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,19);});
+  await page.getByLabel('Дата наблюдения',{exact:true}).fill(observedAt);
+  await page.getByLabel('Источник показателей',{exact:true}).fill('Тестовое ручное наблюдение');
+  await page.getByLabel('Просмотры',{exact:true}).fill('0');
+  await page.getByRole('button',{name:'Сохранить показатели',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('Показатели сохранены');
+  await expect(analyticsCard.locator('dd').first()).toHaveText('0');
+  await expect(analyticsCard.locator('dd').nth(1)).toHaveText('Нет данных');
+  await page.reload();
+  await page.getByRole('button',{name:'Аналитика',exact:true}).click();
+  await expect(analyticsCard.locator('dd').first()).toHaveText('0');
+  await analyticsCard.getByRole('button',{name:'История показателей',exact:true}).click();
+  await expect(analyticsCard.locator('details')).toHaveCount(1);
+  await page.screenshot({path:'test-results/analytics-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/analytics-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
 
   await page.getByRole('button',{name:'Видео',exact:true}).click();

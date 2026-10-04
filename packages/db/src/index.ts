@@ -21,3 +21,4 @@ export * from './repositories/videos';
 export * from './repositories/calendar';
 export * from './repositories/social';
 export * from './repositories/publishing';
+export * from './repositories/analytics';
