@@ -1,0 +1,25 @@
+# Payments and monthly subscriptions
+
+Status: implementation in progress. No checkout, renewal, provider settlement or payment-based credit grant is enabled yet. Existing trial credits remain separate. Production requires merchant credentials and receipt configuration; missing configuration must never simulate payment success.
+
+## Domain and consistency decisions
+
+Plans FREE, START, CREATOR, EXPERT and AGENCY have database-owned, immutable price/entitlement versions. UI displays server quotes rather than hardcoded prices. Checkout is restricted to a verified organization OWNER. A transaction locks the organization, validates the current quote and records an immutable order with exact integer minor units, currency, plan version, actor, consent and idempotency key before dispatching a durable payment task. A reused intent with different content conflicts.
+
+Payments are organization-scoped, not brand-scoped, so they need their own durable task/outbox rather than fabricating a brand or usage reservation to fit generation jobs. A payment attempt keeps its provider, merchant identity, test/live mode, internal order reference and stable provider idempotency key. Its first-send timestamp and immutable request hash determine a conservative 23-hour replay deadline. Network/5xx/invalid-response uncertainty never creates a fresh payment key. After the replay deadline, an unknown submission requires reconciliation. Known IDs can always be read without creating a new charge.
+
+A redirect back to the application proves nothing about payment. Webhook receipts are saved before processing and deduplicated by provider object/event type when no event UUID exists. An authenticated provider read must match the stored external payment ID, internal order reference, merchant, test/live mode, exact amount and currency. Only a paid SUCCEEDED observation can settle. Unsupported or contradictory states must not grant anything. Settlement locks the tenant and atomically appends the immutable settlement, paid subscription term, one PURCHASE entry per nonzero entitlement unit and audit event. Unique payment/term/ledger keys fence duplicate or reordered notifications.
+
+An automatic renewal requires explicit, versioned consent covering amount, monthly cadence and cancellation, plus a saved provider method. Method references remain server-side and encrypted; card numbers/CVC are never accepted or stored. Cancellation changes future renewal eligibility, not the paid term. A queued renewal rechecks consent/cancellation under lock before its send marker. Cancellation after an external send cannot pretend to reverse that payment; its final outcome must be reconciled.
+
+Monthly boundaries use a stored UTC anchor date and original day of month. Clamp only the individual target month (31 January → 28 February → 31 March), without permanent drift. A successful late renewal starts no earlier than the actual paid activation time; missed periods do not silently create multiple charges. Downgrade is scheduled for the next term. Upgrade is an explicit new quote and payment; existing paid value needs a deterministic disclosed credit/proration policy before enabling the action. No speculative renewal or unconfigured prices may be enabled.
+
+## Provider research (2026-10-04)
+
+Official sources: [interaction format](https://yookassa.ru/developers/using-api/interaction-format), [quick start](https://yookassa.ru/developers/payment-acceptance/getting-started/quick-start), [notifications](https://yookassa.ru/developers/using-api/webhooks), [saving a method](https://yookassa.ru/developers/payment-acceptance/scenario-extensions/recurring-payments/save-payment-method/save-during-payment), [recurring payments](https://yookassa.ru/developers/payment-acceptance/scenario-extensions/recurring-payments/pay-with-saved), [receipts](https://yookassa.ru/developers/payment-acceptance/receipts/54fz/yoomoney/payments), [refunds](https://yookassa.ru/developers/payment-acceptance/after-the-payment/refunds).
+
+YooKassa v3 uses server-side Basic authentication and Idempotence-Key for mutations. Its replay window is 24 hours; a 500 response is not proof of failure. Redirect checkout uses capture=true. Payment confirmation must come from the provider state, not the browser. Do not invent a webhook HMAC. Recurring payments require shop activation and user consent. Receipt fields and merchant tax settings must be explicitly configured and validated before live checkout; no guessed tax values.
+
+## Required verification before enabling
+
+Provider contract tests must cover exact decimal money conversion, merchant/mode/reference mismatch, saved-method handling, response size/time limits, redaction and uncertain outcomes. Real PostgreSQL integration tests must cover tenant permissions, concurrent checkout/settlement, replay conflicts, webhook deduplication, expiry, cancellation versus send, term boundaries and no duplicate credit grants. Browser tests must exercise quoted prices, external confirmation using explicit development fixtures, persisted plan/credits, cancellation and scheduled changes. No real charge is needed for CI.
