@@ -295,7 +295,8 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.setViewportSize({width:1440,height:1000});
 
   const studioUrl=new URL(page.url()),brainPath=`/api/organizations/${studioUrl.searchParams.get('organization')}/brands/${studioUrl.pathname.split('/')[2]}`;
-  const beforeAnalysisBrain=await (await page.request.get(brainPath)).json();
+  const beforeBrainResponse=await page.request.get(brainPath);expect(beforeBrainResponse.ok()).toBe(true);
+  const beforeAnalysisBrain=await beforeBrainResponse.json();expect(beforeAnalysisBrain.data.brand.id).toBe(studioUrl.pathname.split('/')[2]);
   const performance=page.getByRole('region',{name:'AI-анализ эффективности',exact:true});
   await performance.getByRole('button',{name:'Проанализировать эффективность',exact:true}).click();
   await expect(performance.getByRole('heading',{name:'ДЕМО · Отчёт по эффективности',exact:true})).toBeVisible({timeout:90000});
@@ -307,7 +308,8 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await accept.click();
   await expect(performance.getByText('Принято · создана версия 2',{exact:true})).toBeVisible();
   await expect(performance.getByRole('heading',{name:'Текущая стратегия v2',exact:true})).toBeVisible();
-  expect((await (await page.request.get(brainPath)).json()).data).toEqual(beforeAnalysisBrain.data);
+  const afterBrainResponse=await page.request.get(brainPath);expect(afterBrainResponse.ok()).toBe(true);
+  expect((await afterBrainResponse.json()).data).toEqual(beforeAnalysisBrain.data);
   await page.screenshot({path:'test-results/performance-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
