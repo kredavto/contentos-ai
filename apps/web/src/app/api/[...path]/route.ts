@@ -43,6 +43,7 @@ async function dispatch(request: Request, context: RouteContext) {
         if(path.length===3&&request.method==='GET')return ok(await billing.overview(user.userId,tenantId));
         if(path[3]==='checkout'&&path.length===4&&request.method==='POST')return ok(await billing.checkout(user.userId,tenantId,await readBody(request),correlationId),202);
         if(path[3]==='orders'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.orderStatus(user.userId,tenantId,path[4]));
+        if(path[3]==='purchase-preview'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.purchasePreview(user.userId,tenantId,path[4]));
         if(path[3]==='renewal-policy'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.renewalPolicy(user.userId,tenantId,path[4]));
         if(path[3]==='accept-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.acceptRenewal(user.userId,tenantId,await readBody(request),{ip,userAgent:request.headers.get('user-agent')??''},correlationId),201);
         if(path[3]==='cancel-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.cancelRenewal(user.userId,tenantId,await readBody(request),correlationId));

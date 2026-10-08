@@ -33,6 +33,7 @@ test('explicit UI fixtures cover checkout retry, confirmation and paid state',as
   const base=`/api/organizations/${f.tenantId}/billing`;let checkoutCalls=0,status='QUEUED';const keys:string[]=[];
   const order=()=>({id:orderId,planVersionId,amountMinor:199900,currency:'RUB',createdAt:new Date().toISOString(),status,confirmationUrl:status==='WAITING'?'https://yoomoney.ru/checkout/fixture':null,errorCode:null});
   await page.route(`**${base}`,route=>route.fulfill({json:{data:{checkoutStatus:'READY',plans:[{planVersionId,code:'CREATOR',name:'Автор',amountMinor:199900,currency:'RUB',aiCredits:100,videoSeconds:300}],subscription:{status:status==='PAID'?'ACTIVE':'INACTIVE',current:status==='PAID'?{endsAt:'2027-01-01T00:00:00Z'}:null,orders:[]},renewal:{revision:0,active:null}}}}));
+  await page.route(`**${base}/purchase-preview/${planVersionId}`,route=>route.fulfill({json:{data:{expectedTermId:null,effectiveAt:null,direction:'START'}}}));
   await page.route(`**${base}/checkout`,route=>{checkoutCalls++;keys.push(route.request().postDataJSON().idempotencyKey);return checkoutCalls===1?route.fulfill({status:503,json:{error:{message:'Тестовый временный сбой'}}}):route.fulfill({status:202,json:{data:order()}});});
   await page.route(`**${base}/orders/${orderId}`,route=>route.fulfill({json:{data:order()}}));
   await page.goto(`/billing?organization=${f.tenantId}`);await page.getByRole('button',{name:'Оплатить месяц'}).click();await expect(page.getByRole('alert').filter({hasText:'Тестовый временный сбой'})).toContainText('Тестовый временный сбой');
@@ -57,4 +58,14 @@ test('renewal opt-in is unchecked and retries preserve consent and checkout iden
   await page.getByRole('button',{name:'Повторить подготовку оплаты'}).click();await expect(page.getByRole('alert').filter({hasText:'Тестовый сбой заказа'})).toContainText('Тестовый сбой заказа');
   await page.getByRole('button',{name:'Повторить подготовку оплаты'}).click();await expect(page.getByRole('heading',{name:'Готовим оплату'})).toBeVisible();
   expect(acceptKeys).toHaveLength(2);expect(acceptKeys[0]).toBe(acceptKeys[1]);expect(checkoutKeys).toHaveLength(2);expect(checkoutKeys[0]).toBe(checkoutKeys[1]);await expect(checkbox).toHaveCount(0);
+});
+test('plan downgrade requires confirmation and submits the displayed paid-term identity',async({page,context,baseURL},testInfo)=>{
+  const f=await fixture(),planVersionId=randomUUID(),termId=randomUUID(),orderId=randomUUID();await context.addCookies([{name:'contentos_session',value:f.token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
+  const base=`/api/organizations/${f.tenantId}/billing`,target={id:planVersionId,name:'Старт',amountMinor:100000,aiCredits:50,videoSeconds:100};let calls=0;
+  await page.route(`**${base}`,route=>route.fulfill({json:{data:{checkoutStatus:'READY',plans:[{...target,planVersionId,code:'START',currency:'RUB'}],subscription:{current:{endsAt:'2027-02-01T12:00:00Z',planName:'Автор'},orders:[]},renewal:{revision:0,active:null}}}}));
+  await page.route(`**${base}/purchase-preview/${planVersionId}`,route=>route.fulfill({json:{data:{target,source:{name:'Автор'},expectedTermId:termId,effectiveAt:'2027-02-01T12:00:00Z',direction:'DOWNGRADE'}}}));
+  await page.route(`**${base}/checkout`,route=>{calls++;expect(route.request().postDataJSON().expectedTermId).toBe(termId);return route.fulfill({json:{data:{id:orderId,planVersionId,amountMinor:100000,currency:'RUB',createdAt:new Date().toISOString(),status:'QUEUED',confirmationUrl:null,errorCode:null}}});});
+  await page.goto(`/billing?organization=${f.tenantId}`);await page.getByRole('button',{name:'Оплатить месяц'}).click();await expect(page.getByRole('heading',{name:'Понижение тарифа'})).toBeVisible();expect(calls).toBe(0);
+  await page.screenshot({path:testInfo.outputPath('billing-plan-change-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('billing-plan-change-mobile.png'),fullPage:true});
+  await expect(page.getByText('Текущий тариф и оплаченный срок сохраняются.',{exact:false})).toBeVisible();await page.getByRole('button',{name:'Подтвердить смену тарифа'}).click();await expect(page.getByRole('heading',{name:'Готовим оплату'})).toBeVisible();expect(calls).toBe(1);
 });

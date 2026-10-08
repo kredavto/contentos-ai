@@ -52,6 +52,10 @@ export class PaymentTaskRepository {
         const [preference] = await tx.select().from(renewalPreferences).where(eq(renewalPreferences.tenantId, tenantId));
         permitted &&= preference?.activeConsentId === order.renewalConsentId && preference.revision === order.renewalRevision;
       }
+      if (order.changeFromTermId && !task.firstSubmittedAt) {
+        const [latest] = await tx.select({ id: subscriptionTerms.id }).from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1);
+        permitted &&= latest?.id === order.changeFromTermId;
+      }
       let method: typeof paymentMethods.$inferSelect | null = null;
       if (order.input.mode === 'RENEWAL') {
         if (!renewalsEnabled) throw new DomainError('CONFIGURATION_REQUIRED', 503);

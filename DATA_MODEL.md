@@ -32,3 +32,5 @@ Migration 0025 adds `payment_tasks` (69 tables total), an organization-scoped ta
 Migration 0026 adds `webhook_events` (70 tables total): immutable minimal provider receipt identity, merchant/mode-scoped event uniqueness, processing leases, retry timing and dispatch indexes. It deliberately stores no raw payment payload or unverified tenant/order metadata. The authenticated provider lookup resolves the existing order before tenant-locked reconciliation.
 
 Migrations 0027–0028 add `billing_renewal_intents` (71 tables total), with unique tenant/paid-term and immutable order/term/method bindings. A composite term identity supports tenant FKs; method IDs equal their originating settled order IDs by the existing check. Deferred constraints require renewal bindings at commit. Order JSON cannot contain the decrypted paymentMethodId, and renewal kind/mode must agree.
+
+Migration 0029 binds UPGRADE/DOWNGRADE orders to their tenant-owned prior paid term and verifies the target quote and direction. No paid term is rewritten; confirmed changes append the next monthly period. Table count remains 71.

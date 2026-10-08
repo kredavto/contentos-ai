@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated 2026-10-04. This is an implementation inventory, not a claim that the full specification is complete.
+Updated 2026-10-09. This is an implementation inventory, not a claim that the full specification is complete.
 
 ## Verified working slice
 
@@ -10,7 +10,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 57 tables with twenty-one SQL migrations (0000–0020). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 71 tables with thirty SQL migrations (0000–0029). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
 - CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
@@ -312,3 +312,11 @@ All three local Billing browser scenarios passed in Chrome after the selector co
 Verification resumed on 2026-10-09 after temporary logs/binaries had disappeared. Docker PostgreSQL retained all 29 migrations. Typecheck/lint passed again and all 29 focused payment scenarios passed. FFmpeg/FFprobe 9.0.2 were restored from the macOS distributor linked by ffmpeg.org. The initial full run had two existing media-processing timeouts under parallel load; a serial run passed both but exposed an immediate-cleanup test's dependence on application/database clock alignment. The fixture now explicitly makes its queued deletion due on the database clock before claiming it, as it already did for the retry. Production deletion timing is unchanged. Final serial verification is running.
 
 Final opt-in verification: all 237 tests across 38 files passed serially with PostgreSQL and real FFmpeg; production build passed. Workspace/test typecheck and lint passed, with the subsequent test-only clock fix checked separately. Three Billing browser scenarios passed in local Chrome earlier for this UI, including unchecked opt-in and stable keys across both simulated failure stages. No real payment or deployment was made. Upgrade/downgrade flows, configured-provider end-to-end coverage, recovery notifications, production configuration and deployment remain outstanding.
+
+## Confirmed monthly plan changes
+
+Added owner purchase preview and explicit next-period upgrade/downgrade confirmation. Orders bind the displayed last paid term; PostgreSQL verifies direction, target quote/resources and tenant ownership. Stale previews are rejected, stale unsent changes canceled, and already-submitted payments remain reconcilable without overwriting paid history. Current/upcoming plan names and consent/plan mismatch are visible in Billing. The product policy preserves prepaid periods; immediate prorated upgrades are not implemented.
+
+Migration 0029 applied to the test database (30 migrations, 71 tables). The new cyclic financial foreign key needed an explicit Drizzle extra-config return type to retain strict inference. Five focused integration tests passed in an isolated per-suite database; an initial cross-tenant assertion was corrected to expect the existing NOT_FOUND non-disclosure response. Browser and full checks are running. No live payment was made.
+
+Final monthly-change verification: 242 tests across 39 files passed serially with PostgreSQL/FFmpeg; workspace/test typecheck, lint and production build passed. Four Billing browser scenarios passed in Chrome, and the added downgrade scenario was rerun for reviewed desktop/mobile screenshots with no overflow. The dev server was stopped. The new test database is created/migrated/dropped per suite and does not modify other suites' global plan catalogs. No real charge, refund or deployment occurred.

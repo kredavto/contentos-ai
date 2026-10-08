@@ -19,13 +19,16 @@ export class BillingService {
     if (!this.configuration || (input.renewal && !this.renewalEngineEnabled)) throw new DomainError('CONFIGURATION_REQUIRED', 503);
     const returnUrl = new URL('/billing', this.configuration.appUrl);
     returnUrl.searchParams.set('organization', tenantId);
-    const order = await this.repository.checkout(userId, tenantId, input.planVersionId, input.idempotencyKey, { ...(input.renewal ? { renewal: input.renewal } : {}), returnUrl: returnUrl.href, receipt: { ...this.configuration.receipt, customerEmail: email } }, this.configuration.merchant, correlationId);
+    const order = await this.repository.checkout(userId, tenantId, input.planVersionId, input.idempotencyKey, { ...(input.expectedTermId ? { expectedTermId: input.expectedTermId } : {}), ...(input.renewal ? { renewal: input.renewal } : {}), returnUrl: returnUrl.href, receipt: { ...this.configuration.receipt, customerEmail: email } }, this.configuration.merchant, correlationId);
     return this.repository.orderStatus(userId, tenantId, order.id);
+  }
+  purchasePreview(userId: string, tenantId: string, planVersionId: string) {
+    return this.repository.purchasePreview(userId, z.uuid().parse(tenantId), z.uuid().parse(planVersionId));
   }
   async renewalPolicy(userId: string, tenantId: string, planVersionId: string) {
     const policy = await this.renewal.preview(userId, z.uuid().parse(tenantId), z.uuid().parse(planVersionId));
     if (!this.configuration || !this.renewalEngineEnabled) throw new DomainError('CONFIGURATION_REQUIRED', 503);
-    return policy;
+    return { ...policy, purchase: await this.repository.purchasePreview(userId, tenantId, planVersionId) };
   }
   async acceptRenewal(userId: string, tenantId: string, raw: unknown, request: { ip: string; userAgent: string }, correlationId: string) {
     z.uuid().parse(tenantId);

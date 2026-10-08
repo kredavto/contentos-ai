@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq, gt, lte } from 'drizzle-orm';
+import { and, desc, eq, gt, lte, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { DomainError, createPaymentSchema, paymentObservationSchema, paymentSettlementEligible, monthlyBillingBoundary, type PaymentObservation, type CreatePayment, type EncryptedCredential } from '@contentos/types';
 import type { Database } from '../index';
@@ -14,6 +14,21 @@ export class BillingRepository {
       await assertMembership(tx, userId, tenantId, 'billing');
       const rows = await tx.selectDistinctOn([plans.id], { planVersionId: planVersions.id, code: plans.code, name: plans.name, amountMinor: planVersions.amountMinor, currency: planVersions.currency, aiCredits: planVersions.aiCredits, videoSeconds: planVersions.videoSeconds }).from(plans).innerJoin(planVersions, eq(planVersions.planId, plans.id)).where(eq(plans.enabled, true)).orderBy(plans.id, desc(planVersions.version));
       return rows.filter(row => row.code !== 'FREE' && row.amountMinor > 0).sort((a,b) => ['START','CREATOR','EXPERT','AGENCY'].indexOf(a.code) - ['START','CREATOR','EXPERT','AGENCY'].indexOf(b.code));
+    });
+  }
+  async purchasePreview(userId: string, tenantId: string, planVersionId: string) {
+    return this.db.transaction(async tx => {
+      await lockTenant(tx, tenantId); await assertMembership(tx, userId, tenantId, 'billing');
+      const [target] = await tx.select({ id: planVersions.id, planId: planVersions.planId, code: plans.code, name: plans.name, amountMinor: planVersions.amountMinor, aiCredits: planVersions.aiCredits, videoSeconds: planVersions.videoSeconds, enabled: plans.enabled }).from(planVersions).innerJoin(plans, eq(plans.id, planVersions.planId)).where(eq(planVersions.id, planVersionId));
+      if (!target) throw new DomainError('NOT_FOUND', 404);
+      if (!target.enabled || target.code === 'FREE' || target.amountMinor <= 0) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+      const [latest] = await tx.select({ id: planVersions.id }).from(planVersions).where(eq(planVersions.planId, target.planId)).orderBy(desc(planVersions.version)).limit(1);
+      if (latest?.id !== target.id) throw new DomainError('CONFLICT', 409);
+      const [term] = await tx.select({ id: subscriptionTerms.id, endsAt: subscriptionTerms.endsAt, code: plans.code, name: plans.name }).from(subscriptionTerms).innerJoin(planVersions, eq(planVersions.id, subscriptionTerms.planVersionId)).innerJoin(plans, eq(plans.id, planVersions.planId)).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1);
+      const active = term && term.endsAt > this.now() ? term : null;
+      const ranks = ['FREE','START','CREATOR','EXPERT','AGENCY'];
+      const change = active && active.code !== target.code;
+      return { target, source: active, expectedTermId: change ? active.id : null, direction: change ? (ranks.indexOf(target.code) > ranks.indexOf(active.code) ? 'UPGRADE' : 'DOWNGRADE') : active ? 'RENEW' : 'START', effectiveAt: active?.endsAt ?? null };
     });
   }
   async receiptEmail(userId: string, tenantId: string) {
@@ -39,9 +54,9 @@ export class BillingRepository {
     return this.db.transaction(async tx => {
       await assertMembership(tx, userId, tenantId, 'billing');
       const now = this.now();
-      const [current] = await tx.select().from(subscriptionTerms).where(and(eq(subscriptionTerms.tenantId, tenantId), lte(subscriptionTerms.startsAt, now), gt(subscriptionTerms.endsAt, now))).limit(1);
-      const upcoming = await tx.select().from(subscriptionTerms).where(and(eq(subscriptionTerms.tenantId, tenantId), gt(subscriptionTerms.startsAt, now))).orderBy(subscriptionTerms.startsAt).limit(20);
-      const history = await tx.select().from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.startsAt)).limit(20);
+      const [current] = await tx.select({ ...getTableColumns(subscriptionTerms), planCode: plans.code, planName: plans.name }).from(subscriptionTerms).innerJoin(planVersions, eq(planVersions.id, subscriptionTerms.planVersionId)).innerJoin(plans, eq(plans.id, planVersions.planId)).where(and(eq(subscriptionTerms.tenantId, tenantId), lte(subscriptionTerms.startsAt, now), gt(subscriptionTerms.endsAt, now))).limit(1);
+      const upcoming = await tx.select({ ...getTableColumns(subscriptionTerms), planCode: plans.code, planName: plans.name }).from(subscriptionTerms).innerJoin(planVersions, eq(planVersions.id, subscriptionTerms.planVersionId)).innerJoin(plans, eq(plans.id, planVersions.planId)).where(and(eq(subscriptionTerms.tenantId, tenantId), gt(subscriptionTerms.startsAt, now))).orderBy(subscriptionTerms.startsAt).limit(20);
+      const history = await tx.select({ ...getTableColumns(subscriptionTerms), planCode: plans.code, planName: plans.name }).from(subscriptionTerms).innerJoin(planVersions, eq(planVersions.id, subscriptionTerms.planVersionId)).innerJoin(plans, eq(plans.id, planVersions.planId)).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.startsAt)).limit(20);
       const orders = await tx.select({ id: billingOrders.id, planVersionId: billingOrders.planVersionId, kind: billingOrders.kind, amountMinor: billingOrders.amountMinor, currency: billingOrders.currency, createdAt: billingOrders.createdAt }).from(billingOrders).where(eq(billingOrders.tenantId, tenantId)).orderBy(desc(billingOrders.createdAt)).limit(20);
       return { status: current ? 'ACTIVE' as const : 'INACTIVE' as const, current: current ?? null, upcoming, history, orders };
     });
@@ -63,12 +78,13 @@ export class BillingRepository {
     await tx.insert(subscriptionTerms).values({ tenantId: order.tenantId, subscriptionId: subscription.id, orderId: order.id, planVersionId: order.planVersionId, anchorAt, monthIndex, startsAt, endsAt });
   }
   /** Internal checkout boundary. Consent and its revision are frozen with the order. */
-  async checkout(userId: string, tenantId: string, planVersionId: string, key: string, input: Pick<Extract<CreatePayment, {mode:'CHECKOUT'}>, 'receipt' | 'returnUrl'> & { renewal?: { consentId: string; revision: number } }, merchant: z.infer<typeof merchantSchema>, correlationId: string) {
+  async checkout(userId: string, tenantId: string, planVersionId: string, key: string, input: Pick<Extract<CreatePayment, {mode:'CHECKOUT'}>, 'receipt' | 'returnUrl'> & { expectedTermId?: string; renewal?: { consentId: string; revision: number } }, merchant: z.infer<typeof merchantSchema>, correlationId: string) {
     for (const value of [userId, tenantId, planVersionId, key, correlationId]) if (!z.uuid().safeParse(value).success) throw new DomainError('INVALID_INPUT');
     const configured = merchantSchema.parse(merchant);
+    const expectedTermId = input.expectedTermId === undefined ? undefined : z.uuid().parse(input.expectedTermId);
     const renewal = input.renewal === undefined ? undefined : z.object({ consentId: z.uuid(), revision: z.number().int().positive() }).strict().parse(input.renewal);
     const request = createPaymentSchema.parse({ receipt: input.receipt, returnUrl: input.returnUrl, amountMinor: 1, currency: 'RUB', description: 'Subscription', mode: 'CHECKOUT', saveMethod: Boolean(renewal) });
-    const hash = createHash('sha256').update(JSON.stringify({ userId, planVersionId, request, configured, ...(renewal ? { renewal } : {}) })).digest('hex');
+    const hash = createHash('sha256').update(JSON.stringify({ userId, planVersionId, request, configured, ...(expectedTermId ? { expectedTermId } : {}), ...(renewal ? { renewal } : {}) })).digest('hex');
     return this.db.transaction(async tx => {
       await lockTenant(tx, tenantId); await assertMembership(tx, userId, tenantId, 'billing');
       const [existing] = await tx.select().from(billingOrders).where(and(eq(billingOrders.tenantId, tenantId), eq(billingOrders.idempotencyKey, key)));
@@ -84,8 +100,13 @@ export class BillingRepository {
       if (!plan?.enabled || quote.amountMinor <= 0 || plan.code === 'FREE') throw new DomainError('CONFIGURATION_REQUIRED', 503);
       const [latest] = await tx.select({ id: planVersions.id }).from(planVersions).where(eq(planVersions.planId, plan.id)).orderBy(desc(planVersions.version)).limit(1);
       if (latest?.id !== quote.id) throw new DomainError('CONFLICT', 409);
+      const [source] = await tx.select({ id: subscriptionTerms.id, endsAt: subscriptionTerms.endsAt, code: plans.code }).from(subscriptionTerms).innerJoin(planVersions, eq(planVersions.id, subscriptionTerms.planVersionId)).innerJoin(plans, eq(plans.id, planVersions.planId)).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1);
+      const changing = source && source.endsAt > this.now() && source.code !== plan.code;
+      if ((changing && expectedTermId !== source.id) || (expectedTermId && (!changing || source.id !== expectedTermId))) throw new DomainError('CONFLICT', 409);
+      const rank = ['FREE','START','CREATOR','EXPERT','AGENCY'];
+      const kind = changing ? (rank.indexOf(plan.code) > rank.indexOf(source.code) ? 'UPGRADE' : 'DOWNGRADE') : 'START';
       const frozen = createPaymentSchema.parse({ ...request, amountMinor: quote.amountMinor, currency: quote.currency, description: `Subscription ${plan.code}` });
-      const [order] = await tx.insert(billingOrders).values({ tenantId, planVersionId, requestedBy: userId, kind: 'START', amountMinor: quote.amountMinor, currency: quote.currency, aiCredits: quote.aiCredits, videoSeconds: quote.videoSeconds, ...configured, renewalConsentId: renewal?.consentId ?? null, renewalRevision: renewal?.revision ?? null, input: frozen, inputHash: hash, idempotencyKey: key, correlationId }).returning();
+      const [order] = await tx.insert(billingOrders).values({ tenantId, planVersionId, requestedBy: userId, kind, changeFromTermId: changing ? source.id : null, amountMinor: quote.amountMinor, currency: quote.currency, aiCredits: quote.aiCredits, videoSeconds: quote.videoSeconds, ...configured, renewalConsentId: renewal?.consentId ?? null, renewalRevision: renewal?.revision ?? null, input: frozen, inputHash: hash, idempotencyKey: key, correlationId }).returning();
       if (!order) throw new Error('Billing order insert failed');
       await tx.insert(paymentTasks).values({ id: order.id, tenantId });
       await tx.insert(auditLogs).values({ tenantId, userId, action: 'BILLING_ORDER_CREATED', resourceId: order.id, correlationId, metadata: { planVersionId, amountMinor: order.amountMinor, currency: order.currency } });

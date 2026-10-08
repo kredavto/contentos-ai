@@ -122,7 +122,7 @@ export const paymentNotificationSchema = z.object({
 });
 export type PaymentNotification = z.infer<typeof paymentNotificationSchema>;
 
-export const billingCheckoutSchema = z.object({ planVersionId: z.uuid(), idempotencyKey: z.uuid(), renewal: z.object({ consentId: z.uuid(), revision: z.number().int().positive() }).strict().optional() }).strict();
+export const billingCheckoutSchema = z.object({ planVersionId: z.uuid(), idempotencyKey: z.uuid(), expectedTermId: z.uuid().optional(), renewal: z.object({ consentId: z.uuid(), revision: z.number().int().positive() }).strict().optional() }).strict();
 
 /** Durable renewal intent omits the decrypted provider method reference. */
 export type StoredPaymentRequest = Extract<CreatePayment, {mode:'CHECKOUT'}> | Omit<Extract<CreatePayment, {mode:'RENEWAL'}>, 'paymentMethodId'>;
