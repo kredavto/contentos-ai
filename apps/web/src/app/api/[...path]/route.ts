@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -35,6 +35,11 @@ async function dispatch(request: Request, context: RouteContext) {
       // A shared per-user mutation budget complements the authentication throttles.
       await auth.throttle('mutation', user.userId);
       if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
+    }
+    if (path[0] === 'admin') {
+      if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
+      if (key === 'admin/data' && request.method === 'GET') return ok(await admin.list(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId));
+      if (key === 'admin/revoke-sessions' && request.method === 'POST') return ok(await admin.revokeSessions(user.userId, await readBody(request), correlationId));
     }
     if(request.method==='POST'&&key==='team/accept')return ok(await team.accept(user.userId,await readBody(request),correlationId));
     if (path[0] === 'organizations' && path[1]) {

@@ -8,5 +8,5 @@ export default async function DashboardPage({searchParams}:{searchParams:Promise
   const user = await services().auth.session((await cookies()).get(sessionCookie)?.value);
   if (!user) redirect('/login');
   const {organization}=await searchParams;
-  return <Workspace name={user.name} verified={Boolean(user.emailVerifiedAt)} initialOrganization={z.uuid().safeParse(organization).success?organization!:null} />;
+  return <Workspace platformOperator={await services().admin.canAccess(user.userId)} name={user.name} verified={Boolean(user.emailVerifiedAt)} initialOrganization={z.uuid().safeParse(organization).success?organization!:null} />;
 }

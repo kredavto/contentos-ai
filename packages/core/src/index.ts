@@ -27,3 +27,5 @@ export * from './email';
 export * from './team';
 
 export * from './agency';
+
+export * from './admin';

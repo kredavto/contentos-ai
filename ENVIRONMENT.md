@@ -50,3 +50,5 @@ Authentication email uses a durable PostgreSQL outbox. Both web and worker need 
 Production SMTP onboarding and the compatible Resend configuration are described in [production-email.md](docs/production-email.md). The mail provider and sending domain are not yet configured.
 
 Agency mode is gated by `AGENCY_MODE_ENABLED` (default `false`) and explicit owner activation of the organization's `agency_mode` flag. Enabling the deployment flag grants no cross-tenant access or pooled billing. See [agency portfolio](docs/agency.md).
+
+`PLATFORM_ADMIN_ENABLED` defaults to `false`. Enabling it does not grant anyone operator rights: a trusted host operator must explicitly provision an existing verified account. The console exposes only selected configuration names/statuses, never environment credentials. See [platform administration](docs/platform-admin.md).

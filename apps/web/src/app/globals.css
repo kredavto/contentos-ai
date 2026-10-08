@@ -44,3 +44,11 @@
 .brain-entry { display: grid; gap: 8px; min-width: 0; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 16px; }
 .brain-entry .button { justify-self: start; }
 .agency-client-forms .inline-form + .inline-form { margin-top: 24px; }
+.admin-center { min-width: 0; }
+.admin-center .inline-form { margin: 18px 0; }
+.admin-table-scroll { max-width: 100%; overflow-x: auto; margin: 16px 0; }
+.admin-table-scroll table { border-collapse: collapse; font-size: 12px; }
+.admin-table-scroll th, .admin-table-scroll td { padding: 10px 14px; border-bottom: 1px solid #e4e9e4; text-align: left; vertical-align: top; max-width: 320px; overflow-wrap: anywhere; min-width: 130px; }
+.admin-support-form { display: grid; gap: 16px; }
+.admin-support-form > div { display: grid; gap: 6px; }
+.admin-support-form > button { justify-self: start; }

@@ -41,3 +41,5 @@ export * from './team';
 export * from './brand-brain';
 
 export * from './agency';
+
+export * from './admin';
