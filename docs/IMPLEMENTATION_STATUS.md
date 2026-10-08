@@ -10,10 +10,10 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 71 tables with thirty SQL migrations (0000–0029). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 75 tables with thirty-three SQL migrations (0000–0032). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for container commit b79de65 (run 37854326989). Newer team changes are still being verified.
 
 ## Generation slice implemented
 
@@ -55,7 +55,7 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Local paths/filter arguments are generated internally; shell/network inputs are disallowed, MOV external references disabled, subprocess environment excludes credentials, timeouts/cancellation and temporary cleanup are enforced. Final codecs/dimensions/duration are checked.
 - Six real media tests passed with FFmpeg/FFprobe 9.0.2; CI now installs FFmpeg before tests. See [processing boundaries](video-processing.md). This is now connected to durable video projects and the Video Studio workflow.
 
-## Verification evidence
+## Historical verification evidence (initial generation/consent slice)
 
 - Typecheck for all 9 workspace packages and test sources passed.
 - ESLint passed.
@@ -356,3 +356,13 @@ Container follow-up: worker SIGTERM shutdown returned exit code 0. Frozen worksp
 Final container verification: the Linux ARM64 web image built successfully, including Next TypeScript checks and static generation. A production-mode, non-root, read-only container with the compose-equivalent init process passed home/registration rendering, all nine referenced CSS/JavaScript assets, health, anonymous rejection and a database lookup for a well-formed unknown session. SIGTERM stopped it with code 143 without forced kill; the smoke runner initially expected only code 0, then corrected that expectation and repeated the check with init enabled. Worker shutdown had returned 0. Isolated PostgreSQL database, Redis container/network and temporary environment file were removed; existing development services were preserved. The new web smoke script passed lint. No production backend was deployed.
 
 The user authorized their existing NL server for backend infrastructure. SSH host/user details are pending; no configured SSH alias was found locally. Inspect existing services and capacity before deployment. NL is the GLOBAL placement, not RU_DATA_RESIDENCY. Team/invitation management and the other outstanding product modules remain unfinished.
+
+## Team membership and invitations
+
+Added verified owner/admin management, restricted role assignment/removal, explicit ownership transfer and email-bound seven-day invitations. Tenant locks serialize mutations. UUID membership revisions prevent stale actions after role changes and after removal/rejoining. Invitation links carry the bearer in the fragment; database stores its hash and a tenant/invitation-bound encrypted envelope for idempotent replay. Acceptance rechecks the recipient and issuer's current authority and never overwrites an existing role. Accepted/revoked envelopes are erased; identity and terminal states are immutable in PostgreSQL.
+
+Migration 0032 adds team invitations (75 tables, 33 migrations). The initial unapplied draft used integer revisions; it was regenerated before any application with UUID revisions to prevent old requests matching a newly recreated membership. The final migration applied to the isolated integration database and main test database. Initial six team plus four credential tests passed. Added expiry/disabled-user coverage, team/join UI, Origin-protected API routes and a browser workflow; full validation is running. A dashboard link now selects the invited organization after acceptance, including users with existing organizations. No external invitations were sent.
+
+Infrastructure: container commit b79de657d87f5afd52d958c30f479192c37d62c2 was pushed; GitHub CI 37854326989 succeeded. Its Vercel preview dpl_5jmJx55RC9fKAbX4oQRr9rtxRkjV reached READY at https://contentos-637b1dl11-digagency.vercel.app. HTTP home/health returned 200; account API still honestly returns CONFIGURATION_REQUIRED. SSH to the user's NL server succeeded with the existing matching key. Read-only inventory found Ubuntu 24.04, 2 CPUs/4 GB RAM, many existing applications, ~700 MB available RAM, ~3.2 GB swap used and 8.3 GB disk free. No server services were changed. The owner chose to increase resources; deployment waits for sufficient measured capacity.
+
+Final team verification: all 263 tests in 42 files passed, including ten team integration scenarios and concurrent ownership transfers. Removing/demoting an issuer permanently revokes invitations outside their remaining authority, preventing old links from reviving after rejoining. Workspace/test typecheck, lint and production build passed. All eight Playwright scenarios passed in installed Chrome (8.7 minutes), including the full MVP chain and the new two-account team workflow. Final desktop/mobile team screenshots were inspected with no horizontal overflow. Playwright stopped its web/worker/fixture servers. Production backend and mail remain unconfigured; the operator selected a server resource upgrade and has no SMTP provider yet. A compatible Resend setup was documented; domain/DNS details are pending. No external invitation, SMTP message or paid provider request was made.

@@ -6,7 +6,7 @@ import { NotificationLink } from './notification-center';
 import { api } from '../lib/api-client';
 type Organization = { id: string; name: string; role: string };
 type Overview = { role: string; workspaces: Array<{ id: string; name: string }>; brands: Array<{ id: string; name: string; onboardingStep: number; onboardingCompletedAt: string | null }> };
-export function Workspace({ name, verified }: { name: string; verified: boolean }) {
+export function Workspace({ name, verified, initialOrganization }: { name: string; verified: boolean; initialOrganization:string|null }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [tenant, setTenant] = useState('');
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -16,10 +16,10 @@ export function Workspace({ name, verified }: { name: string; verified: boolean 
   const [creatingOrganization, setCreatingOrganization] = useState(false);
   const [creatingBrand, setCreatingBrand] = useState(false);
   const load = useCallback(async () => {
-    try { const items = await api<Organization[]>('organizations'); setOrganizations(items); setTenant(current => current || items[0]?.id || ''); }
+    try { const items = await api<Organization[]>('organizations'); setOrganizations(items); setTenant(current => items.some(item=>item.id===current)?current:items.find(item=>item.id===initialOrganization)?.id||items[0]?.id||''); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Ошибка загрузки'); }
     finally { setLoading(false); }
-  }, []);
+  }, [initialOrganization]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!tenant) return;
@@ -58,7 +58,7 @@ export function Workspace({ name, verified }: { name: string; verified: boolean 
     </aside>
     <div className="workspace-main">
       <div className="page-eyebrow">ВАШ КОНТЕНТ. ВАША СИСТЕМА.</div>
-      <div className="page-title"><div><h1>Всё начинается с бренда</h1><p className="muted">Соберите контекст один раз. Сохраняйте его для всей контент-команды.</p></div><div>{tenant?<NotificationLink key={tenant} tenantId={tenant}/>:null}{tenant&&overview?.role==='OWNER'?<Link className="button secondary" href={`/billing?organization=${tenant}`}>Биллинг</Link>:null}<span className="badge">Ранний доступ</span></div></div>
+      <div className="page-title"><div><h1>Всё начинается с бренда</h1><p className="muted">Соберите контекст один раз. Сохраняйте его для всей контент-команды.</p></div><div>{tenant?<NotificationLink key={tenant} tenantId={tenant}/>:null}{tenant&&overview&&['OWNER','ADMIN'].includes(overview.role)?<Link className="button secondary" href={`/team?organization=${tenant}`}>Команда</Link>:null}{tenant&&overview?.role==='OWNER'?<Link className="button secondary" href={`/billing?organization=${tenant}`}>Биллинг</Link>:null}<span className="badge">Ранний доступ</span></div></div>
       {!verified ? <p className="notice warning">Подтвердите почту перед подключением AI-сервисов. <Link href="/resend-verification">Отправить письмо</Link></p> : null}
       {error ? <p className="notice error" role="alert">{error}</p> : null}
       {loading ? <div className="panel loading" role="status"><LoaderCircle className="spin" />Загружаем рабочее пространство…</div> : null}

@@ -21,7 +21,7 @@ export const organizations = pgTable('organizations', {
 export const organizationMembers = pgTable('organization_members', {
   tenantId: uuid('tenant_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  role: text('role', { enum: ['OWNER', 'ADMIN', 'MANAGER', 'EDITOR', 'CLIENT_APPROVER', 'VIEWER'] }).notNull(), createdAt: createdAt(),
+  role: text('role', { enum: ['OWNER', 'ADMIN', 'MANAGER', 'EDITOR', 'CLIENT_APPROVER', 'VIEWER'] }).notNull(), revision: uuid('revision').notNull().defaultRandom(), createdAt: createdAt(),
 }, t => [primaryKey({ columns: [t.tenantId, t.userId] }), index('members_user_idx').on(t.userId), check('members_role_valid', sql`${t.role} in ('OWNER', 'ADMIN', 'MANAGER', 'EDITOR', 'CLIENT_APPROVER', 'VIEWER')`)]);
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),

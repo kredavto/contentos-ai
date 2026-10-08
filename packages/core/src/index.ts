@@ -23,3 +23,5 @@ export * from './billing';
 export * from './notifications';
 
 export * from './email';
+
+export * from './team';

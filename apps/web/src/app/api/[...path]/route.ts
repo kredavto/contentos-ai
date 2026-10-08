@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -36,8 +36,20 @@ async function dispatch(request: Request, context: RouteContext) {
       await auth.throttle('mutation', user.userId);
       if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
     }
+    if(request.method==='POST'&&key==='team/accept')return ok(await team.accept(user.userId,await readBody(request),correlationId));
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
+      if(path[2]==='team'){
+        if(path.length===3&&request.method==='GET')return ok(await team.overview(user.userId,tenantId));
+        if(path.length===4&&request.method==='POST'){
+          const input=await readBody(request);
+          if(path[3]==='invite')return ok(await team.invite(user.userId,tenantId,input,correlationId),201);
+          if(path[3]==='role')return ok(await team.changeRole(user.userId,tenantId,input,correlationId));
+          if(path[3]==='remove')return ok(await team.remove(user.userId,tenantId,input,correlationId));
+          if(path[3]==='transfer')return ok(await team.transfer(user.userId,tenantId,input,correlationId));
+          if(path[3]==='revoke')return ok(await team.revoke(user.userId,tenantId,input,correlationId));
+        }
+      }
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if(path[2]==='notifications'&&path.length===3&&request.method==='GET')return ok(await notifications.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
       if(path[2]==='notifications'&&path[3]==='read'&&path.length===4&&request.method==='POST')return ok(await notifications.markRead(user.userId,tenantId,await readBody(request)));

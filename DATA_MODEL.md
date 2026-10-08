@@ -38,3 +38,5 @@ Migration 0029 binds UPGRADE/DOWNGRADE orders to their tenant-owned prior paid t
 Migration 0030 adds `notification_receipts` and `notifications` (73 tables). Immutable projection receipts deduplicate durable source facts; per-member notification identity is immutable while `read_at` can be set once. Membership and brand composite foreign keys enforce tenancy. Current role/audience authorization is also applied when reading or marking messages, rather than relying on the role at delivery time.
 
 Migration 0031 adds `email_outbox` (74 tables) with an authenticated-encrypted message envelope, composite user/token-hash reference, due index, lease fencing, bounded attempts and terminal-state/identity guards. No plaintext verification/reset link is stored in the queue. Terminal delivery clears the envelope; safe delivery audit records exclude recipient and message content.
+
+Migration 0032 adds email-bound team invitations with immutable identity/terminal states and tenant-scoped idempotency. Membership UUID revisions change on role updates and are recreated on rejoining, preventing stale requests from acting on later memberships.

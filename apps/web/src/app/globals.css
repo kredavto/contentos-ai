@@ -28,3 +28,11 @@
 .analytics-metrics,.analytics-inputs{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}.analytics-metrics{margin:0}.analytics-metrics dt{font-size:13px;color:var(--muted)}.analytics-metrics dd{margin:4px 0 0;font-weight:600}.analytics-inputs input{width:100%}fieldset.stack{border:0;padding:0;min-width:0}
 
 .billing-studio .plan-grid{margin-bottom:20px}.billing-studio .plan-grid .button{margin:0 8px 8px 0}.billing-studio .consent-checkbox{margin-bottom:16px}
+
+.team-center .panel { overflow-wrap: anywhere; }
+.team-center select, .team-center textarea { max-width: 100%; }
+
+.team-center form { display: grid; gap: 14px; margin: 14px 0; }
+.team-center form > button { justify-self: start; }
+.team-center .studio-actions { align-items: end; }
+.team-center article > button { margin-top: 12px; }
