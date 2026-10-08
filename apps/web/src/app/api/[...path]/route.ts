@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -39,6 +39,8 @@ async function dispatch(request: Request, context: RouteContext) {
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
+      if(path[2]==='notifications'&&path.length===3&&request.method==='GET')return ok(await notifications.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
+      if(path[2]==='notifications'&&path[3]==='read'&&path.length===4&&request.method==='POST')return ok(await notifications.markRead(user.userId,tenantId,await readBody(request)));
       if(path[2]==='billing'){
         if(path.length===3&&request.method==='GET')return ok(await billing.overview(user.userId,tenantId));
         if(path[3]==='checkout'&&path.length===4&&request.method==='POST')return ok(await billing.checkout(user.userId,tenantId,await readBody(request),correlationId),202);

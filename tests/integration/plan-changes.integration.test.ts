@@ -1,28 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { BillingRepository, PaymentTaskRepository, createDatabase } from '../../packages/db/src/index';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { BillingRepository, PaymentTaskRepository } from '../../packages/db/src/index';
+import { isolatedTestDatabase } from '../helpers/isolated-database';
 const url=process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)('confirmed monthly plan changes',()=>{
-  if(url&&!new URL(url).pathname.endsWith('_test'))throw new Error('Dedicated test database required');
-  // Plan catalogs are global. Keep these multi-plan fixtures isolated from concurrent suites.
-  const admin=createDatabase(url??'postgresql://localhost/unused_test');
-  const name=`contentos_plan_${randomUUID().replaceAll('-','')}_test`,isolated=new URL(url??'postgresql://localhost/unused_test');isolated.pathname=`/${name}`;
-  const database=createDatabase(isolated.href),billing=new BillingRepository(database.db),tasks=new PaymentTaskRepository(database.db);let created=false;
+  const database=isolatedTestDatabase(url),billing=new BillingRepository(database.db),tasks=new PaymentTaskRepository(database.db);
   const merchant={provider:'yookassa' as const,merchantId:'100500',test:true};
   const input={returnUrl:'https://contentos.example/billing',receipt:{customerEmail:'plan@example.test',vatCode:11,mode:'full_payment' as const,subject:'service' as const}};
   const quotes:Record<string,string>={};
   beforeAll(async()=>{
-    await admin.client`create database ${admin.client(name)}`;created=true;
-    await promisify(execFile)(process.execPath,[fileURLToPath(import.meta.resolve('tsx/cli')),'packages/db/src/migrate.ts'],{cwd:fileURLToPath(new URL('../../',import.meta.url)),env:{...process.env,DATABASE_URL:isolated.href}});
     for(const [code,amount,credits] of [['START',10000,10],['CREATOR',20000,20],['EXPERT',30000,30]] as const){
       const [plan]=await database.client`update plans set enabled=true where code=${code} returning id`;
       const id=randomUUID();quotes[code]=id;await database.client`insert into plan_versions(id,plan_id,version,amount_minor,ai_credits,video_seconds) values(${id},${plan!.id},1,${amount},${credits},${credits*10})`;
     }
   },60000);
-  afterAll(async()=>{await database.close();if(created)await admin.client`drop database ${admin.client(name)}`;await admin.close();});
+
   async function fixture(code='CREATOR'){
     const tenantId=randomUUID(),owner=randomUUID();
     await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${owner},${`plan-${owner}@example.test`},'unusable','Owner',now())`;

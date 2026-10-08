@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, Building2, Plus, FolderOpen, CheckCircle2, LayoutDashboard, Lightbulb, CalendarDays, Clapperboard, BarChart3, Settings2, LogOut, Sparkles, ArrowRight, LoaderCircle } from 'lucide-react';
+import { NotificationLink } from './notification-center';
 import { api } from '../lib/api-client';
 type Organization = { id: string; name: string; role: string };
 type Overview = { role: string; workspaces: Array<{ id: string; name: string }>; brands: Array<{ id: string; name: string; onboardingStep: number; onboardingCompletedAt: string | null }> };
@@ -57,7 +58,7 @@ export function Workspace({ name, verified }: { name: string; verified: boolean 
     </aside>
     <div className="workspace-main">
       <div className="page-eyebrow">ВАШ КОНТЕНТ. ВАША СИСТЕМА.</div>
-      <div className="page-title"><div><h1>Всё начинается с бренда</h1><p className="muted">Соберите контекст один раз. Сохраняйте его для всей контент-команды.</p></div><div>{tenant&&overview?.role==='OWNER'?<Link className="button secondary" href={`/billing?organization=${tenant}`}>Биллинг</Link>:null}<span className="badge">Ранний доступ</span></div></div>
+      <div className="page-title"><div><h1>Всё начинается с бренда</h1><p className="muted">Соберите контекст один раз. Сохраняйте его для всей контент-команды.</p></div><div>{tenant?<NotificationLink key={tenant} tenantId={tenant}/>:null}{tenant&&overview?.role==='OWNER'?<Link className="button secondary" href={`/billing?organization=${tenant}`}>Биллинг</Link>:null}<span className="badge">Ранний доступ</span></div></div>
       {!verified ? <p className="notice warning">Подтвердите почту перед подключением AI-сервисов. <Link href="/resend-verification">Отправить письмо</Link></p> : null}
       {error ? <p className="notice error" role="alert">{error}</p> : null}
       {loading ? <div className="panel loading" role="status"><LoaderCircle className="spin" />Загружаем рабочее пространство…</div> : null}
@@ -68,7 +69,7 @@ export function Workspace({ name, verified }: { name: string; verified: boolean 
         <div className="section-heading"><h2>Ваши бренды <span className="count">{overview.brands.length}</span></h2><span className="muted">Контекст под вашим контролем</span></div>
         {!overview.brands.length ? <div className="panel empty"><FolderOpen size={34} /><h3>Здесь будут ваши бренды</h3><p className="muted">Добавьте первый бренд и пройдите короткую настройку.</p></div> : <div className="brand-grid">{overview.brands.map(brand => <Link className="brand-card" key={brand.id} href={`/brands/${brand.id}/${brand.onboardingCompletedAt ? 'content' : 'onboarding'}?organization=${tenant}`}><div className="brand-card-top"><span className="brand-monogram">{brand.name.slice(0, 2).toUpperCase()}</span><ArrowUpRight size={20} /></div><h3>{brand.name}</h3><p>{brand.onboardingCompletedAt ? <><CheckCircle2 size={15} />Brand Brain готов</> : `Настройка: шаг ${brand.onboardingStep + 1} из 15`}</p><div className="progress-track"><span style={{ width: `${brand.onboardingCompletedAt ? 100 : (brand.onboardingStep + 1) / 15 * 100}%` }} /></div></Link>)}</div>}
       </> : null}
-      <p className="implementation-note">Откройте настроенный бренд, чтобы работать со стратегией, идеями и сценариями. Видеостудия и публикация — следующие этапы.</p>
+      <p className="implementation-note">Откройте настроенный бренд, чтобы работать со стратегией, идеями и сценариями. Видеостудия, календарь и публикации доступны внутри бренда.</p>
     </div>
   </div>;
 }

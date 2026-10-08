@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
 import { PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
@@ -23,6 +23,7 @@ const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const channelAnalyticsRepository=new ChannelAnalyticsRepository(database.db);
 const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env));
+const notificationRepository=new NotificationRepository(database.db);
 const paymentRepository = new PaymentTaskRepository(database.db);
 const paymentProvider = paymentsFromEnvironment(env);
 const renewalRepository = new RenewalBillingRepository(database.db);
@@ -119,10 +120,16 @@ const cleanupTimer = setInterval(() => {
   cleanupTask = media.cleanupOne().then(()=>{}).catch(()=>console.error(JSON.stringify({event:'media_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).then(()=>avatars.cleanupOne()).then(()=>{}).catch(()=>console.error(JSON.stringify({event:'avatar_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).then(()=>videos.cleanupOne()).then(()=>{}).catch(()=>console.error(JSON.stringify({event:'video_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).finally(()=>{cleaning=false;});
 },2000);
 void dispatch();
+let projecting=false;
+let notificationTask:Promise<unknown>=Promise.resolve();
+const notificationTimer=setInterval(()=>{
+  if(projecting)return;projecting=true;
+  notificationTask=notificationRepository.projectBatch().catch(()=>console.error(JSON.stringify({event:'notification_projection_error',code:'INTERNAL_ERROR'}))).finally(()=>{projecting=false;});
+},5000);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await connection.quit(); storage?.close(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); await notificationTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await connection.quit(); storage?.close(); await database.close();
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

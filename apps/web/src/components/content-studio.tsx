@@ -19,10 +19,11 @@ type Script = Overview['scripts'][number];
 const labels = {OPTIMIZE_STRATEGY:'Анализ эффективности',GENERATE_STRATEGY:'Стратегия',GENERATE_IDEAS:'Идеи',GENERATE_SCRIPT:'Сценарий',CREATE_AVATAR:'Аватар',GENERATE_VIDEO:'Видео'};
 const states:Record<string,string> = {WAITING_REVIEW:'Ожидает проверки',QUEUED:'В очереди',RUNNING:'Генерируется',RETRY:'Повторная попытка',SUCCEEDED:'Готово',FAILED:'Ошибка',WAITING_EXTERNAL:'Обрабатывается провайдером',RECONCILIATION:'Требуется проверка'};
 const edits: Array<[GenerationOptions['edit'],string]> = [['GENERATE','Новый сценарий'],['REWRITE','Переписать'],['SHORTEN','Сократить'],['EXPAND','Расширить'],['PROVOCATIVE','Более провокационно'],['EXPERT','Более экспертно'],['EMOTIONAL','Более эмоционально'],['SALES','Больше акцента на продаже'],['CHANGE_CTA','Изменить CTA']];
-export function ContentStudio({tenantId,brandId,brandName,role,verified}:{tenantId:string;brandId:string;brandName:string;role:string;verified:boolean}) {
+const studioTabs=['strategy','ideas','scripts','jobs','consents','media','avatars','videos','calendar','integrations','publishing','analytics'] as const;
+export function ContentStudio({tenantId,brandId,brandName,role,verified,initialTab}:{tenantId:string;brandId:string;brandName:string;role:string;verified:boolean;initialTab?:string}) {
   const base = `organizations/${tenantId}/brands/${brandId}`;
   const [data,setData] = useState<Overview|null>(null); const [error,setError] = useState(''); const [pending,setPending] = useState(false);
-  const [tab,setTab] = useState<'strategy'|'ideas'|'scripts'|'jobs'|'consents'|'media'|'avatars'|'videos'|'calendar'|'integrations'|'publishing'|'analytics'>('strategy');
+  const [tab,setTab] = useState<typeof studioTabs[number]>(()=>studioTabs.find(value=>value===initialTab)??'strategy');
   const [options,setOptions] = useState<GenerationOptions>(()=>generationOptionsSchema.parse({}));
   const [selected,setSelected] = useState<Script|null>(null); const [draft,setDraft] = useState<ScriptOutput|null>(null);
   const [history,setHistory] = useState<Array<{version:number;content:ScriptOutput}>>([]);

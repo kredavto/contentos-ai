@@ -1,6 +1,6 @@
 import {randomUUID,randomBytes} from 'node:crypto';
 import {describe,it,expect,beforeAll,afterAll} from 'vitest';
-import {createDatabase,SocialRepository} from '../../packages/db/src/index';
+import {NotificationRepository,createDatabase,SocialRepository} from '../../packages/db/src/index';
 import {SocialService} from '../../packages/core/src/social';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {DomainError,type SocialConnectionProvider} from '../../packages/types/src/index';
@@ -32,7 +32,7 @@ describe.skipIf(!url)('encrypted tenant social connections',()=>{
   });
   it('persists limited/expired states and can rewrap without changing the credential version',async()=>{
     canPublish=false;await service.refresh(owner,tenantId,brandId,connectionId,{revision:(await current()).revision},correlation);expect((await current()).status).toBe('LIMITED');
-    fail=true;await expect(service.refresh(owner,tenantId,brandId,connectionId,{revision:(await current()).revision},correlation)).rejects.toThrow('SOCIAL_TOKEN_EXPIRED');expect((await current()).status).toBe('TOKEN_EXPIRED');fail=false;canPublish=true;
+    fail=true;await expect(service.refresh(owner,tenantId,brandId,connectionId,{revision:(await current()).revision},correlation)).rejects.toThrow('SOCIAL_TOKEN_EXPIRED');expect((await current()).status).toBe('TOKEN_EXPIRED');const notifications=new NotificationRepository(database.db);await notifications.projectBatch(tenantId);expect((await notifications.list(owner,tenantId)).items.some(item=>item.type==='SOCIAL_TOKEN_EXPIRED'&&item.resourceId===connectionId)).toBe(true);fail=false;canPublish=true;
     const rotatedVault=new CredentialVault(JSON.stringify({v1:key,v2:randomBytes(32).toString('base64')}),'v2'),rotating=new SocialService(repo,{name:'telegram',provider},rotatedVault);
     await rotating.rewrap(owner,tenantId,brandId,connectionId,{revision:(await current()).revision},correlation);const stored=await repo.managed(owner,tenantId,brandId,connectionId);expect(stored.credential?.keyId).toBe('v2');expect(stored.credentialVersion).toBe(1);
     await rotating.refresh(owner,tenantId,brandId,connectionId,{revision:(await current()).revision},correlation);expect((await current()).status).toBe('ACTIVE');

@@ -34,3 +34,5 @@ Migration 0026 adds `webhook_events` (70 tables total): immutable minimal provid
 Migrations 0027–0028 add `billing_renewal_intents` (71 tables total), with unique tenant/paid-term and immutable order/term/method bindings. A composite term identity supports tenant FKs; method IDs equal their originating settled order IDs by the existing check. Deferred constraints require renewal bindings at commit. Order JSON cannot contain the decrypted paymentMethodId, and renewal kind/mode must agree.
 
 Migration 0029 binds UPGRADE/DOWNGRADE orders to their tenant-owned prior paid term and verifies the target quote and direction. No paid term is rewritten; confirmed changes append the next monthly period. Table count remains 71.
+
+Migration 0030 adds `notification_receipts` and `notifications` (73 tables). Immutable projection receipts deduplicate durable source facts; per-member notification identity is immutable while `read_at` can be set once. Membership and brand composite foreign keys enforce tenancy. Current role/audience authorization is also applied when reading or marking messages, rather than relying on the role at delivery time.
