@@ -34,3 +34,5 @@ export * from './repositories/notifications';
 export * from './repositories/email';
 
 export * from './repositories/team';
+
+export * from './repositories/agency';

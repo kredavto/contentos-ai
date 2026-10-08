@@ -43,3 +43,4 @@
 .brand-profile-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
 .brain-entry { display: grid; gap: 8px; min-width: 0; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 16px; }
 .brain-entry .button { justify-self: start; }
+.agency-client-forms .inline-form + .inline-form { margin-top: 24px; }

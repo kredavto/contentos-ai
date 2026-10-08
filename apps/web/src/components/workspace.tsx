@@ -51,7 +51,7 @@ export function Workspace({ name, verified, initialOrganization }: { name: strin
       </select>
       <button className="text-button" onClick={() => setCreatingOrganization(true)}><Plus size={15} />Добавить организацию</button>
       <div className="mobile-account"><span>{name}</span><button className="icon-button" aria-label="Выйти из аккаунта" onClick={logout}><LogOut size={18} /></button></div>
-      <nav className="side-nav" aria-label="Разделы"><Link className="active" href="/dashboard"><LayoutDashboard size={18} />Обзор</Link>
+      <nav className="side-nav" aria-label="Разделы">{tenant && overview && ['OWNER', 'ADMIN', 'MANAGER'].includes(overview.role) ? <Link href={`/clients?organization=${tenant}`}><Building2 size={18} />Клиенты</Link> : null}<Link className="active" href="/dashboard"><LayoutDashboard size={18} />Обзор</Link>
         {[['Стратегия', Sparkles], ['Идеи', Lightbulb], ['Календарь', CalendarDays], ['Видеостудия', Clapperboard], ['Аналитика', BarChart3], ['Настройки', Settings2]].map(([label, Icon]) => { const NavIcon = Icon as typeof Sparkles; return <button key={String(label)} disabled title="Раздел в разработке"><NavIcon size={18} />{String(label)}<span className="soon">скоро</span></button>; })}
       </nav>
       <div className="sidebar-bottom"><span className="avatar-letter">{name.slice(0, 1).toUpperCase()}</span><div><strong>{name}</strong><small>Ваш аккаунт</small></div><button className="icon-button" aria-label="Выйти" onClick={logout}><LogOut size={18} /></button></div>

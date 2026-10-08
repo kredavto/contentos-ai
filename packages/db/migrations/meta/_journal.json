@@ -239,6 +239,13 @@
       "when": 1791501195447,
       "tag": "0033_milky_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791502027392,
+      "tag": "0034_sleepy_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

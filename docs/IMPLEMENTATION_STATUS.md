@@ -10,10 +10,10 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and completed summary. A profile/voice editor is implemented with transactional role checks and optimistic revisions; all 13 structured collections now have an editor with stable IDs and archiving. See [profile editing](brand-profile.md).
-- Database schema: 75 tables with thirty-four SQL migrations (0000–0033). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 77 tables with thirty-five SQL migrations (0000–0034). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for team commit 34f7063 (run 37857028953). Newer profile changes are locally verified and awaiting remote CI.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for structured Brand Brain commit ca1ead0 (run 37859160174). Newer agency changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -67,17 +67,16 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 
 ## Full objective still outstanding
 
-- Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
-- Extend the implemented text/avatar/video/publishing job engine to additional platforms and webhooks, including operator reconciliation and provider pricing configuration.
-- Remaining image/media, YooKassa, YouTube/TikTok/Meta/VK and platform analytics adapters; production configuration and live verification of HeyGen/S3/Telegram remain pending.
-- Remaining AI workflows beyond strategy/ideas/scripts; downstream publishing transitions from the implemented editorial calendar.
-- Private voice cloning/import, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
-- OAuth flows and refresh for additional social platforms, autopilot, verified/idempotent webhooks, additional delivery-status adapters and normalized/raw analytics.
-- AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
-- Admin/support/audit UI, notifications, privacy export/deletion workflows, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
-- Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
-- Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
-- Complete Vercel runtime configuration and full-stack deployment verification. A staging web deployment is available, but partial functionality is not represented as the finished product.
+- Production SMTP/domain setup and live mail verification; OAuth authentication flows.
+- Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery, Brand Guardian and fact-checking interfaces.
+- Private voice cloning/import, cover design, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
+- YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
+- Comment inbox/reply safety modes, funnels/UTMs, financial/provider-cost dashboards, admin/support/audit UI and provider/model configuration.
+- Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, Sentry-compatible monitoring and provider readiness views.
+- Complete development seed and final platform-wide security/architecture reviews. The full MVP browser chain is verified with fixture transports; real configured-provider end-to-end verification remains pending.
+- Fresh AMD64 release images, GLOBAL/RU infrastructure placement, backups/restore drills, production credentials and complete Vercel/runtime deployment. The NL capacity upgrade and SMTP sender domain are still pending.
+
+Implemented billing/renewal, durable encrypted email, notifications, team management, structured Brand Brain editing and the agency portfolio are documented below; their presence does not establish completion of the remaining specification.
 
 ## Source and hosting
 
@@ -379,3 +378,10 @@ Verification: 266 tests across 43 files passed with PostgreSQL and real FFmpeg; 
 All required normalized collections can now be read and explicitly edited after onboarding: products, audiences, pains, desires, objections, competitors, positioning, pillars, offers, lead magnets, CTAs, rules and references. Writes share the brand revision and tenant lock, require a currently verified OWNER/ADMIN/MANAGER, reject foreign/archived/duplicate IDs and preserve mandatory lists. Removed entries receive archived_at instead of being deleted; downstream references remain valid. New AI snapshots filter archives and include the additional collections. Old queued snapshots and draft onboarding retain compatible schemas. Migration 0033 adds archival timestamps and is applied to local development/test databases.
 
 Verification: 269 tests in 43 files passed with PostgreSQL and FFmpeg, including collection mutations, archival retention, permissions, concurrency and actual provider prompt context. Final workspace/test typecheck and lint passed. The full MVP browser chain and CSRF scenario passed (5.1 minutes including the initial profile-test locator failure); the corrected profile/collection scenario then passed independently in Chrome (24 seconds). The locator was narrowed to distinguish the profile success message from the collection loading status. Mobile collection rendering was inspected with no horizontal overflow. Production build passed. No live paid provider calls occurred.
+
+
+## Agency client portfolio
+
+A gated Clients page supports explicit owner opt-in, atomic/idempotent client-organization creation, linking organizations owned by the actor, and revision-safe portfolio archiving/restoration. Clients remain separate tenants with independent membership, ledgers, subscriptions, brands and provider connections. Portfolio queries join current direct client membership; agency membership alone grants no client data access. Existing organizations remain usable after portfolio mode is disabled. The deployment gate defaults off. Migration 0034 adds tenant feature flags and immutable-identity client relationships, applied locally. See [agency workflow](agency.md).
+
+All 275 tests in 44 files passed with PostgreSQL and FFmpeg, including six focused agency integration scenarios. Workspace/test typecheck and lint passed. Agency and team Chrome scenarios passed; the agency browser test was then strengthened to wait for the client brand list before cleanup. The strengthened agency scenario passed in Chrome (47 seconds), including a successful client-data fetch after mode was disabled. Final desktop/mobile screenshots were inspected with no horizontal overflow. Production build passed. Local development PostgreSQL confirms 35 applied migrations and 77 public tables. No external email, account invitation or paid provider operation was performed.

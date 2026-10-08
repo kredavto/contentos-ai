@@ -22,3 +22,5 @@ export * from './notifications';
 export * from './email';
 
 export * from './team';
+
+export * from './agency';

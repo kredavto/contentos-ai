@@ -5,6 +5,7 @@ const serverSchema = z.object({
   APP_URL: z.url(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.url(),
+  AGENCY_MODE_ENABLED: z.enum(['true', 'false']).default('false'),
   PAYMENT_RENEWALS_ENABLED: z.enum(['true','false']).default('false'),
   PAYMENTS_ENABLED: z.enum(['true', 'false']).default('false'),
   PAYMENT_PROVIDER: z.enum(['disabled', 'yookassa']).default('disabled'),

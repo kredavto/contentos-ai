@@ -10,6 +10,7 @@ const messages: Record<string, string> = {
   RECONCILIATION_REQUIRED: 'Результат запроса пока не подтверждён. Не создавайте дубликат; требуется проверка задачи.',
   INSUFFICIENT_CREDITS: 'Недостаточно кредитов для этой операции.',
   CONSENT_REQUIRED: 'Для этой операции требуется действующее согласие.',
+  PORTFOLIO_LIMIT_REACHED: 'Достигнут лимит клиентских организаций в портфеле. Обратитесь к администратору.',
   PLAN_LIMIT_REACHED: 'Достигнут лимит хранилища. Удалите ненужные файлы.',
 };
 export async function readPhotoUpload(request: Request) {
