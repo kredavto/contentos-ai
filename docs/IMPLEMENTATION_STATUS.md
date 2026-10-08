@@ -77,7 +77,7 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Admin/support/audit UI, notifications, privacy export/deletion workflows, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
 - Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
 - Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
-- Vercel deployment and verification. No deployment has happened; scaffold/partial functionality is not represented as the finished product.
+- Complete Vercel runtime configuration and full-stack deployment verification. A staging web deployment is available, but partial functionality is not represented as the finished product.
 
 ## Source and hosting
 
@@ -340,3 +340,19 @@ Vercel infrastructure inspection found no existing CONTENTOS project. Created pr
 Remote verification: CI run 37850214258 succeeded for notification commit `0d4817f9a6b04e1b0ec2d22b1b1bdf1eb9d61f38`, including its browser stage. This does not substitute for validation of the newer email changes.
 
 Final email verification: all 253 tests across 41 files passed with PostgreSQL and real FFmpeg; workspace/test typecheck, lint and production build passed. All seven Playwright scenarios passed in installed Chrome, including the full registration → queued SMTP verification → onboarding → strategy/ideas/script → avatar/video/captions → approval/scheduled publication → analytics/recommendations chain, plus Billing and notifications. SMTP/storage/provider transports were local fixtures, not real external sends or charges. The lint pass required explicit Node imports in the new local-key setup script; that was corrected before the final passing run. Browser/web/worker fixture processes were stopped by Playwright and the separate inspection browser was closed.
+
+First Vercel staging deployment reached READY for email commit `e3f3c043386c9ab9f28d4fce7b7fe0a55690f130`: https://contentos-54l7vlhlu-digagency.vercel.app (`dpl_BNU3bMVcorBgwyPDFrPS8XvRRERk`). Chrome showed the real home page; health returned 200, registration HTML 200, and account API returned the expected safe CONFIGURATION_REQUIRED 503. No runtime credentials or database were fabricated. Initial automatic production deployment was canceled; the UI confirms `main` production tracking. Production worker/data/provider setup and remaining modules are still required.
+
+## Deployable container profiles (verification in progress)
+
+Added pinned Node 24 multi-stage worker/web images, production-only worker dependencies with frozen lockfile, an explicit tsx runtime dependency, FFmpeg/FFprobe/fonts, non-root execution, context secret exclusions and GLOBAL/self-hosted release compose settings. An initial legacy pnpm deployment stage was replaced because it re-resolved dependency ranges; the final worker uses the committed dependency graph directly.
+
+Worker image built successfully. Its offline, read-only, non-root smoke check passed actual video normalization, Cyrillic captions, JPEG cover and PCM extraction, and verified no `.env` or development test runner was included. The image applied all 32 migrations to a newly created isolated test database, then started with an isolated Redis in production mode; health returned 200 and logs contained no error. Web image and graceful shutdown checks are still in progress. No production data service or worker host has been provisioned.
+
+Remote CI run 37851537944 succeeded for email commit `e3f3c043386c9ab9f28d4fce7b7fe0a55690f130`, independently of these newer packaging changes.
+
+Container follow-up: worker SIGTERM shutdown returned exit code 0. Frozen workspace installation, workspace/test typecheck and lint passed after promoting tsx to a worker runtime dependency; the lockfile changed only that importer reference, without package upgrades. Web dependency download took about six minutes on the local connection; production build is now running.
+
+Final container verification: the Linux ARM64 web image built successfully, including Next TypeScript checks and static generation. A production-mode, non-root, read-only container with the compose-equivalent init process passed home/registration rendering, all nine referenced CSS/JavaScript assets, health, anonymous rejection and a database lookup for a well-formed unknown session. SIGTERM stopped it with code 143 without forced kill; the smoke runner initially expected only code 0, then corrected that expectation and repeated the check with init enabled. Worker shutdown had returned 0. Isolated PostgreSQL database, Redis container/network and temporary environment file were removed; existing development services were preserved. The new web smoke script passed lint. No production backend was deployed.
+
+The user authorized their existing NL server for backend infrastructure. SSH host/user details are pending; no configured SSH alias was found locally. Inspect existing services and capacity before deployment. NL is the GLOBAL placement, not RU_DATA_RESIDENCY. Team/invitation management and the other outstanding product modules remain unfinished.

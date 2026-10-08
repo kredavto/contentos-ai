@@ -1,0 +1,57 @@
+# Supply a protected runtime env file and a verified immutable release tag.
+# GLOBAL: worker + managed services; RU_DATA_RESIDENCY: add self-hosted web,
+# and place ALL data services/hosts in the selected Russian infrastructure.
+services:
+  worker:
+    image: contentos-worker:${CONTENTOS_IMAGE_TAG:?Set a verified release tag}
+    build:
+      context: ..
+      target: worker
+    env_file: ${RUNTIME_ENV_FILE:?Set an absolute path to the protected runtime env file}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=2g,uid=1000,gid=1000,mode=1770']
+    security_opt: ['no-new-privileges:true']
+    cap_drop: [ALL]
+    mem_limit: 3g
+    cpus: 2
+    stop_grace_period: 120s
+  migrate:
+    image: contentos-worker:${CONTENTOS_IMAGE_TAG:?Set a verified release tag}
+    profiles: [operations]
+    env_file: ${RUNTIME_ENV_FILE:?Set an absolute path to the protected runtime env file}
+    command: ['node', '--import', 'tsx', 'node_modules/@contentos/db/src/migrate.ts']
+    init: true
+    restart: 'no'
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=128m,uid=1000,gid=1000,mode=1770']
+    security_opt: ['no-new-privileges:true']
+    cap_drop: [ALL]
+    healthcheck:
+      disable: true
+  web:
+    image: contentos-web:${CONTENTOS_IMAGE_TAG:?Set a verified release tag}
+    build:
+      context: ..
+      target: web
+    profiles: [self-hosted]
+    env_file: ${RUNTIME_ENV_FILE:?Set an absolute path to the protected runtime env file}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,uid=1000,gid=1000,mode=1770
+      - /app/apps/web/.next/cache:rw,noexec,nosuid,size=256m,uid=1000,gid=1000,mode=1770
+    ports: ['127.0.0.1:3100:3000']
+    security_opt: ['no-new-privileges:true']
+    cap_drop: [ALL]
+    mem_limit: 1g
+    cpus: 1
+    stop_grace_period: 30s
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
