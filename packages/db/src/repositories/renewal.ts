@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DomainError, minorToRubles, renewalAcceptanceSchema, renewalCancellationSchema, type RenewalAcceptance, type RenewalCancellation } from '@contentos/types';
 import type { Database } from '../index';
-import { plans, planVersions, renewalConsents, renewalPreferences, renewalChanges, auditLogs, paymentMethods } from '../schema';
+import { plans, planVersions, renewalConsents, renewalPreferences, renewalChanges, auditLogs, paymentMethods, billingOrders, subscriptionTerms } from '../schema';
 import { assertMembership, lockTenant, type Transaction } from './ledger';
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 async function quotePolicy(tx: Transaction, versionId: string) {
@@ -18,13 +18,16 @@ async function quotePolicy(tx: Transaction, versionId: string) {
 }
 export class RenewalRepository {
   constructor(private readonly db: Database) {}
-  async overview(userId: string, tenantId: string) {
+  async overview(userId: string, tenantId: string, merchant?: { provider: string; merchantId: string; test: boolean }) {
     return this.db.transaction(async tx => {
       await lockTenant(tx, tenantId); await assertMembership(tx, userId, tenantId, 'billing');
       const [preference] = await tx.select().from(renewalPreferences).where(eq(renewalPreferences.tenantId, tenantId));
       const [active] = preference?.activeConsentId ? await tx.select({ id: renewalConsents.id, planVersionId: renewalConsents.planVersionId, amountMinor: renewalConsents.amountMinor, currency: renewalConsents.currency, policyVersion: renewalConsents.policyVersion, policyText: renewalConsents.policyText, createdAt: renewalConsents.createdAt }).from(renewalConsents).where(and(eq(renewalConsents.tenantId, tenantId), eq(renewalConsents.id, preference.activeConsentId))) : [];
       const history = await tx.select({ id: renewalChanges.id, consentId: renewalChanges.consentId, revision: renewalChanges.revision, operation: renewalChanges.operation, createdAt: renewalChanges.createdAt }).from(renewalChanges).where(eq(renewalChanges.tenantId, tenantId)).orderBy(desc(renewalChanges.revision)).limit(20);
-      return { revision: preference?.revision ?? 0, active: active ?? null, history };
+      const [method] = active && merchant ? await tx.select({ id: paymentMethods.id }).from(paymentMethods).innerJoin(billingOrders, and(eq(billingOrders.tenantId, paymentMethods.tenantId), eq(billingOrders.id, paymentMethods.orderId))).where(and(eq(paymentMethods.tenantId, tenantId), eq(paymentMethods.consentId, active.id), eq(paymentMethods.renewalRevision, preference!.revision), isNull(paymentMethods.revokedAt), eq(billingOrders.provider, merchant.provider), eq(billingOrders.merchantId, merchant.merchantId), eq(billingOrders.test, merchant.test))).limit(1) : [];
+      const [term] = active ? await tx.select({ endsAt: subscriptionTerms.endsAt, planVersionId: subscriptionTerms.planVersionId }).from(subscriptionTerms).where(eq(subscriptionTerms.tenantId, tenantId)).orderBy(desc(subscriptionTerms.endsAt)).limit(1) : [];
+      return { revision: preference?.revision ?? 0, active: active ?? null, history, methodReady: Boolean(method), nextPaymentAt: method && term?.planVersionId === active?.planVersionId && term && term.endsAt > new Date() ? term.endsAt : null };
+
     });
   }
   async preview(userId: string, tenantId: string, planVersionId: string) {

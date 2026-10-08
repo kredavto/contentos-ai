@@ -212,6 +212,42 @@ describe.skipIf(!url)('durable payment dispatch', () => {
     const status=await service.orderStatus(f.owner,f.tenantId,f.order.id);expect(status.status).toBe('PAID');expect(status.confirmationUrl).toBeNull();
   });
 
+  it('requires explicit exact consent for saving checkout and preserves both retry intents',async()=>{
+    const f=await fixture(),renewal=new RenewalRepository(database.db),service=new BillingService(f.billing,renewal,{merchant:f.merchant,appUrl:'https://contentos.example',receipt:{vatCode:11,subject:'service',mode:'full_payment'}},true);
+    const policy=await service.renewalPolicy(f.owner,f.tenantId,f.versionId);
+    const acceptance={planVersionId:f.versionId,policyVersion:policy.policyVersion,textHash:policy.textHash,expectedRevision:policy.expectedRevision,accepted:true,idempotencyKey:randomUUID()},request={ip:'127.0.0.1',userAgent:'fixture'};
+    await expect(service.acceptRenewal(f.owner,f.tenantId,{...acceptance,accepted:false},request,randomUUID())).rejects.toThrow();
+    await expect(service.acceptRenewal(f.owner,f.tenantId,{...acceptance,textHash:'0'.repeat(64)},request,randomUUID())).rejects.toThrow('CONFLICT');
+    const permission=await service.acceptRenewal(f.owner,f.tenantId,acceptance,request,randomUUID());
+    expect(await service.acceptRenewal(f.owner,f.tenantId,acceptance,request,randomUUID())).toEqual(permission);
+    const intent={planVersionId:f.versionId,idempotencyKey:randomUUID(),renewal:permission};
+    const order=await service.checkout(f.owner,f.tenantId,intent,randomUUID());
+    expect((await service.checkout(f.owner,f.tenantId,intent,randomUUID())).id).toBe(order.id);
+    const [row]=await database.client`select input,renewal_consent_id from billing_orders where id=${order.id}`;expect(row!.input.saveMethod).toBe(true);expect(row!.renewal_consent_id).toBe(permission.consentId);
+    expect((await service.overview(f.owner,f.tenantId)).renewal.methodReady).toBe(false);
+    await service.cancelRenewal(f.owner,f.tenantId,{expectedRevision:permission.revision,idempotencyKey:randomUUID()},randomUUID());
+    await expect(service.checkout(f.owner,f.tenantId,{...intent,idempotencyKey:randomUUID()},randomUUID())).rejects.toThrow('CONSENT_REQUIRED');
+    expect((await service.orderStatus(f.owner,f.tenantId,order.id)).status).toBe('CANCELED');
+  });
+  it('denies opt-in without configuration and scopes policy/acceptance to verified owners',async()=>{
+    const f=await fixture(),renewal=new RenewalRepository(database.db),configuration={merchant:f.merchant,appUrl:'https://contentos.example',receipt:{vatCode:11,subject:'service' as const,mode:'full_payment' as const}};
+    const disabled=new BillingService(f.billing,renewal,configuration),service=new BillingService(f.billing,renewal,configuration,true);
+    await expect(disabled.renewalPolicy(f.owner,f.tenantId,f.versionId)).rejects.toThrow('CONFIGURATION_REQUIRED');
+    const policy=await service.renewalPolicy(f.owner,f.tenantId,f.versionId),input={planVersionId:f.versionId,policyVersion:policy.policyVersion,textHash:policy.textHash,expectedRevision:0,accepted:true,idempotencyKey:randomUUID()};
+    await expect(disabled.acceptRenewal(f.owner,f.tenantId,input,{ip:'',userAgent:''},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
+    await expect(disabled.checkout(f.owner,f.tenantId,{planVersionId:f.versionId,idempotencyKey:randomUUID(),renewal:{consentId:randomUUID(),revision:1}},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
+    await database.client`update organization_members set role='EDITOR' where tenant_id=${f.tenantId}`;
+    await expect(service.renewalPolicy(f.owner,f.tenantId,f.versionId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(service.acceptRenewal(f.owner,f.tenantId,input,{ip:'',userAgent:''},randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+  });
+  it('shows only usable merchant-scoped method readiness and clears it on cancellation',async()=>{
+    const f=await recurringFixture(),renewal=new RenewalRepository(database.db);
+    const overview=await renewal.overview(f.owner,f.tenantId,f.merchant);expect(overview.methodReady).toBe(true);expect(overview.nextPaymentAt).toEqual(new Date(f.term.ends_at));
+    expect(JSON.stringify(overview)).not.toContain('fixture-recurring-method');expect(JSON.stringify(overview)).not.toContain('credential');
+    expect((await renewal.overview(f.owner,f.tenantId,{...f.merchant,test:false})).methodReady).toBe(false);
+    await f.cancel();const canceled=await renewal.overview(f.owner,f.tenantId,f.merchant);expect(canceled.methodReady).toBe(false);expect(canceled.nextPaymentAt).toBeNull();
+  });
+
   async function recurringFixture(anchor?:Date){
     const f=await fixture(true),vault=new CredentialVault(JSON.stringify({fixture:randomBytes(32).toString('base64')}),'fixture');
     const initialBilling=anchor?new BillingRepository(database.db,()=>anchor):f.billing;
