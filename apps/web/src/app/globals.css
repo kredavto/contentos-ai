@@ -41,3 +41,5 @@
 .brand-profile-editor > fieldset { border: 0; padding: 0; display: grid; gap: 18px; min-width: 0; }
 .brand-profile-field { display: grid; gap: 8px; }
 .brand-profile-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.brain-entry { display: grid; gap: 8px; min-width: 0; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 16px; }
+.brain-entry .button { justify-self: start; }

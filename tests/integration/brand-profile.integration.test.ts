@@ -53,4 +53,36 @@ describe.skipIf(!url)('completed Brand Brain profile', () => {
     await expect(service.saveProfile(user, tenant, brand, { revision: 2, data: profile() }, correlation)).rejects.toThrow('NOT_FOUND');
     await database.client`update users set disabled_at=null where id=${user}`;
   });
+  it('edits all structured collections and excludes archived context without deleting identity', async () => {
+    const audience = await service.collection(user, tenant, brand, 'audience');
+    const oldId = audience.entries[0]!.id;
+    await service.saveCollection(user, tenant, brand, 'audience', { revision: audience.revision, entries: [{ name: 'Experts', description: 'Experienced builders' }] }, correlation);
+    const archived = await database.client`select archived_at from audience_segments where id=${oldId}`;
+    expect(archived).toHaveLength(1); expect(archived[0]?.archived_at).not.toBeNull();
+    expect((await service.getBrandBrain(user, tenant, brand)).data.audience.map(row => row.name)).toEqual(['Experts']);
+    for (const collection of ['desires', 'objections', 'positioning', 'pillars', 'offers', 'rules']) {
+      const before = await service.collection(user, tenant, brand, collection);
+      await service.saveCollection(user, tenant, brand, collection, { revision: before.revision, entries: [{ name: collection, description: 'Structured context' }] }, correlation);
+      const saved = await service.collection(user, tenant, brand, collection);
+      const id = saved.entries[0]!.id;
+      await service.saveCollection(user, tenant, brand, collection, { revision: saved.revision, entries: [{ id, name: collection, description: 'Updated context' }] }, correlation);
+      expect((await service.collection(user, tenant, brand, collection)).entries[0]?.id).toBe(id);
+    }
+    const brain = await service.getBrandBrain(user, tenant, brand);
+    expect(brain.data.rules?.[0]?.description).toBe('Updated context');
+    expect(brain.data.desires?.[0]?.name).toBe('desires');
+    await expect(service.saveCollection(user, tenant, brand, 'audience', { revision: brain.brand.revision, entries: [{ id: oldId, name: 'Revived', description: '' }] }, correlation)).rejects.toThrow('NOT_FOUND');
+  });
+  it('guards collection permissions, duplicate IDs, required lists and stale revisions', async () => {
+    const current = await service.collection(user, tenant, brand, 'products');
+    const input = { revision: current.revision, entries: current.entries };
+    await expect(service.saveCollection(viewer, tenant, brand, 'products', input, correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(service.saveCollection(user, tenant, brand, 'products', { ...input, entries: [] }, correlation)).rejects.toThrow('INVALID_INPUT');
+    expect(() => service.saveCollection(user, tenant, brand, 'products', { ...input, entries: [...current.entries, ...current.entries] }, correlation)).toThrow();
+    await expect(service.saveCollection(user, tenant, brand, 'products', { ...input, entries: [{ id: randomUUID(), name: 'Foreign', description: '' }] }, correlation)).rejects.toThrow('NOT_FOUND');
+    const outcomes = await Promise.allSettled([1, 2].map(() => service.saveCollection(user, tenant, brand, 'products', input, correlation)));
+    expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter(result => result.status === 'rejected')).toHaveLength(1);
+  });
+
 });

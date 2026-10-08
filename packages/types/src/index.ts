@@ -37,3 +37,5 @@ export * from './payments';
 export * from './notifications';
 
 export * from './team';
+
+export * from './brand-brain';

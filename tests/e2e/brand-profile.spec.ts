@@ -28,7 +28,7 @@ test('completed profile edits persist, reject stale saves and preserve structure
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('profile-mobile.png'), fullPage: true });
     await page.getByRole('button', { name: 'Сохранить профиль', exact: true }).click();
-    await expect(page.getByRole('status')).toHaveText('Профиль бренда обновлён');
+    await expect(page.getByRole('status').filter({ hasText: 'Профиль бренда обновлён' })).toHaveText('Профиль бренда обновлён');
     await page.reload(); await expect(page.getByRole('heading', { name: 'Brand Brain: Обновлённый бренд' })).toBeVisible();
     await expect(page.getByText('Точный и дружелюбный', { exact: true })).toBeVisible();
     const saved = await service.getBrandBrain(user, tenant, brand); expect(saved.data.products[0]?.name).toBe('Курс'); expect(saved.brand.revision).toBe(2);
@@ -37,6 +37,23 @@ test('completed profile edits persist, reject stale saves and preserve structure
     await page.getByLabel('Название бренда', { exact: true }).fill('Устаревшая запись');
     await page.getByRole('button', { name: 'Сохранить профиль', exact: true }).click();
     await expect(page.getByRole('alert')).toBeVisible(); expect((await service.getBrandBrain(user, tenant, brand)).data.company).toBe('Обновлённый бренд');
+    await page.reload();
+    await page.getByLabel('Раздел', { exact: true }).selectOption('rules');
+    await page.getByRole('button', { name: 'Добавить пункт', exact: true }).click();
+    await page.getByLabel('Название 1', { exact: true }).fill('Проверять факты');
+    await page.getByLabel('Описание 1', { exact: true }).fill('Подтверждать утверждения источниками');
+    await page.getByRole('button', { name: 'Сохранить раздел', exact: true }).click();
+    await expect(page.getByLabel('Раздел', { exact: true })).toHaveValue('products');
+    await page.getByLabel('Раздел', { exact: true }).selectOption('rules');
+    await expect(page.getByLabel('Название 1', { exact: true })).toHaveValue('Проверять факты');
+    const rules = await service.collection(user, tenant, brand, 'rules'); expect(rules.entries).toHaveLength(1);
+    await page.screenshot({ path: testInfo.outputPath('brain-collections-mobile.png'), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.getByRole('button', { name: 'Убрать пункт 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Сохранить раздел', exact: true }).click();
+    await expect(page.getByLabel('Раздел', { exact: true })).toHaveValue('products');
+    expect((await service.getBrandBrain(user, tenant, brand)).data.rules).toEqual([]);
+    expect((await database.client`select archived_at from brand_rules where id=${rules.entries[0]!.id}`)[0]?.archived_at).not.toBeNull();
     expect(errors).toEqual([]);
   } finally { await database.client`delete from organizations where id=${tenant}`; await database.client`delete from users where id=${user}`; }
 });

@@ -64,6 +64,10 @@ async function dispatch(request: Request, context: RouteContext) {
       }
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if (path[3] && path[4] === 'brain' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await brands.collection(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') return ok(await brands.saveCollection(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId));
+        }
         if(path[3]&&path[4]==='performance'&&path.length===5){
           if(request.method==='GET')return ok(await performance.list(user.userId,tenantId,path[3]));
           if(request.method==='POST')return ok(await performance.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));

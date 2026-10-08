@@ -40,3 +40,5 @@ Migration 0030 adds `notification_receipts` and `notifications` (73 tables). Imm
 Migration 0031 adds `email_outbox` (74 tables) with an authenticated-encrypted message envelope, composite user/token-hash reference, due index, lease fencing, bounded attempts and terminal-state/identity guards. No plaintext verification/reset link is stored in the queue. Terminal delivery clears the envelope; safe delivery audit records exclude recipient and message content.
 
 Migration 0032 adds email-bound team invitations with immutable identity/terminal states and tenant-scoped idempotency. Membership UUID revisions change on role updates and are recreated on rejoining, preventing stale requests from acting on later memberships.
+
+Brand Brain collection editing (0033): normalized entity tables gain nullable archived_at. Removing a collection entry archives it so historical audience/pillar foreign keys remain resolvable. Active collection reads and new generation snapshots exclude archived entries. Collection saves preserve IDs, reject cross-brand or archived IDs, share brands.revision with profile edits and write content-free audit metadata.
