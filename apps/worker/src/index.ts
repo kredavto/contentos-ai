@@ -2,15 +2,17 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
+import { SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
 const repository = new JobRepository(database.db);
+const emailRepository=new EmailRepository(database.db);
+const emailProcessor=new EmailProcessor(emailRepository,env.SMTP_URL&&env.EMAIL_FROM?new SmtpEmailProvider(env.SMTP_URL,env.EMAIL_FROM,env.NODE_ENV==='production'):null,credentialVaultFromEnvironment(env));
 const storage = storageFromEnvironment(env);
 const media = new MediaService(new MediaRepository(database.db),storage);
 const avatarConnection = avatarFromEnvironment(env);
@@ -126,10 +128,13 @@ const notificationTimer=setInterval(()=>{
   if(projecting)return;projecting=true;
   notificationTask=notificationRepository.projectBatch().catch(()=>console.error(JSON.stringify({event:'notification_projection_error',code:'INTERNAL_ERROR'}))).finally(()=>{projecting=false;});
 },5000);
+let mailing=false;
+let emailTask:Promise<unknown>=Promise.resolve();
+const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).catch(()=>console.error(JSON.stringify({event:'email_worker_error',code:'INTERNAL_ERROR'}))).finally(()=>{mailing=false;});},2000);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); await notificationTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await connection.quit(); storage?.close(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await connection.quit(); storage?.close(); await database.close();
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

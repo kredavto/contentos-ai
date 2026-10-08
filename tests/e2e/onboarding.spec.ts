@@ -12,9 +12,8 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Пароль', { exact: true }).fill('secure-test-password');
   await page.getByRole('button', { name: 'Создать аккаунт' }).click();
   await expect(page.getByRole('status')).toContainText('письмо',{timeout:60000}); // scrypt can exceed 30s on a memory-constrained local machine.
-  const response = await request.get(`http://127.0.0.1:8026/?recipient=${encodeURIComponent(email)}`);
-  const messages = await response.json() as Array<{ text: string }>;
-  const token = messages.at(-1)?.text.match(/token=([a-zA-Z0-9_-]+)/)?.[1];
+  let token:string|undefined;
+  await expect.poll(async()=>{const response=await request.get(`http://127.0.0.1:8026/?recipient=${encodeURIComponent(email)}`);const messages=await response.json() as Array<{text:string}>;token=messages.at(-1)?.text.match(/token=([a-zA-Z0-9_-]+)/)?.[1];return Boolean(token);},{timeout:30000}).toBe(true);
   expect(token).toBeTruthy();
   await page.goto(`/verify#token=${token}`);
   await page.getByRole('button', { name: 'Подтвердить почту' }).click();

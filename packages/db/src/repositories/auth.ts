@@ -1,6 +1,7 @@
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../index';
-import { users, sessions, authTokens, auditLogs, rateLimits } from '../schema';
+import type { EncryptedCredential } from '@contentos/types';
+import { emailOutbox, users, sessions, authTokens, auditLogs, rateLimits } from '../schema';
 export type AuthTokenType = 'VERIFY_EMAIL' | 'RESET_PASSWORD';
 export class AuthRepository {
   constructor(private readonly db: Database) {}
@@ -16,21 +17,23 @@ export class AuthRepository {
     const [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
     return user;
   }
-  async register(input: { email: string; name: string; passwordHash: string; tokenHash: string; correlationId: string }) {
+  async register(input: { id:string; email: string; name: string; passwordHash: string; tokenHash: string; correlationId: string; mail:{id:string;payload:EncryptedCredential} }) {
     return this.db.transaction(async tx => {
-      const [user] = await tx.insert(users).values({ email: input.email, name: input.name, passwordHash: input.passwordHash }).onConflictDoNothing({ target: users.email }).returning();
+      const [user] = await tx.insert(users).values({ id:input.id, email: input.email, name: input.name, passwordHash: input.passwordHash }).onConflictDoNothing({ target: users.email }).returning();
       if (!user) return undefined;
       await tx.insert(authTokens).values({ userId: user.id, tokenHash: input.tokenHash, type: 'VERIFY_EMAIL', expiresAt: new Date(Date.now() + 24 * 3600_000) });
+      await tx.insert(emailOutbox).values({id:input.mail.id,userId:user.id,tokenHash:input.tokenHash,payload:input.mail.payload,correlationId:input.correlationId});
       await tx.insert(auditLogs).values({ userId: user.id, action: 'AUTH_REGISTER', resourceId: user.id, correlationId: input.correlationId });
       return user;
     });
   }
-  async issueToken(userId: string, type: AuthTokenType, tokenHash: string) {
+  async issueToken(userId: string, type: AuthTokenType, tokenHash: string, mail:{id:string;payload:EncryptedCredential},correlationId:string) {
     await this.db.transaction(async tx => {
       const [user] = await tx.select({ id: users.id }).from(users).where(and(eq(users.id, userId), isNull(users.disabledAt))).for('update');
       if (!user) return;
       await tx.update(authTokens).set({ consumedAt: new Date() }).where(and(eq(authTokens.userId, userId), eq(authTokens.type, type), isNull(authTokens.consumedAt)));
       await tx.insert(authTokens).values({ userId, type, tokenHash, expiresAt: new Date(Date.now() + (type === 'VERIFY_EMAIL' ? 24 * 3600_000 : 30 * 60_000)) });
+      await tx.insert(emailOutbox).values({id:mail.id,userId,tokenHash,payload:mail.payload,correlationId});
     });
   }
   async consumeToken(tokenHash: string, type: AuthTokenType, correlationId: string, passwordHash?: string) {

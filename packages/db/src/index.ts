@@ -30,3 +30,5 @@ export * from './repositories/payment-tasks';
 export * from './repositories/payment-webhooks';
 export * from './repositories/renewal-billing';
 export * from './repositories/notifications';
+
+export * from './repositories/email';

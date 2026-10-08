@@ -18,3 +18,5 @@ export * from './billing';
 export * from './payment-tasks';
 export * from './webhooks';
 export * from './notifications';
+
+export * from './email';

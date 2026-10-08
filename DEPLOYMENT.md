@@ -12,3 +12,5 @@ Current release status and deploy blockers: docs/IMPLEMENTATION_STATUS.md. No li
 
 ## Selected web hosting
 User selected Vercel for the web/BFF deployment, connected to kredavto/contentos-ai. Use apps/web as project root with workspace dependencies included. Deploy and verify only after implementation checks. Persistent BullMQ/FFmpeg worker remains a separate container service with PostgreSQL, Redis and S3. Vercel deployment belongs to GLOBAL; RU_DATA_RESIDENCY continues to use the separately documented Russian hosting profile.
+
+Vercel project was created on 2026-10-09 in team `digagency` (`team_T4Jm4ASQqZgd6ys8grG6emG4`): `contentos-ai`, project ID `prj_KMzoSu8fmoWhhWqTFWFG4lc0hpEB`, linked GitHub repository `kredavto/contentos-ai`, root `apps/web`, Next.js, Node 24. Creation did not deploy the application; there are no runtime environment values or live deployment yet. Production PostgreSQL/Redis/S3/SMTP and the persistent worker host still need provisioning/configuration.

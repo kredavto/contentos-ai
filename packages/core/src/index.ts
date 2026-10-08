@@ -21,3 +21,5 @@ export * from './payment-processor';
 export * from './payment-webhooks';
 export * from './billing';
 export * from './notifications';
+
+export * from './email';

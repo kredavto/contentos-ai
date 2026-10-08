@@ -14,7 +14,7 @@ export const authTokens = pgTable('auth_tokens', {
   id: uuid('id').primaryKey().defaultRandom(), userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull(), type: text('type', { enum: ['VERIFY_EMAIL', 'RESET_PASSWORD'] }).notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(), consumedAt: timestamp('consumed_at', { withTimezone: true }), createdAt: createdAt(),
-}, t => [uniqueIndex('auth_tokens_hash_uq').on(t.tokenHash), check('auth_tokens_type_valid', sql`${t.type} in ('VERIFY_EMAIL', 'RESET_PASSWORD')`)]);
+}, t => [uniqueIndex('auth_tokens_hash_uq').on(t.tokenHash), uniqueIndex('auth_tokens_user_hash_uq').on(t.userId,t.tokenHash), check('auth_tokens_type_valid', sql`${t.type} in ('VERIFY_EMAIL', 'RESET_PASSWORD')`)]);
 export const organizations = pgTable('organizations', {
   id: uuid('id').primaryKey().defaultRandom(), name: text('name').notNull(), createdAt: createdAt(),
 });

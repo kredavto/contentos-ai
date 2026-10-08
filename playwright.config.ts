@@ -12,7 +12,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) } }],
   webServer: [
     { command: 'pnpm exec tsx tests/e2e/storage-server.ts', url: 'http://127.0.0.1:8027/health', reuseExistingServer: false, env: { ...storageEnv, NODE_ENV: 'test' } },
-    { command: 'pnpm --filter @contentos/worker start', url: 'http://127.0.0.1:3190/health', timeout: 60000, reuseExistingServer: false, env: { ...storageEnv, NODE_ENV: 'test', DATABASE_URL: databaseUrl, REDIS_URL: 'redis://localhost:6379/14', APP_URL: 'http://localhost:3187', AI_PROVIDER: 'mock', WORKER_HEALTH_PORT: '3190' } },
+    { command: 'pnpm --filter @contentos/worker start', url: 'http://127.0.0.1:3190/health', timeout: 60000, reuseExistingServer: false, env: { ...storageEnv, NODE_ENV: 'test', DATABASE_URL: databaseUrl, REDIS_URL: 'redis://localhost:6379/14', APP_URL: 'http://localhost:3187', AI_PROVIDER: 'mock', SMTP_URL:'smtp://127.0.0.1:1026', EMAIL_FROM:'noreply@example.test', WORKER_HEALTH_PORT: '3190' } },
     { command: 'pnpm exec tsx tests/e2e/mail-server.ts', url: 'http://127.0.0.1:8026/health', reuseExistingServer: false, env: { NODE_ENV: 'test' } },
     { command: 'pnpm --filter @contentos/web exec next dev --port 3187', stdout: 'pipe', url: 'http://localhost:3187/api/me', timeout: 120_000, reuseExistingServer: false, env: { ...storageEnv, DATABASE_URL: databaseUrl, REDIS_URL: 'redis://localhost:6379/14', AI_PROVIDER: 'mock', APP_URL: 'http://localhost:3187', SMTP_URL: 'smtp://127.0.0.1:1026', EMAIL_FROM: 'noreply@example.test' } },
   ],
