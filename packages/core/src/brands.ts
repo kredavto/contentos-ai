@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BrandRepository } from '@contentos/db';
-import { onboardingSaveSchema } from '@contentos/types';
+import { onboardingSaveSchema, brandProfileSaveSchema } from '@contentos/types';
 const id = z.uuid();
 const writers = ['OWNER', 'ADMIN', 'MANAGER'] as const;
 export class BrandService {
@@ -16,6 +16,9 @@ export class BrandService {
     return this.repository.createBrand(userId, id.parse(tenantId), input.workspaceId, input.name, writers, correlationId);
   }
   getBrandBrain(userId: string, tenantId: string, brandId: string) { return this.repository.getBrandBrain(userId, id.parse(tenantId), id.parse(brandId)); }
+  saveProfile(userId: string, tenantId: string, brandId: string, raw: unknown, correlationId: string) {
+    return this.repository.saveProfile(userId, id.parse(tenantId), id.parse(brandId), brandProfileSaveSchema.parse(raw), correlationId);
+  }
   saveOnboarding(userId: string, tenantId: string, brandId: string, raw: unknown, correlationId: string) {
     return this.repository.saveOnboarding(userId, id.parse(tenantId), id.parse(brandId), onboardingSaveSchema.parse(raw), writers, correlationId);
   }

@@ -1,0 +1,42 @@
+import { test, expect } from '@playwright/test';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { createDatabase, BrandRepository } from '../../packages/db/src/index';
+import { BrandService } from '../../packages/core/src/brands';
+import { emptyOnboarding } from '../../packages/types/src/index';
+const url = process.env.TEST_DATABASE_URL;
+if (!url || !new URL(url).pathname.endsWith('_test')) throw new Error('Dedicated test database required');
+const database = createDatabase(url);
+test.afterAll(() => database.close());
+test('completed profile edits persist, reject stale saves and preserve structured lists', async ({ page, context, baseURL }, testInfo) => {
+  const user = randomUUID(), token = randomBytes(32).toString('base64url'), correlation = randomUUID();
+  const service = new BrandService(new BrandRepository(database.db));
+  await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${user},${`${user}@example.test`},'unusable','Profile editor',now())`;
+  await database.client`insert into sessions(user_id,token_hash,expires_at) values(${user},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+  const tenant = (await service.createOrganization(user, { name: 'Profile browser' }, correlation)).id;
+  try {
+    const workspace = (await service.overview(user, tenant)).workspaces[0]!;
+    const brand = (await service.createBrand(user, tenant, { name: 'Бренд', workspaceId: workspace.id }, correlation)).id;
+    await service.saveOnboarding(user, tenant, brand, { revision: 0, step: 14, complete: true, data: { ...emptyOnboarding('Бренд'), niche: 'Обучение', geography: 'Онлайн', usp: 'Практика', voice: 'Спокойный', goals: ['Доверие'], platforms: ['TELEGRAM'], products: [{ name: 'Курс', description: '' }], audience: [{ name: 'Студенты', description: '' }], pains: [{ name: 'Мало времени', description: '' }], ctas: [{ name: 'Записаться', description: '' }] } }, correlation);
+    await context.addCookies([{ name: 'contentos_session', value: token, url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
+    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`/brands/${brand}/onboarding?organization=${tenant}`);
+    await page.getByRole('button', { name: 'Редактировать профиль', exact: true }).click();
+    await page.getByLabel('Название бренда', { exact: true }).fill('Обновлённый бренд');
+    await page.getByLabel('Голос бренда', { exact: true }).fill('Точный и дружелюбный');
+    await page.screenshot({ path: testInfo.outputPath('profile-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('profile-mobile.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Сохранить профиль', exact: true }).click();
+    await expect(page.getByRole('status')).toHaveText('Профиль бренда обновлён');
+    await page.reload(); await expect(page.getByRole('heading', { name: 'Brand Brain: Обновлённый бренд' })).toBeVisible();
+    await expect(page.getByText('Точный и дружелюбный', { exact: true })).toBeVisible();
+    const saved = await service.getBrandBrain(user, tenant, brand); expect(saved.data.products[0]?.name).toBe('Курс'); expect(saved.brand.revision).toBe(2);
+    await page.getByRole('button', { name: 'Редактировать профиль', exact: true }).click();
+    await database.client`update brands set revision=revision+1 where id=${brand}`;
+    await page.getByLabel('Название бренда', { exact: true }).fill('Устаревшая запись');
+    await page.getByRole('button', { name: 'Сохранить профиль', exact: true }).click();
+    await expect(page.getByRole('alert')).toBeVisible(); expect((await service.getBrandBrain(user, tenant, brand)).data.company).toBe('Обновлённый бренд');
+    expect(errors).toEqual([]);
+  } finally { await database.client`delete from organizations where id=${tenant}`; await database.client`delete from users where id=${user}`; }
+});

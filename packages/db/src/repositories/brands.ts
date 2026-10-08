@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
-import { DomainError, emptyOnboarding, onboardingSchema, type Role, type OnboardingSave } from '@contentos/types';
+import { DomainError, emptyOnboarding, onboardingSchema, type Role, type OnboardingSave, type BrandProfileSave } from '@contentos/types';
+import { assertMembership, lockTenant } from './ledger';
 import type { Database } from '../index';
 import * as s from '../schema';
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
@@ -83,6 +84,26 @@ export class BrandRepository {
       if (data.voice) await tx.insert(s.brandVoice).values({ tenantId, brandId, name: 'Основной голос бренда', description: data.voice });
       const [updated] = await tx.update(s.brands).set({ name: data.company, revision: brand.revision + 1, onboardingStep: input.step, onboardingCompletedAt: input.complete ? new Date() : null }).where(whereBrand).returning();
       await tx.insert(s.auditLogs).values({ userId, tenantId, resourceId: brandId, action: input.complete ? 'BRAND_BRAIN_CREATED' : 'ONBOARDING_SAVED', correlationId, metadata: { step: input.step, revision: brand.revision + 1 } });
+      return updated;
+    });
+  }
+  async saveProfile(userId: string, tenantId: string, brandId: string, input: BrandProfileSave, correlationId: string) {
+    return this.db.transaction(async tx => {
+      await lockTenant(tx, tenantId);
+      await assertMembership(tx, userId, tenantId, 'strategy');
+      const scope = and(eq(s.brands.tenantId, tenantId), eq(s.brands.id, brandId));
+      const [brand] = await tx.select().from(s.brands).where(scope).for('update');
+      if (!brand) throw new DomainError('NOT_FOUND', 404);
+      if (!brand.onboardingCompletedAt || brand.revision !== input.revision) throw new DomainError('CONFLICT', 409);
+      const data = input.data;
+      await tx.update(s.brandProfiles).set({ website: data.website, niche: data.niche, geography: data.geography, usp: data.usp, goals: data.goals, socialPlatforms: data.platforms, updatedAt: new Date() }).where(and(eq(s.brandProfiles.tenantId, tenantId), eq(s.brandProfiles.brandId, brandId)));
+      // Keep the voice identity and all audience/product/pillar references stable.
+      const voiceScope = and(eq(s.brandVoice.tenantId, tenantId), eq(s.brandVoice.brandId, brandId));
+      const [voice] = await tx.select({ id: s.brandVoice.id }).from(s.brandVoice).where(voiceScope);
+      if (voice) await tx.update(s.brandVoice).set({ description: data.voice }).where(and(voiceScope, eq(s.brandVoice.id, voice.id)));
+      else await tx.insert(s.brandVoice).values({ tenantId, brandId, name: 'Основной голос бренда', description: data.voice });
+      const [updated] = await tx.update(s.brands).set({ name: data.company, revision: brand.revision + 1 }).where(scope).returning();
+      await tx.insert(s.auditLogs).values({ userId, tenantId, resourceId: brandId, action: 'BRAND_PROFILE_UPDATED', correlationId, metadata: { previousRevision: brand.revision, revision: brand.revision + 1 } });
       return updated;
     });
   }

@@ -152,6 +152,7 @@ async function dispatch(request: Request, context: RouteContext) {
         }
         if (path.length === 3 && request.method === 'POST') return ok(await brands.createBrand(user.userId, tenantId, await readBody(request), correlationId), 201);
         if (path[3] && path.length === 4 && request.method === 'GET') return ok(await brands.getBrandBrain(user.userId, tenantId, path[3]));
+        if (path[3] && path[4] === 'profile' && path.length === 5 && request.method === 'PUT') return ok(await brands.saveProfile(user.userId, tenantId, path[3], await readBody(request), correlationId));
         if (path[3] && path[4] === 'onboarding' && path.length === 5 && request.method === 'PUT') {
           await auth.throttle('onboarding', user.userId);
           return ok(await brands.saveOnboarding(user.userId, tenantId, path[3], await readBody(request), correlationId));

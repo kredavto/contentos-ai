@@ -36,3 +36,8 @@
 .team-center form > button { justify-self: start; }
 .team-center .studio-actions { align-items: end; }
 .team-center article > button { margin-top: 12px; }
+
+.brand-profile-editor { margin-top: 24px; }
+.brand-profile-editor > fieldset { border: 0; padding: 0; display: grid; gap: 18px; min-width: 0; }
+.brand-profile-field { display: grid; gap: 8px; }
+.brand-profile-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }

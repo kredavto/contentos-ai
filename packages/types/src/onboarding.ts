@@ -11,6 +11,13 @@ export const onboardingSchema = z.object({
   ctas: z.array(item).max(20), leadMagnets: z.array(item).max(20), references: z.array(item).max(20),
 }).strict();
 export type OnboardingData = z.infer<typeof onboardingSchema>;
+export const brandProfileSchema = onboardingSchema.pick({ company: true, website: true, niche: true, geography: true, usp: true, voice: true, goals: true, platforms: true }).extend({
+  niche: line.min(1), geography: line.min(1), usp: line.min(1), voice: line.min(1),
+  goals: onboardingSchema.shape.goals.min(1), platforms: onboardingSchema.shape.platforms.min(1),
+});
+export const brandProfileSaveSchema = z.object({ revision: z.number().int().nonnegative(), data: brandProfileSchema }).strict();
+export type BrandProfileData = z.infer<typeof brandProfileSchema>;
+export type BrandProfileSave = z.infer<typeof brandProfileSaveSchema>;
 export const onboardingSaveSchema = z.object({
   revision: z.number().int().nonnegative(), step: z.number().int().min(0).max(14), complete: z.boolean(), data: onboardingSchema,
 }).strict().superRefine((input, ctx) => {
