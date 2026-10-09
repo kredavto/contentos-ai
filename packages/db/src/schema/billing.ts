@@ -36,7 +36,7 @@ export const payments = pgTable('payments', {
 export const paymentSettlements = pgTable('payment_settlements', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), orderId: uuid('order_id').notNull(), paymentId: uuid('payment_id').notNull(),
   observation: jsonb('observation').$type<PaymentObservation>().notNull(), correlationId: uuid('correlation_id').notNull(), createdAt: createdAt(),
-}, t => [unique('payment_settlement_order_uq').on(t.tenantId, t.orderId), unique('payment_settlement_payment_uq').on(t.tenantId, t.paymentId),
+}, t => [index('settlement_created_tenant_idx').on(t.createdAt, t.tenantId), unique('payment_settlement_order_uq').on(t.tenantId, t.orderId), unique('payment_settlement_payment_uq').on(t.tenantId, t.paymentId),
   foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [billingOrders.tenantId, billingOrders.id] }),
   foreignKey({ columns: [t.tenantId, t.paymentId], foreignColumns: [payments.tenantId, payments.id] }),
   check('payment_settlement_paid_valid', sql`${t.observation}->>'status' = 'SUCCEEDED' and ${t.observation}->>'paid' = 'true'`),

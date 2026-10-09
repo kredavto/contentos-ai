@@ -48,6 +48,13 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     expect((await database.client`select id from platform_actions where actor_id=${operator} and target_user_id=${target}`)).toHaveLength(1);
     await page.getByLabel('Раздел администрирования', { exact: true }).selectOption('actions');
     await expect(page.getByRole('table').getByText('BROWSER-1', { exact: true })).toBeVisible();
+    await page.getByLabel('Организация для финансовой сводки (UUID)', { exact: true }).fill(tenant);
+    await page.getByRole('button', { name: 'Рассчитать сводку', exact: true }).click();
+    await expect(page.getByText('Подтверждённых платежей за выбранный период нет.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Валовая маржа', exact: true })).toBeVisible();
+    await expect(page.getByText('Не рассчитана:', { exact: false })).toBeVisible();
+    await page.getByRole('heading', { name: 'Финансовые данные', exact: true }).locator('..').screenshot({ path: testInfo.outputPath('finance-mobile.png') });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   } finally {
     await ordinary.close();

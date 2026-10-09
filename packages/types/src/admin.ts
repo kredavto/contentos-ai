@@ -29,3 +29,21 @@ export const adminPlanSchema = z.object({
 });
 export type AdminPlanInput = z.infer<typeof adminPlanSchema>;
 export type AdminPlan = { code: string; name: string; enabled: boolean; version: number; planVersionId: string | null; amountMinor: number; currency: string; aiCredits: number; videoSeconds: number };
+export const adminFinanceSchema = z.object({
+  from: z.string().datetime({ offset: true }), to: z.string().datetime({ offset: true }),
+  tenantId: z.uuid().optional(), paymentMode: z.enum(['LIVE', 'TEST']).default('LIVE'),
+  groupBy: z.enum(['USER', 'BRAND', 'PROVIDER']).default('BRAND'),
+}).strict().superRefine((input, ctx) => {
+  const duration = Date.parse(input.to) - Date.parse(input.from);
+  if (!(duration > 0 && duration <= 93 * 86400000)) ctx.addIssue({ code: 'custom', path: ['to'], message: 'Choose a positive interval of at most 93 days' });
+});
+export type AdminFinanceInput = z.infer<typeof adminFinanceSchema>;
+export type AdminFinanceReport = {
+  revenue: Array<{ currency: string; amountMinor: string; payments: string }>;
+  costs: Array<{ currency: string; knownMicrounits: string; calls: string; unknownCalls: string }>;
+  groups: Array<{ entityId: string; currency: string; knownMicrounits: string; calls: string; unknownCalls: string }>;
+  groupsTruncated: boolean;
+  captured: Array<{ unit: string; amount: string }>;
+  jobsWithoutCostEvidence: string; videoJobsWithoutCostEvidence: string;
+  grossMargin: null;
+};

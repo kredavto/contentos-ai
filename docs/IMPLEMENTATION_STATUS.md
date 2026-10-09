@@ -10,10 +10,10 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and completed summary. A profile/voice editor is implemented with transactional role checks and optimistic revisions; all 13 structured collections now have an editor with stable IDs and archiving. See [profile editing](brand-profile.md).
-- Database schema: 80 tables with thirty-seven SQL migrations (0000–0036). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 80 tables with thirty-eight SQL migrations (0000–0037). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for platform-admin commit 8ab4250 (run 37861591656). Newer tariff-publishing changes are locally verified and awaiting remote CI.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for tariff-publishing commit f2f9e97 (run 37862636240). Newer financial-reporting changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -405,3 +405,13 @@ Verification: 281 tests in 45 files passed with PostgreSQL and FFmpeg, including
 
 Validation for tariff publishing: 287 tests across 46 files passed with real PostgreSQL/Redis/FFmpeg; workspace/test typecheck, lint and production build passed; both admin Chrome scenarios passed, including tariff publication and session support. External payment providers were not called.
 Final pricing-only Chrome rerun passed after making its fixture name unique across repeated runs; desktop/mobile form screenshots were inspected without page overflow.
+
+
+## Financial evidence reporting
+
+- Added operator-only receipts and recorded AI-cost aggregates, tenant and UTC-period filters, separate live/test payment views, currency-separated exact decimal sums, user/brand/provider attribution and captured resource totals.
+- Reports retain unknown cost counts, expose missing monetary evidence including video jobs and cap group rows without truncating totals. Gross margin remains unknown: full expense/fee/refund/FX capture and per-video economics remain outstanding, not replaced by an incomplete calculation.
+- Explicitly requested reports are audited, rate-limited and use a repeatable-read snapshot with bounded statement time. See [financial reporting definitions](financial-reporting.md).
+
+Financial reporting validation: 293 tests / 47 files passed; the six financial integration tests passed again after the report time limit and migration 0037 period indexes. Both local databases have the additive migration.
+Workspace/test typecheck, lint and production build passed. Both admin Chrome scenarios passed with the financial report; the mobile finance screenshot was inspected without page overflow.
