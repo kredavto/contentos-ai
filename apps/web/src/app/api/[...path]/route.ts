@@ -38,6 +38,8 @@ async function dispatch(request: Request, context: RouteContext) {
     }
     if (path[0] === 'admin') {
       if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
+      if (key === 'admin/plans' && request.method === 'GET') return ok(await admin.catalog(user.userId, correlationId));
+      if (key === 'admin/plans' && request.method === 'POST') return ok(await admin.publishPlan(user.userId, await readBody(request), correlationId));
       if (key === 'admin/data' && request.method === 'GET') return ok(await admin.list(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId));
       if (key === 'admin/revoke-sessions' && request.method === 'POST') return ok(await admin.revokeSessions(user.userId, await readBody(request), correlationId));
     }

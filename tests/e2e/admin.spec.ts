@@ -56,3 +56,50 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     for (const user of [operator, target]) await database.client`delete from users where id=${user}`;
   }
 });
+
+test('ADMIN publishes a priced version while SUPPORT stays read-only', async ({ page, context, baseURL }, testInfo) => {
+  const actor = randomUUID(), token = randomBytes(32).toString('base64url');
+  await database.client`insert into users(id,email,name,password_hash,email_verified_at) values(${actor},${`${actor}@example.test`},'Pricing browser fixture','unusable',now())`;
+  await database.client`insert into sessions(user_id,token_hash,expires_at) values(${actor},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+  await database.client`insert into platform_operators(user_id,role) values(${actor},'SUPPORT')`;
+  await context.addCookies([{ name: 'contentos_session', value: token, url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
+  try {
+    await page.goto('/admin');
+    await expect(page.getByRole('button', { name: 'Опубликовать версию тарифа', exact: true })).toBeDisabled();
+    await expect(page.getByText('SUPPORT может просматривать тарифы.', { exact: false })).toBeVisible();
+    await database.client`update platform_operators set role='ADMIN' where user_id=${actor}`;
+    await page.reload();
+    await expect(page.getByLabel('Название тарифа', { exact: true })).toBeEnabled();
+    await page.getByLabel('Тариф', { exact: true }).selectOption('AGENCY');
+    const current = await page.request.get('/api/admin/plans');
+    const catalog = (await current.json()).data.plans as Array<{code:string;version:number}>;
+    const previous = catalog.find(plan => plan.code === 'AGENCY')!.version;
+    await page.getByLabel('Название тарифа', { exact: true }).fill(`Agency fixture ${actor.slice(0, 8)}`);
+    await page.getByLabel('Цена за месяц, копейки', { exact: true }).fill('350000');
+    await page.getByLabel('AI-кредиты за месяц', { exact: true }).fill('500');
+    await page.getByLabel('Видео за месяц, секунды', { exact: true }).fill('900');
+    await page.getByLabel('Доступен в каталоге', { exact: true }).uncheck();
+    await page.getByLabel('Номер изменения тарифа', { exact: true }).fill('BROWSER-PRICING');
+    const payload = { code: 'AGENCY', name: 'Agency browser fixture', enabled: false, expectedVersion: previous, amountMinor: 350000, currency: 'RUB', aiCredits: 500, videoSeconds: 900, ticket: 'BROWSER-PRICING', idempotencyKey: randomUUID() };
+    expect((await page.request.post('/api/admin/plans', { data: payload })).status()).toBe(403);
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('button', { name: 'Опубликовать версию тарифа', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Версия тарифа опубликована.' })).toBeVisible();
+    await expect(page.getByText(`Текущая версия: ${previous + 1}`, { exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByLabel('Тариф', { exact: true }).selectOption('AGENCY');
+    await expect(page.getByLabel('Цена за месяц, копейки', { exact: true })).toHaveValue('350000');
+    await expect(page.getByLabel('Видео за месяц, секунды', { exact: true })).toHaveValue('900');
+    expect(await database.client`select id from platform_plan_changes where actor_id=${actor}`).toHaveLength(1);
+    await page.getByRole('heading', { name: 'Управление тарифами', exact: true }).scrollIntoViewIfNeeded();
+    await page.getByRole('heading', { name: 'Управление тарифами', exact: true }).locator('..').screenshot({ path: testInfo.outputPath('pricing-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.getByRole('heading', { name: 'Управление тарифами', exact: true }).scrollIntoViewIfNeeded();
+    await page.getByRole('heading', { name: 'Управление тарифами', exact: true }).locator('..').screenshot({ path: testInfo.outputPath('pricing-mobile.png') });
+  } finally {
+    // Keep immutable pricing evidence; remove the synthetic account's active authority/session.
+    await database.client`update platform_operators set revoked_at=now() where user_id=${actor}`;
+    await database.client`delete from sessions where user_id=${actor}`;
+  }
+});

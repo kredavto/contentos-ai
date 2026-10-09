@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
-import { DomainError, type AdminListInput, type AdminRevokeSessionsInput, type AdminRow } from '@contentos/types';
+import { DomainError, type AdminPlanInput, type AdminListInput, type AdminRevokeSessionsInput, type AdminRow } from '@contentos/types';
 import type { Database } from '../index';
 import * as s from '../schema';
 import type { Transaction } from './ledger';
@@ -52,6 +52,44 @@ export class AdminRepository {
       const more = rows.length > input.limit;
       const page = rows.slice(0, input.limit), last = page.at(-1);
       return { role: operator.role, rows: page, next: more && last ? { beforeAt: (last.createdAt as Date).toISOString(), beforeId: String(last.id) } : null };
+    });
+  }
+  async catalog(userId: string, correlationId: string) {
+    return this.db.transaction(async tx => {
+      const operator = await assertPlatformOperator(tx, userId);
+      const rows = await tx.selectDistinctOn([s.plans.id], {
+        code: s.plans.code, name: s.plans.name, enabled: s.plans.enabled,
+        version: sql<number>`coalesce(${s.planVersions.version}, 0)`, planVersionId: s.planVersions.id,
+        amountMinor: sql<number>`coalesce(${s.planVersions.amountMinor}, 0)`, currency: sql<string>`coalesce(${s.planVersions.currency}, 'RUB')`,
+        aiCredits: sql<number>`coalesce(${s.planVersions.aiCredits}, 0)`, videoSeconds: sql<number>`coalesce(${s.planVersions.videoSeconds}, 0)`,
+      }).from(s.plans).leftJoin(s.planVersions, eq(s.planVersions.planId, s.plans.id)).orderBy(s.plans.id, desc(s.planVersions.version));
+      await tx.insert(s.auditLogs).values({ userId, action: 'ADMIN_CATALOG_READ', correlationId });
+      return { role: operator.role, plans: rows };
+    });
+  }
+  async publishPlan(userId: string, input: AdminPlanInput, correlationId: string) {
+    const { idempotencyKey, ...intent } = input;
+    const hash = createHash('sha256').update(JSON.stringify(intent)).digest('hex');
+    return this.db.transaction(async tx => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`platform-pricing:${userId}`}, 0))`);
+      if ((await assertPlatformOperator(tx, userId)).role !== 'ADMIN') throw new DomainError('NOT_AUTHORIZED', 403);
+      const [existing] = await tx.select().from(s.platformPlanChanges).where(and(eq(s.platformPlanChanges.actorId, userId), eq(s.platformPlanChanges.requestKey, idempotencyKey)));
+      if (existing) {
+        if (existing.inputHash !== hash) throw new DomainError('CONFLICT', 409);
+        return { id: existing.id, planVersionId: existing.planVersionId };
+      }
+      // Checkout shares this lock; a published version and its availability become visible together.
+      const [plan] = await tx.select().from(s.plans).where(eq(s.plans.code, input.code)).for('update');
+      if (!plan) throw new DomainError('NOT_FOUND', 404);
+      const [latest] = await tx.select({ version: s.planVersions.version }).from(s.planVersions).where(eq(s.planVersions.planId, plan.id)).orderBy(desc(s.planVersions.version)).limit(1);
+      if ((latest?.version ?? 0) !== input.expectedVersion) throw new DomainError('CONFLICT', 409);
+      const [version] = await tx.insert(s.planVersions).values({ planId: plan.id, version: input.expectedVersion + 1, amountMinor: input.amountMinor, currency: input.currency, aiCredits: input.aiCredits, videoSeconds: input.videoSeconds }).returning({ id: s.planVersions.id });
+      if (!version) throw new Error('Plan version insert failed');
+      await tx.update(s.plans).set({ name: input.name, enabled: input.enabled }).where(eq(s.plans.id, plan.id));
+      const [change] = await tx.insert(s.platformPlanChanges).values({ actorId: userId, planVersionId: version.id, name: input.name, enabled: input.enabled, ticket: input.ticket, requestKey: idempotencyKey, inputHash: hash }).returning({ id: s.platformPlanChanges.id, planVersionId: s.platformPlanChanges.planVersionId });
+      if (!change) throw new Error('Plan change insert failed');
+      await tx.insert(s.auditLogs).values({ userId, action: 'ADMIN_PLAN_PUBLISHED', resourceId: version.id, correlationId, metadata: { changeId: change.id, code: input.code, version: input.expectedVersion + 1, ticket: input.ticket, enabled: input.enabled } });
+      return change;
     });
   }
   async revokeSessions(userId: string, input: AdminRevokeSessionsInput, correlationId: string) {

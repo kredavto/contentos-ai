@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, timestamp, integer, uniqueIndex, check } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, boolean, uniqueIndex, check } from 'drizzle-orm/pg-core';
 import { users } from './identity';
+import { planVersions } from './billing';
 export const platformOperators = pgTable('platform_operators', {
   id: uuid('id').primaryKey().defaultRandom(), userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   role: text('role', { enum: ['SUPPORT', 'ADMIN'] }).notNull(), revokedAt: timestamp('revoked_at', { withTimezone: true }),
@@ -12,3 +13,12 @@ export const platformActions = pgTable('platform_actions', {
   requestKey: uuid('request_key').notNull(), inputHash: text('input_hash').notNull(), revokedSessions: integer('revoked_sessions').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [uniqueIndex('platform_action_intent_uq').on(t.actorId, t.requestKey), check('platform_action_valid', sql`${t.operation} = 'REVOKE_SESSIONS' and ${t.reason} in ('USER_REQUEST','SECURITY_INCIDENT','SUPPORT_CASE') and ${t.ticket} ~ '^[A-Za-z0-9_-]{3,80}$' and ${t.revokedSessions} >= 0`)]);
+
+export const platformPlanChanges = pgTable('platform_plan_changes', {
+  id: uuid('id').primaryKey().defaultRandom(), actorId: uuid('actor_id').notNull().references(() => users.id),
+  planVersionId: uuid('plan_version_id').notNull().references(() => planVersions.id),
+  name: text('name').notNull(), enabled: boolean('enabled').notNull(), ticket: text('ticket').notNull(),
+  requestKey: uuid('request_key').notNull(), inputHash: text('input_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [uniqueIndex('platform_plan_change_intent_uq').on(t.actorId, t.requestKey), uniqueIndex('platform_plan_change_version_uq').on(t.planVersionId),
+  check('platform_plan_change_valid', sql`${t.ticket} ~ '^[A-Za-z0-9_-]{3,80}$' and ${t.inputHash} ~ '^[a-f0-9]{64}$' and length(${t.name}) between 1 and 80`)]);

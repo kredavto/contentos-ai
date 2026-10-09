@@ -10,10 +10,10 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and completed summary. A profile/voice editor is implemented with transactional role checks and optimistic revisions; all 13 structured collections now have an editor with stable IDs and archiving. See [profile editing](brand-profile.md).
-- Database schema: 79 tables with thirty-six SQL migrations (0000–0035). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 80 tables with thirty-seven SQL migrations (0000–0036). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for agency commit bd8bc6d (run 37860223851). Newer platform-admin changes are locally verified and awaiting remote CI.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for platform-admin commit 8ab4250 (run 37861591656). Newer tariff-publishing changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -71,7 +71,7 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery, Brand Guardian and fact-checking interfaces.
 - Private voice cloning/import, cover design, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
-- Comment inbox/reply safety modes, funnels/UTMs, complete financial/provider-cost dashboards, administrative pricing/job-reconciliation workflows and provider/model configuration.
+- Comment inbox/reply safety modes, funnels/UTMs, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
 - Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, Sentry-compatible monitoring and provider readiness views.
 - Complete development seed and final platform-wide security/architecture reviews. The full MVP browser chain is verified with fixture transports; real configured-provider end-to-end verification remains pending.
 - Fresh AMD64 release images, GLOBAL/RU infrastructure placement, backups/restore drills, production credentials and complete Vercel/runtime deployment. The NL capacity upgrade and SMTP sender domain are still pending.
@@ -394,3 +394,14 @@ A separately provisioned platform operator can access 15 allowlisted operational
 The deployment gate defaults off; an enabled verified user also needs an unrevoked SUPPORT/ADMIN operator record. Tenant ownership never grants platform access. Host-only provisioning is audited and uses explicit UUID/role/ticket arguments. The console can revoke ordinary-user sessions with actor-bound idempotency, a reason/ticket, current role checks and atomic result/audit persistence. Retries do not revoke later logins. Operator accounts are excluded from this support action. Migration 0035 adds operator/action records and update-protects action results. Real users were not granted operator access. See [admin scope and provisioning](platform-admin.md).
 
 Verification: 281 tests in 45 files passed with PostgreSQL and FFmpeg, including explicit CLI provisioning, denied tenant owners, bounded projections/pagination, unknown costs, concurrent/replayed support requests and current account/role checks. The initial isolated test fixture's timestamp encoding was corrected before the passing run. Final workspace/test typecheck, lint and production build passed. The Chrome operator scenario passed (43 seconds), covering denied tenant-owner access, guarded navigation, safe user filtering, CSRF denial, actual session invalidation and action history. Desktop/mobile screenshots were inspected; wide tables scroll within their panel without page overflow. A final six-test regression also passed after linking audit metadata to the immutable action ID. Development PostgreSQL confirms 36 migrations and 79 tables. No paid provider requests or external messages were sent.
+
+
+## Platform tariff publishing
+
+- Added ADMIN-only price/resource/availability publication with strict validation, optimistic version checks, plan-row checkout fencing, actor-bound idempotency and atomic audit. SUPPORT remains read-only.
+- Every edit creates an immutable version; existing orders, paid periods and renewal consents retain their price and resource snapshots. Disabling also prevents scheduling new automatic renewals, but preserves already-created payment intents.
+- Added a Russian operator form with units, explicit review, retry-safe intent, reload and conflict handling. Prices in test databases are synthetic; no real paid catalog or provider transaction was configured.
+- Migration 0036 adds immutable operator pricing evidence. Production infrastructure/SMTP/provider credentials and the broader remaining modules are still outstanding. See [operator details](platform-admin.md).
+
+Validation for tariff publishing: 287 tests across 46 files passed with real PostgreSQL/Redis/FFmpeg; workspace/test typecheck, lint and production build passed; both admin Chrome scenarios passed, including tariff publication and session support. External payment providers were not called.
+Final pricing-only Chrome rerun passed after making its fixture name unique across repeated runs; desktop/mobile form screenshots were inspected without page overflow.
