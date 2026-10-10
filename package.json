@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "db:generate": "pnpm --filter @contentos/db generate",
     "db:migrate": "node scripts/with-env.mjs pnpm --filter @contentos/db migrate",
-    "admin:operator": "node scripts/with-env.mjs pnpm --filter @contentos/db operator"
+    "admin:operator": "node scripts/with-env.mjs pnpm --filter @contentos/db operator",
+    "db:seed": "node scripts/with-env.mjs tsx scripts/seed-development.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

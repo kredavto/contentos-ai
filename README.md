@@ -21,6 +21,8 @@ The local setup command generates a private encryption key in ignored `.env` wit
 
 Open http://localhost:3100. Register with a fictional address and read its confirmation email in [local Mailpit](http://localhost:8025). Passwords require 12–128 characters. After confirmation, sign in, create an organization/brand and complete onboarding. Each step can be saved and resumed. Brand Brain is stored as structured PostgreSQL rows. Set `AI_PROVIDER=mock` in your local `.env` for an explicitly marked demo walkthrough, then restart `pnpm dev`. Open the completed brand, claim starter credits, create a strategy, ideas and a script, edit it and approve a version. Web and the actual worker run together. For real text generation, configure `AI_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL` server-side on both services; no live provider test has been performed.
 
+Optional: populate a fictional brand, strategy, ideas and script with `pnpm db:seed`. See [local demo setup and safeguards](docs/development-seed.md) for the required opt-in and private password.
+
 ## Checks
 
 ```sh
