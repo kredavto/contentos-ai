@@ -11,6 +11,7 @@ const messages: Record<string, string> = {
   INSUFFICIENT_CREDITS: 'Недостаточно кредитов для этой операции.',
   CONSENT_REQUIRED: 'Для этой операции требуется действующее согласие.',
   PORTFOLIO_LIMIT_REACHED: 'Достигнут лимит клиентских организаций в портфеле. Обратитесь к администратору.',
+  EXPORT_TOO_LARGE: 'Объём данных превышает лимит быстрой выгрузки. Файл не создан. Расширенная выгрузка пока недоступна.',
   PLAN_LIMIT_REACHED: 'Достигнут лимит хранилища. Удалите ненужные файлы.',
 };
 export async function readPhotoUpload(request: Request) {

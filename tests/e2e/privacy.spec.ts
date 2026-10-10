@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { BrandRepository, createDatabase } from '../../packages/db/src/index';
 import { BrandService } from '../../packages/core/src/brands';
@@ -34,6 +35,16 @@ test('privacy center registers and cancels a request and revokes every session',
     await page.goto('/privacy');
     await expect(page.getByText('Активных сессий: 2', { exact: true })).toBeVisible();
     expect((await page.request.post('/api/privacy/deletion', { data: { password, acknowledged: true, idempotencyKey: randomUUID() } })).status()).toBe(403);
+    expect((await page.request.post('/api/privacy/export', { data: { password } })).status()).toBe(403);
+    await page.getByLabel('Пароль для скачивания данных', { exact: true }).fill(password);
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Скачать JSON', exact: true }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('contentos-account.json');
+    const archive = JSON.parse(await readFile((await download.path())!, 'utf8'));
+    expect(archive.profile.id).toBe(user); expect(archive.sessionHistory).toHaveLength(2);
+    expect(JSON.stringify(archive)).not.toMatch(/passwordHash|tokenHash|scrypt/);
+    await expect(page.getByLabel('Пароль для скачивания данных', { exact: true })).toHaveValue('');
     await page.getByLabel('Текущий пароль', { exact: true }).fill('wrong-password');
     await page.getByRole('checkbox', { name: 'Я понимаю, что отправляю запрос, а удаление ещё не выполнено.' }).check();
     page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Запросить удаление аккаунта', exact: true }).click();

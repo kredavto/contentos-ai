@@ -9,10 +9,22 @@ type Brand = { id: string; name: string; onboardingCompletedAt: string | null };
 export function PrivacyCenter() {
   const [data, setData] = useState<Overview | null>(null), [organizations, setOrganizations] = useState<Organization[]>([]);
   const [tenant, setTenant] = useState(''), [brands, setBrands] = useState<Brand[]>([]), [brand, setBrand] = useState('');
+  const [exportPassword, setExportPassword] = useState('');
   const [password, setPassword] = useState(''), [acknowledged, setAcknowledged] = useState(false), [intent, setIntent] = useState('');
   const [pending, setPending] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
   useEffect(() => { let active = true; Promise.all([api<Overview>('privacy'), api<Organization[]>('organizations')]).then(([overview, items]) => { if (active) { setData(overview); setOrganizations(items); setTenant(items[0]?.id ?? ''); } }).catch(failure => { if (active) setError(failure.message); }); return () => { active = false; }; }, []);
   useEffect(() => { let active = true; setBrands([]); setBrand(''); if (tenant) api<{ brands: Brand[] }>(`organizations/${tenant}`).then(result => { if (active) { setBrands(result.brands); setBrand(result.brands[0]?.id ?? ''); } }).catch(failure => { if (active) setError(failure.message); }); return () => { active = false; }; }, [tenant]);
+  async function downloadAccount() {
+    setPending(true); setError(''); setMessage('');
+    try {
+      const archive = await api<Awaited<ReturnType<PrivacyService['exportAccount']>>>('privacy/export', 'POST', { password: exportPassword });
+      const url = URL.createObjectURL(new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'contentos-account.json'; document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage('Файл данных аккаунта подготовлен для скачивания.');
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось подготовить файл'); }
+    finally { setExportPassword(''); setPending(false); }
+  }
   async function requestDeletion() {
     if (!window.confirm('Зарегистрировать запрос на удаление аккаунта? Это ещё не удалит аккаунт и данные. До начала обработки запрос можно отменить.')) return;
     const key = intent || crypto.randomUUID(); setIntent(key); setPending(true); setError(''); setMessage('');
@@ -37,6 +49,9 @@ export function PrivacyCenter() {
     {error ? <p className="notice error" role="alert">{error}</p> : null}{message ? <p className="saved-message" role="status">{message}</p> : null}
     {!data ? <p>Загружаем настройки приватности…</p> : <>
       <section className="panel"><h2>Ваш аккаунт</h2><p>{data.user.name} · {data.user.email}</p><p>Активных сессий: {data.activeSessions}</p><button className="button secondary" disabled={pending} onClick={() => void revokeSessions()}>Выйти на всех устройствах</button></section>
+      <section className="panel brand-profile-editor"><h2>Скачать данные аккаунта</h2><p>JSON-файл содержит профиль, текущие роли в организациях, сохранённые даты сеансов и историю запросов на удаление. Материалы брендов, медиа, платежи, согласия и журналы операций в эту выгрузку не входят.</p>
+        {data.user.verifiedAt ? <form onSubmit={event => { event.preventDefault(); void downloadAccount(); }}><label htmlFor="export-password">Пароль для скачивания данных</label><input id="export-password" type="password" autoComplete="current-password" required maxLength={128} disabled={pending} value={exportPassword} onChange={event => setExportPassword(event.target.value)} /><button className="button secondary" disabled={pending || !exportPassword}>Скачать JSON</button></form> : <p><Link href="/resend-verification">Подтвердите почту</Link>, чтобы скачать данные.</p>}
+      </section>
       <section className="panel brand-profile-editor"><h2>Данные бренда и разрешения</h2><p className="muted">Доступные действия зависят от вашей роли в организации. Удаление медиа выполняется отдельным процессом; его статус доступен в соответствующем разделе.</p>
         {organizations.length ? <><label htmlFor="privacy-organization">Организация для управления данными</label><select id="privacy-organization" value={tenant} onChange={event => setTenant(event.target.value)}>{organizations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
           <label htmlFor="privacy-brand">Бренд для управления данными</label><select id="privacy-brand" value={brand} onChange={event => setBrand(event.target.value)} disabled={!brands.length}>{!brands.length ? <option value="">Нет брендов</option> : brands.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>

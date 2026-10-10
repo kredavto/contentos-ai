@@ -1,6 +1,10 @@
 # Implementation status
 
-Updated 2026-10-10. This is an implementation inventory, not a claim that the full specification is complete.
+Updated 2026-10-10.
+
+Basic account export added to Privacy Center: current-password confirmation, repeatable-read snapshot, explicit own-data projections, bounded all-or-error JSON download and payload-free audit. Includes profile, current membership metadata, retained session timestamps and deletion requests. Extended consent/billing/operational-history export and large asynchronous exports remain outstanding, along with actual account erasure.
+
+This is an implementation inventory, not a claim that the full specification is complete.
 
 ## Verified working slice
 
@@ -421,8 +425,12 @@ Workspace/test typecheck, lint and production build passed. Both admin Chrome sc
 
 - Added an authenticated Privacy Center for session revocation and navigation to the existing brand consent/social/avatar/video/photo controls; existing service authorization and cleanup workflows remain authoritative.
 - Added durable, password-confirmed account-deletion requests with explicit acknowledgement, email verification, user-lock/password-change fencing, idempotency, one-active-request enforcement, revision-checked cancellation and content-free audit events. Operator queue projection is gated separately from organization roles.
-- This is request intake, not account erasure. The UI explicitly preserves that distinction. Account-data export and the actual multi-resource account deletion workflow remain outstanding. See [privacy scope](privacy-center.md).
+- This is request intake, not account erasure. The UI explicitly preserves that distinction. Basic account JSON export is now implemented; extended account export and the actual multi-resource account deletion workflow remain outstanding. See [privacy scope](privacy-center.md).
 
 Privacy validation: 299 tests across 48 files passed with PostgreSQL/Redis/real FFmpeg; workspace/test typecheck and lint passed. Schema generation reports no drift after migration 0038. No real account deletion was requested or performed.
 Privacy browser verification passed after narrowing the wrong-password alert selector to exclude Next.js’s route announcer. The two existing admin scenarios also passed. Six privacy integration cases passed again after switching cancellation timestamps to the database clock. The mobile screenshot was inspected without page overflow.
 Final workspace/test typecheck, lint and production build passed for Privacy Center. NL read-only recheck still shows 2 CPUs / 4 GB RAM and about 8.2 GB free disk; no existing server services were modified.
+
+Account export validation: eight privacy integration tests passed, including fresh-password/verification checks, cross-user isolation, explicit credential exclusion, empty audit payload and oversized-archive rejection. Workspace/test typecheck and lint passed. Chrome verified the actual JSON download and existing deletion/session controls; mobile layout was inspected. The first browser run exceeded its 30-second navigation expectation while Next compiled the page for 32 seconds under concurrent typecheck load; the isolated rerun passed without changing application or test behavior.
+
+Account export production build passed. This change adds no database migration and does not configure live infrastructure or provider credentials.

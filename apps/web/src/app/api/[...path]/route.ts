@@ -37,6 +37,7 @@ async function dispatch(request: Request, context: RouteContext) {
       if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
     }
     if (key === 'privacy' && request.method === 'GET') return ok(await privacy.overview(user.userId));
+    if (key === 'privacy/export' && request.method === 'POST') { await auth.throttle('account-export', user.userId); return ok(await privacy.exportAccount(user.userId, await readBody(request), correlationId)); }
     if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
