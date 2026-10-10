@@ -52,3 +52,5 @@
 .admin-support-form { display: grid; gap: 16px; }
 .admin-support-form > div { display: grid; gap: 6px; }
 .admin-support-form > button { justify-self: start; }
+
+.funnel-studio { min-width: 0; overflow-wrap: anywhere; }

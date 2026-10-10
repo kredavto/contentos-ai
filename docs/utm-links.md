@@ -12,4 +12,4 @@ Routes under `/api/organizations/:tenant/brands/:brand/utm`:
 - POST accepts the fields plus an idempotency UUID. Origin, authenticated-session, mutation-rate and JSON-body controls apply.
 - POST `/:id/archive` accepts revision and desired archive boolean. Already-matching state is a no-op; stale state changes conflict. Restoration does not change URL data. Archiving only organizes the library and cannot disable an already distributed destination URL.
 
-Audit records contain actor/tenant/resource/action and correlation IDs, never URLs or campaign text. No paid provider, DNS, SMTP or new remote service is required. Full click-to-lead attribution, content-to-CTA relations, lead forms, messenger integration and the larger funnel module are not implemented by this slice.
+Audit records contain actor/tenant/resource/action and correlation IDs, never URLs or campaign text. No paid provider, DNS, SMTP or new remote service is required. Content-to-CTA relations and versioned manual aggregate reports are now available in the separate Funnels tab; see [funnel scope](funnels.md). Automatic click-to-lead attribution, lead forms and messenger integration remain outstanding.

@@ -33,3 +33,5 @@ export * from './admin';
 export * from './privacy';
 
 export * from './utm';
+
+export * from './funnels';

@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -113,6 +113,16 @@ async function dispatch(request: Request, context: RouteContext) {
             if(path[6]==='reconnect')return ok(await social.reconnect(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
             if(path[6]==='disconnect'){await social.disconnect(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({disconnected:true});}
             if(path[6]==='rewrap'){await social.rewrap(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({rotated:true});}
+          }
+        }
+        if(path[3]&&path[4]==='funnels'){
+          const query=Object.fromEntries(new URL(request.url).searchParams);
+          if(path.length===5&&request.method==='GET')return ok(await funnels.list(user.userId,tenantId,path[3],query));
+          if(path.length===5&&request.method==='POST')return ok(await funnels.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          if(path[5]==='choices'&&path.length===6&&request.method==='GET')return ok(await funnels.choices(user.userId,tenantId,path[3],query));
+          if(path[5]&&path[6]==='measurements'&&path.length===7){
+            if(request.method==='GET')return ok(await funnels.measurements(user.userId,tenantId,path[3],path[5],query));
+            if(request.method==='POST')return ok(await funnels.measure(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),201);
           }
         }
         if(path[3]&&path[4]==='utm'){
