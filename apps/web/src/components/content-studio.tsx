@@ -8,6 +8,7 @@ import {PerformanceStudio} from './performance-studio';
 import {AnalyticsStudio} from './analytics-studio';
 import {PublishingStudio} from './publishing-studio';
 import {SocialIntegrations} from './social-integrations';
+import { UtmStudio } from './utm-studio';
 import {ContentCalendar} from './content-calendar';
 import { VideoStudio } from './video-studio';
 import { AvatarStudio } from './avatar-studio';
@@ -19,7 +20,7 @@ type Script = Overview['scripts'][number];
 const labels = {OPTIMIZE_STRATEGY:'Анализ эффективности',GENERATE_STRATEGY:'Стратегия',GENERATE_IDEAS:'Идеи',GENERATE_SCRIPT:'Сценарий',CREATE_AVATAR:'Аватар',GENERATE_VIDEO:'Видео'};
 const states:Record<string,string> = {WAITING_REVIEW:'Ожидает проверки',QUEUED:'В очереди',RUNNING:'Генерируется',RETRY:'Повторная попытка',SUCCEEDED:'Готово',FAILED:'Ошибка',WAITING_EXTERNAL:'Обрабатывается провайдером',RECONCILIATION:'Требуется проверка'};
 const edits: Array<[GenerationOptions['edit'],string]> = [['GENERATE','Новый сценарий'],['REWRITE','Переписать'],['SHORTEN','Сократить'],['EXPAND','Расширить'],['PROVOCATIVE','Более провокационно'],['EXPERT','Более экспертно'],['EMOTIONAL','Более эмоционально'],['SALES','Больше акцента на продаже'],['CHANGE_CTA','Изменить CTA']];
-const studioTabs=['strategy','ideas','scripts','jobs','consents','media','avatars','videos','calendar','integrations','publishing','analytics'] as const;
+const studioTabs=['strategy','ideas','scripts','jobs','consents','media','avatars','videos','calendar','integrations','publishing','analytics','utm'] as const;
 export function ContentStudio({tenantId,brandId,brandName,role,verified,initialTab}:{tenantId:string;brandId:string;brandName:string;role:string;verified:boolean;initialTab?:string}) {
   const base = `organizations/${tenantId}/brands/${brandId}`;
   const [data,setData] = useState<Overview|null>(null); const [error,setError] = useState(''); const [pending,setPending] = useState(false);
@@ -57,10 +58,11 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified,initialT
     {data&&!data.configuration.ready?<p className="notice warning">CONFIGURATION_REQUIRED: AI-провайдер ещё не настроен.</p>:null}
     {!verified?<p className="notice warning">Подтвердите email для генерации и одобрения контента.</p>:null}
     {error?<p className="notice error" role="alert">{error}</p>:null}
-    <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео'],['calendar','Календарь'],['integrations','Интеграции'],['publishing','Публикации'],['analytics','Аналитика']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+    <nav className="studio-tabs" aria-label="Контент">{([['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео'],['calendar','Календарь'],['integrations','Интеграции'],['publishing','Публикации'],['analytics','Аналитика'],['utm','UTM-ссылки']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>setTab(key)}>{label}</button>)}</nav>
     {tab==='analytics'&&data?<section className="stack"><PerformanceStudio base={base} canManage={canStrategy} overview={data}/><AnalyticsStudio base={base} canManage={canStrategy}/></section>:null}
     {tab==='publishing'?<PublishingStudio base={base} canPublish={canStrategy}/>:null}
       {tab==='integrations'?<SocialIntegrations base={base} canManage={canStrategy}/>:null}
+    {tab==='utm'?<UtmStudio key={base} base={base} canWrite={canGenerate}/>:null}
     {tab==='calendar'?<ContentCalendar base={base} canWrite={canGenerate}/>:null}
     {tab==='videos'&&data?<VideoStudio captionCost={data.usage.policies.find(policy=>policy.operation==='AUTO_CAPTIONS')?.amount} aiAvailable={data.usage.balances.AI_CREDITS.available} base={base} scripts={data.scripts} canWrite={canGenerate} canApprove={canApprove} canManage={canStrategy} maximum={data.usage.policies.find(policy=>policy.operation==='GENERATE_VIDEO')?.amount} available={data.usage.balances.VIDEO_SECONDS.available}/>:null}
     {tab==='avatars'?<AvatarStudio base={base} canWrite={canGenerate} canManage={canStrategy} cost={data?.usage.policies.find(policy=>policy.operation==='CREATE_AVATAR')?.amount}/>:null}

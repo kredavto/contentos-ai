@@ -281,6 +281,13 @@
       "when": 1791660834512,
       "tag": "0039_moaning_firestar",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1791665532513,
+      "tag": "0040_unique_redwing",
+      "breakpoints": true
     }
   ]
 }

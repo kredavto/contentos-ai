@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated 2026-10-10.
+Updated 2026-10-11.
 
 Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
 
@@ -17,7 +17,7 @@ This is an implementation inventory, not a claim that the full specification is 
 - Database schema: 81 tables with thirty-nine SQL migrations (0000–0038). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for account-export commit 2ccc6c4 (run 38041653755). Newer extended-export changes are locally verified and awaiting remote CI.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for extended-export commit 601e086 (run 38083134415). Newer UTM changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -75,7 +75,7 @@ This is an implementation inventory, not a claim that the full specification is 
 - Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery, Brand Guardian and fact-checking interfaces.
 - Private voice cloning/import, cover design, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
-- Comment inbox/reply safety modes, funnels/UTMs, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
+- Comment inbox/reply safety modes, click-to-lead funnels beyond the implemented UTM link builder, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
 - Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, Sentry-compatible monitoring and provider readiness views.
 - Complete development seed and final platform-wide security/architecture reviews. The full MVP browser chain is verified with fixture transports; real configured-provider end-to-end verification remains pending.
 - Fresh AMD64 release images, GLOBAL/RU infrastructure placement, backups/restore drills, production credentials and complete Vercel/runtime deployment. The NL capacity upgrade and SMTP sender domain are still pending.
@@ -444,3 +444,11 @@ Validation: all 304 tests across 49 files passed; workspace/test typecheck and l
 NL read-only capacity check: 2 CPUs, 3915 MiB RAM (867 MiB available), swap 3364/4095 MiB, root 8.0 GiB free. The promised resource increase is not yet visible; existing remote services were not modified.
 
 Extended-export production build passed. Local schema contains 40 applied migrations and 81 public tables.
+
+## Brand UTM link builder
+
+Added a brand-scoped UTM library with encoded URL preview, persistent save, explicit clipboard/manual copy, archive/restore and bounded cursor pagination. Required source/medium/campaign and optional term/content replace pre-existing UTM tags while preserving other query parameters and fragments. HTTP(S)-only URL validation excludes credentials and ambiguous whitespace/control input. Server construction is authoritative; no destination is fetched or automatically published.
+
+Verified content-writing roles may create/archive links; current tenant members may read. Tenant locks, membership rechecks, actor-bound idempotency and optimistic archive revisions protect retries and concurrent changes. Composite foreign keys fence brand ownership. Audits omit URLs and campaign text. Migration 0040 adds one table. This completes the standalone UTM builder, not click/lead measurement or the full funnel module; see [UTM scope](utm-links.md).
+
+UTM validation: 317 tests in 51 files passed, including 13 URL/security/tenant/idempotency/archive/pagination checks. Final workspace/test typecheck, lint and production build passed. Chrome verified preview, actual clipboard contents, persistence after reload, archive/restore, CSRF denial and revoked write access after role change. Initial browser runs caught accessible-name problems caused by nested textarea/select labels; explicit label associations fixed them and the complete scenario passed. Mobile screenshot inspected without overflow. Migration 0040 applied to local development/test databases: 41 migrations and 82 public tables. No external publication, URL fetch, customer click/lead collection or remote infrastructure change was performed.

@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -114,6 +114,11 @@ async function dispatch(request: Request, context: RouteContext) {
             if(path[6]==='disconnect'){await social.disconnect(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({disconnected:true});}
             if(path[6]==='rewrap'){await social.rewrap(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({rotated:true});}
           }
+        }
+        if(path[3]&&path[4]==='utm'){
+          if(path.length===5&&request.method==='GET')return ok(await utm.list(user.userId,tenantId,path[3],Object.fromEntries(new URL(request.url).searchParams)));
+          if(path.length===5&&request.method==='POST')return ok(await utm.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          if(path[5]&&path.length===7&&path[6]==='archive'&&request.method==='POST')return ok(await utm.archive(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
         }
         if(path[3]&&path[4]==='calendar'){
           if(path.length===5&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await calendar.list(user.userId,tenantId,path[3],{from:query.get('from'),to:query.get('to')}));}

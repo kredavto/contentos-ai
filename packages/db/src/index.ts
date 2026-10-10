@@ -42,3 +42,5 @@ export * from './repositories/admin';
 export * from './repositories/admin-finance';
 
 export * from './repositories/privacy';
+
+export * from './repositories/utm';
