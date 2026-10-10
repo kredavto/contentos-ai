@@ -59,7 +59,7 @@ export const renewalConsents = pgTable('billing_renewal_consents', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull().references(() => organizations.id), planVersionId: uuid('plan_version_id').notNull().references(() => planVersions.id),
   policyVersion: text('policy_version').notNull(), policyText: text('policy_text').notNull(), textHash: text('text_hash').notNull(), amountMinor: integer('amount_minor').notNull(), currency: text('currency').notNull(),
   acceptedBy: uuid('accepted_by').notNull().references(() => users.id), ipAddress: text('ip_address').notNull(), userAgent: text('user_agent').notNull(), createdAt: createdAt(),
-}, t => [unique('renewal_consent_tenant_id_uq').on(t.tenantId, t.id), check('renewal_consent_amount_valid', sql`${t.amountMinor} > 0 and ${t.currency} = 'RUB' and ${t.textHash} ~ '^[a-f0-9]{64}$'`)]);
+}, t => [index('renewal_consent_actor_created_idx').on(t.acceptedBy,t.createdAt,t.id), unique('renewal_consent_tenant_id_uq').on(t.tenantId, t.id), check('renewal_consent_amount_valid', sql`${t.amountMinor} > 0 and ${t.currency} = 'RUB' and ${t.textHash} ~ '^[a-f0-9]{64}$'`)]);
 export const renewalPreferences = pgTable('billing_renewal_preferences', {
   tenantId: uuid('tenant_id').primaryKey().references(() => organizations.id), activeConsentId: uuid('active_consent_id'), revision: integer('revision').notNull().default(0), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [foreignKey({ columns: [t.tenantId, t.activeConsentId], foreignColumns: [renewalConsents.tenantId, renewalConsents.id] }), check('renewal_revision_valid', sql`${t.revision} >= 0`)]);

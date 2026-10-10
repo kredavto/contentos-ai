@@ -14,7 +14,7 @@ export const authTokens = pgTable('auth_tokens', {
   id: uuid('id').primaryKey().defaultRandom(), userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull(), type: text('type', { enum: ['VERIFY_EMAIL', 'RESET_PASSWORD'] }).notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(), consumedAt: timestamp('consumed_at', { withTimezone: true }), createdAt: createdAt(),
-}, t => [uniqueIndex('auth_tokens_hash_uq').on(t.tokenHash), uniqueIndex('auth_tokens_user_hash_uq').on(t.userId,t.tokenHash), check('auth_tokens_type_valid', sql`${t.type} in ('VERIFY_EMAIL', 'RESET_PASSWORD')`)]);
+}, t => [index('auth_tokens_user_created_idx').on(t.userId, t.createdAt, t.id), uniqueIndex('auth_tokens_hash_uq').on(t.tokenHash), uniqueIndex('auth_tokens_user_hash_uq').on(t.userId,t.tokenHash), check('auth_tokens_type_valid', sql`${t.type} in ('VERIFY_EMAIL', 'RESET_PASSWORD')`)]);
 export const organizations = pgTable('organizations', {
   id: uuid('id').primaryKey().defaultRandom(), name: text('name').notNull(), createdAt: createdAt(),
 });
@@ -36,4 +36,4 @@ export const auditLogs = pgTable('audit_logs', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').references(() => organizations.id, { onDelete: 'set null' }),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }), action: text('action').notNull(),
   resourceId: uuid('resource_id'), correlationId: uuid('correlation_id').notNull(), metadata: jsonb('metadata').$type<Record<string, string | number | boolean | null>>().notNull().default({}), createdAt: createdAt(),
-}, t => [index('audit_tenant_created_idx').on(t.tenantId, t.createdAt)]);
+}, t => [index('audit_user_created_idx').on(t.userId, t.createdAt, t.id), index('audit_tenant_created_idx').on(t.tenantId, t.createdAt)]);

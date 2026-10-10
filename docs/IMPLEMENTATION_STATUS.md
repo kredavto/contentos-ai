@@ -2,7 +2,7 @@
 
 Updated 2026-10-10.
 
-Basic account export added to Privacy Center: current-password confirmation, repeatable-read snapshot, explicit own-data projections, bounded all-or-error JSON download and payload-free audit. Includes profile, current membership metadata, retained session timestamps and deletion requests. Extended consent/billing/operational-history export and large asynchronous exports remain outstanding, along with actual account erasure.
+Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
 
 This is an implementation inventory, not a claim that the full specification is complete.
 
@@ -17,7 +17,7 @@ This is an implementation inventory, not a claim that the full specification is 
 - Database schema: 81 tables with thirty-nine SQL migrations (0000–0038). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for financial-reporting commit cef28e0 (run 37863563406). Newer Privacy Center changes are locally verified and awaiting remote CI.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for account-export commit 2ccc6c4 (run 38041653755). Newer extended-export changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -434,3 +434,13 @@ Final workspace/test typecheck, lint and production build passed for Privacy Cen
 Account export validation: eight privacy integration tests passed, including fresh-password/verification checks, cross-user isolation, explicit credential exclusion, empty audit payload and oversized-archive rejection. Workspace/test typecheck and lint passed. Chrome verified the actual JSON download and existing deletion/session controls; mobile layout was inspected. The first browser run exceeded its 30-second navigation expectation while Next compiled the page for 32 seconds under concurrent typecheck load; the isolated rerun passed without changing application or test behavior.
 
 Account export production build passed. This change adds no database migration and does not configure live infrastructure or provider credentials.
+
+## Extended personal evidence export
+
+Format v2 adds retained authentication lifecycle and mail-delivery metadata, own consent acceptance evidence and separate revocation records, historical renewal terms and own audit action/date metadata. Actor-based queries intentionally work without current organization membership while omitting subject names, other actors, operational payloads, mail envelopes and credentials. A revoker cannot obtain the original acceptor's IP/user agent. Existing row/byte caps reject oversized archives instead of truncating them. Payment transactions and organization material export, large asynchronous archives and account erasure remain unfinished.
+
+Validation: all 304 tests across 49 files passed; workspace/test typecheck and lint passed. Eleven focused privacy tests include synthetic cross-user records, absent tenant membership, disabled accounts, stale proof and activity-history overflow. Chrome downloaded and inspected JSON v2 and verified existing deletion/session controls; mobile screenshot inspected. Migration 0039 applied locally to development/test databases; schema generator reports no drift. Previous commit 2ccc6c4 passed remote CI 38041653755. No real customer export or deletion was performed.
+
+NL read-only capacity check: 2 CPUs, 3915 MiB RAM (867 MiB available), swap 3364/4095 MiB, root 8.0 GiB free. The promised resource increase is not yet visible; existing remote services were not modified.
+
+Extended-export production build passed. Local schema contains 40 applied migrations and 81 public tables.

@@ -42,7 +42,7 @@ test('privacy center registers and cancels a request and revokes every session',
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe('contentos-account.json');
     const archive = JSON.parse(await readFile((await download.path())!, 'utf8'));
-    expect(archive.profile.id).toBe(user); expect(archive.sessionHistory).toHaveLength(2);
+    expect(archive.version).toBe(2); expect(archive.scope).toContain('accepted_consent_evidence'); expect(archive).toHaveProperty('renewalConsentHistory'); expect(archive.profile.id).toBe(user); expect(archive.sessionHistory).toHaveLength(2);
     expect(JSON.stringify(archive)).not.toMatch(/passwordHash|tokenHash|scrypt/);
     await expect(page.getByLabel('Пароль для скачивания данных', { exact: true })).toHaveValue('');
     await page.getByLabel('Текущий пароль', { exact: true }).fill('wrong-password');
