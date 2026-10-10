@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -36,11 +36,56 @@ async function dispatch(request: Request, context: RouteContext) {
       await auth.throttle('mutation', user.userId);
       if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
     }
+    if (key === 'privacy' && request.method === 'GET') return ok(await privacy.overview(user.userId));
+    if (key === 'privacy/export' && request.method === 'POST') { await auth.throttle('account-export', user.userId); return ok(await privacy.exportAccount(user.userId, await readBody(request), correlationId)); }
+    if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
+    if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
+    if (path[0] === 'admin') {
+      if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
+      if (key === 'admin/finance' && request.method === 'GET') { await auth.throttle('admin-finance', user.userId); return ok(await admin.finance(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId)); }
+      if (key === 'admin/plans' && request.method === 'GET') return ok(await admin.catalog(user.userId, correlationId));
+      if (key === 'admin/plans' && request.method === 'POST') return ok(await admin.publishPlan(user.userId, await readBody(request), correlationId));
+      if (key === 'admin/data' && request.method === 'GET') return ok(await admin.list(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId));
+      if (key === 'admin/revoke-sessions' && request.method === 'POST') return ok(await admin.revokeSessions(user.userId, await readBody(request), correlationId));
+    }
+    if(request.method==='POST'&&key==='team/accept')return ok(await team.accept(user.userId,await readBody(request),correlationId));
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
+      if (path[2] === 'agency') {
+        if (path.length === 3 && request.method === 'GET') return ok(await agency.overview(user.userId, tenantId));
+        if (path.length === 3 && request.method === 'PUT') return ok(await agency.setMode(user.userId, tenantId, await readBody(request), correlationId));
+        if (path[3] === 'clients' && path.length === 4 && request.method === 'POST') return ok(await agency.addClient(user.userId, tenantId, await readBody(request), correlationId), 201);
+        if (path[3] === 'clients' && path[4] && path.length === 5 && request.method === 'PUT') return ok(await agency.setArchived(user.userId, tenantId, path[4], await readBody(request), correlationId));
+      }
+      if(path[2]==='team'){
+        if(path.length===3&&request.method==='GET')return ok(await team.overview(user.userId,tenantId));
+        if(path.length===4&&request.method==='POST'){
+          const input=await readBody(request);
+          if(path[3]==='invite')return ok(await team.invite(user.userId,tenantId,input,correlationId),201);
+          if(path[3]==='role')return ok(await team.changeRole(user.userId,tenantId,input,correlationId));
+          if(path[3]==='remove')return ok(await team.remove(user.userId,tenantId,input,correlationId));
+          if(path[3]==='transfer')return ok(await team.transfer(user.userId,tenantId,input,correlationId));
+          if(path[3]==='revoke')return ok(await team.revoke(user.userId,tenantId,input,correlationId));
+        }
+      }
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
+      if(path[2]==='notifications'&&path.length===3&&request.method==='GET')return ok(await notifications.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
+      if(path[2]==='notifications'&&path[3]==='read'&&path.length===4&&request.method==='POST')return ok(await notifications.markRead(user.userId,tenantId,await readBody(request)));
+      if(path[2]==='billing'){
+        if(path.length===3&&request.method==='GET')return ok(await billing.overview(user.userId,tenantId));
+        if(path[3]==='checkout'&&path.length===4&&request.method==='POST')return ok(await billing.checkout(user.userId,tenantId,await readBody(request),correlationId),202);
+        if(path[3]==='orders'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.orderStatus(user.userId,tenantId,path[4]));
+        if(path[3]==='purchase-preview'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.purchasePreview(user.userId,tenantId,path[4]));
+        if(path[3]==='renewal-policy'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.renewalPolicy(user.userId,tenantId,path[4]));
+        if(path[3]==='accept-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.acceptRenewal(user.userId,tenantId,await readBody(request),{ip,userAgent:request.headers.get('user-agent')??''},correlationId),201);
+        if(path[3]==='cancel-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.cancelRenewal(user.userId,tenantId,await readBody(request),correlationId));
+      }
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if (path[3] && path[4] === 'brain' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await brands.collection(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') return ok(await brands.saveCollection(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId));
+        }
         if(path[3]&&path[4]==='performance'&&path.length===5){
           if(request.method==='GET')return ok(await performance.list(user.userId,tenantId,path[3]));
           if(request.method==='POST')return ok(await performance.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
@@ -129,6 +174,7 @@ async function dispatch(request: Request, context: RouteContext) {
         }
         if (path.length === 3 && request.method === 'POST') return ok(await brands.createBrand(user.userId, tenantId, await readBody(request), correlationId), 201);
         if (path[3] && path.length === 4 && request.method === 'GET') return ok(await brands.getBrandBrain(user.userId, tenantId, path[3]));
+        if (path[3] && path[4] === 'profile' && path.length === 5 && request.method === 'PUT') return ok(await brands.saveProfile(user.userId, tenantId, path[3], await readBody(request), correlationId));
         if (path[3] && path[4] === 'onboarding' && path.length === 5 && request.method === 'PUT') {
           await auth.throttle('onboarding', user.userId);
           return ok(await brands.saveOnboarding(user.userId, tenantId, path[3], await readBody(request), correlationId));

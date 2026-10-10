@@ -1,0 +1,1 @@
+ALTER TABLE "billing_orders" ADD CONSTRAINT "billing_order_mode_kind_valid" CHECK ((("billing_orders"."kind" = 'RENEWAL') = ("billing_orders"."input"->>'mode' = 'RENEWAL')) IS TRUE);

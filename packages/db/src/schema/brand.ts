@@ -10,6 +10,7 @@ function brainEntity(name: string) {
   return pgTable(name, {
     id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), brandId: uuid('brand_id').notNull(),
     name: text('name').notNull(), description: text('description').notNull().default(''),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   }, t => [uniqueIndex(`${name}_tenant_id_uq`).on(t.tenantId, t.id), foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }).onDelete('cascade')]);
 }

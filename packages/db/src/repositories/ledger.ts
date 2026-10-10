@@ -17,7 +17,12 @@ export async function assertMembership(tx: Transaction, userId: string, tenantId
   return member;
 }
 export async function balanceInTransaction(tx: Transaction, tenantId: string, unit: UsageUnit) {
-  const [result] = await tx.select({ available: sql<number>`coalesce(sum(${usageLedger.availableDelta}),0)::int`, reserved: sql<number>`coalesce(sum(${usageLedger.reservedDelta}),0)::int` }).from(usageLedger).where(and(eq(usageLedger.tenantId, tenantId), eq(usageLedger.unit, unit)));
+  const safeBalance = (value: unknown) => {
+    const result = Number(value);
+    if (!Number.isSafeInteger(result)) throw new DomainError('CONFLICT', 409);
+    return result;
+  };
+  const [result] = await tx.select({ available: sql`coalesce(sum(${usageLedger.availableDelta}),0)::bigint`.mapWith(safeBalance), reserved: sql`coalesce(sum(${usageLedger.reservedDelta}),0)::bigint`.mapWith(safeBalance) }).from(usageLedger).where(and(eq(usageLedger.tenantId, tenantId), eq(usageLedger.unit, unit)));
   return result ?? { available: 0, reserved: 0 };
 }
 export async function reserveInTransaction(tx: Transaction, tenantId: string, unit: UsageUnit, amount: number, key: string, correlationId: string) {

@@ -44,6 +44,8 @@ describe.skipIf(!url)('tenant media lifecycle',()=>{
     const asset=await service.upload(userId,tenantId,brandId,input(),image,correlationId);
     await expect(service.delete(viewerId,tenantId,brandId,asset.id,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
     await service.delete(userId,tenantId,brandId,asset.id,correlationId);await expect(service.download(userId,tenantId,brandId,asset.id)).rejects.toThrow('NOT_FOUND');
+    // Make queued cleanup due on the database clock; host and Docker clocks can differ.
+    await database.client`update media_assets set delete_after=now() where id=${asset.id}`;
     failDelete=true;expect(await service.cleanupOne()).toBe(true);failDelete=false;
     let [stored]=await database.client`select * from media_assets where id=${asset.id}`;expect(stored?.status).toBe('DELETE_PENDING');expect(stored?.delete_attempts).toBe(1);
     await database.client`update media_assets set delete_after=now() where id=${asset.id}`;

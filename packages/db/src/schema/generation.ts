@@ -17,7 +17,7 @@ export const usageLedger = pgTable('usage_ledger', {
   type: text('type', { enum: ['GRANT', 'RESERVE', 'CAPTURE', 'RELEASE', 'PURCHASE', 'REFUND', 'ADJUSTMENT', 'EXPIRE'] }).notNull(),
   amount: integer('amount').notNull(), availableDelta: integer('available_delta').notNull(), reservedDelta: integer('reserved_delta').notNull(),
   idempotencyKey: text('idempotency_key').notNull(), correlationId: uuid('correlation_id').notNull(), createdAt: createdAt(),
-}, t => [unique('ledger_key_uq').on(t.tenantId, t.idempotencyKey), index('ledger_balance_idx').on(t.tenantId, t.unit),
+}, t => [unique('ledger_key_uq').on(t.tenantId, t.idempotencyKey), index('ledger_balance_idx').on(t.tenantId, t.unit), index('ledger_created_tenant_idx').on(t.createdAt, t.tenantId),
   foreignKey({ columns: [t.tenantId, t.reservationId], foreignColumns: [usageReservations.tenantId, usageReservations.id] }),
   check('ledger_unit_valid', sql`${t.unit} in ('AI_CREDITS','VIDEO_SECONDS')`),
   check('ledger_deltas_valid', sql`(
@@ -41,7 +41,7 @@ export const jobs = pgTable('jobs', {
   errorCode: text('error_code'), errorMessage: text('error_message'), leaseToken: uuid('lease_token'), leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(), correlationId: uuid('correlation_id').notNull(),
   result: jsonb('result').$type<{ internalId: string; version: number }>(), createdAt: createdAt(), startedAt: timestamp('started_at', { withTimezone: true }), finishedAt: timestamp('finished_at', { withTimezone: true }),
-}, t => [unique('jobs_tenant_id_uq').on(t.tenantId, t.id), unique('jobs_idempotency_uq').on(t.tenantId, t.idempotencyKey), index('jobs_dispatch_idx').on(t.status, t.nextAttemptAt),
+}, t => [unique('jobs_tenant_id_uq').on(t.tenantId, t.id), unique('jobs_idempotency_uq').on(t.tenantId, t.idempotencyKey), index('jobs_dispatch_idx').on(t.status, t.nextAttemptAt), index('jobs_created_tenant_idx').on(t.createdAt, t.tenantId),
   foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }),
   foreignKey({ columns: [t.tenantId, t.reservationId], foreignColumns: [usageReservations.tenantId, usageReservations.id] }),
   check('jobs_progress_valid', sql`${t.progress} between 0 and 100`), check('jobs_attempt_valid', sql`${t.attempt} >= 0 and ${t.maxAttempts} between 1 and 10`),
@@ -56,7 +56,7 @@ export const aiCalls = pgTable('ai_calls', {
   provider: text('provider').notNull(), model: text('model').notNull(), status: text('status', { enum: ['STARTED', 'SUCCEEDED', 'FAILED', 'UNKNOWN'] }).notNull(),
   inputUnits: integer('input_units'), outputUnits: integer('output_units'), providerCostMicrounits: bigint('provider_cost_microunits', { mode: 'number' }), currency: text('currency').notNull().default('USD'),
   output: jsonb('output').$type<unknown>(), durationMs: integer('duration_ms'), errorCode: text('error_code'), createdAt: createdAt(),
-}, t => [unique('ai_call_order_uq').on(t.jobId, t.attempt, t.call), foreignKey({ columns: [t.tenantId, t.jobId], foreignColumns: [jobs.tenantId, jobs.id] })]);
+}, t => [index('ai_call_created_tenant_idx').on(t.createdAt, t.tenantId), unique('ai_call_order_uq').on(t.jobId, t.attempt, t.call), foreignKey({ columns: [t.tenantId, t.jobId], foreignColumns: [jobs.tenantId, jobs.id] })]);
 export const strategies = pgTable('strategies', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), brandId: uuid('brand_id').notNull(), createdAt: createdAt(),
 }, t => [unique('strategy_brand_uq').on(t.tenantId, t.brandId), unique('strategy_tenant_id_uq').on(t.tenantId, t.id), foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] })]);

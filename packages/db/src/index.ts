@@ -24,3 +24,21 @@ export * from './repositories/publishing';
 export * from './repositories/analytics';
 export * from './repositories/channel-analytics';
 export * from './repositories/performance';
+export * from './repositories/billing';
+export * from './repositories/renewal';
+export * from './repositories/payment-tasks';
+export * from './repositories/payment-webhooks';
+export * from './repositories/renewal-billing';
+export * from './repositories/notifications';
+
+export * from './repositories/email';
+
+export * from './repositories/team';
+
+export * from './repositories/agency';
+
+export * from './repositories/admin';
+
+export * from './repositories/admin-finance';
+
+export * from './repositories/privacy';

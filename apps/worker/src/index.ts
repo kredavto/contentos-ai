@@ -2,15 +2,17 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
+import { SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const database = createDatabase(env.DATABASE_URL);
 const repository = new JobRepository(database.db);
+const emailRepository=new EmailRepository(database.db);
+const emailProcessor=new EmailProcessor(emailRepository,env.SMTP_URL&&env.EMAIL_FROM?new SmtpEmailProvider(env.SMTP_URL,env.EMAIL_FROM,env.NODE_ENV==='production'):null,credentialVaultFromEnvironment(env));
 const storage = storageFromEnvironment(env);
 const media = new MediaService(new MediaRepository(database.db),storage);
 const avatarConnection = avatarFromEnvironment(env);
@@ -23,6 +25,19 @@ const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const channelAnalyticsRepository=new ChannelAnalyticsRepository(database.db);
 const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env));
+const notificationRepository=new NotificationRepository(database.db);
+const paymentRepository = new PaymentTaskRepository(database.db);
+const paymentProvider = paymentsFromEnvironment(env);
+const renewalRepository = new RenewalBillingRepository(database.db);
+const renewalMerchant = paymentProvider && env.YOOKASSA_SHOP_ID ? {provider:'yookassa' as const,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'} : null;
+const renewalVaultReady = Boolean(credentialVaultFromEnvironment(env));
+const renewalFiscal = env.PAYMENT_RECEIPT_VAT_CODE && env.PAYMENT_RECEIPT_SUBJECT ? {vatCode:Number(env.PAYMENT_RECEIPT_VAT_CODE),subject:env.PAYMENT_RECEIPT_SUBJECT,mode:'full_payment' as const,...(env.PAYMENT_RECEIPT_TAX_SYSTEM_CODE?{taxSystemCode:Number(env.PAYMENT_RECEIPT_TAX_SYSTEM_CODE)}:{})} : null;
+const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env), env.PAYMENT_RENEWALS_ENABLED==='true');
+const paymentWebhookRepository=new PaymentWebhookRepository(database.db);
+const paymentWebhookProcessor=new PaymentWebhookProcessor(paymentWebhookRepository,new BillingRepository(database.db),paymentProvider,paymentProvider&&env.YOOKASSA_SHOP_ID?{provider:paymentProvider.name,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'}:null,credentialVaultFromEnvironment(env));
+const paymentQueue = new Queue('contentos-payments', { connection });
+const paymentWorker = new Worker<{tenantId:string;id:string}>('contentos-payments', delivery => delivery.name==='webhook'?paymentWebhookProcessor.run(delivery.data.id):paymentProcessor.run(delivery.data.tenantId, delivery.data.id), { connection, concurrency: 2 });
+paymentWorker.on('error', () => console.error(JSON.stringify({ event: 'payment_worker_error', code: 'QUEUE_UNAVAILABLE' })));
 const analyticsQueue=new Queue('contentos-analytics',{connection});
 const analyticsWorker=new Worker<{tenantId:string;id:string}>('contentos-analytics',delivery=>channelAnalyticsProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
 analyticsWorker.on('error',()=>console.error(JSON.stringify({event:'analytics_worker_error',code:'QUEUE_UNAVAILABLE'})));
@@ -66,6 +81,17 @@ async function dispatch() {
   if (dispatching) return;
   dispatching = true;
   try {
+    if(env.PAYMENT_RENEWALS_ENABLED==='true'&&renewalMerchant&&renewalFiscal&&renewalVaultReady){
+      for(const candidate of await renewalRepository.due(renewalMerchant))await renewalRepository.schedule(candidate.tenantId,renewalMerchant,renewalFiscal);
+    }
+    if (paymentProvider) for(const event of await paymentWebhookRepository.due()){
+      await paymentQueue.add('webhook',{id:event.id},{jobId:`webhook-${event.id}`,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
+      await paymentWebhookRepository.dispatched(event.id);
+    }
+    if (paymentProvider) for (const task of await paymentRepository.dispatchable()) {
+      await paymentQueue.add('payment', task, { jobId: task.id, attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: true });
+      await paymentRepository.dispatched(task.tenantId, task.id);
+    }
     for(const job of await channelAnalyticsRepository.due()){
       await analyticsQueue.add('fetch',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await channelAnalyticsRepository.dispatched(job.tenantId,job.id);
@@ -83,7 +109,7 @@ async function dispatch() {
 }
 const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=> {
   if (request.url !== '/health') {response.writeHead(404);response.end();return;}
-  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning();
+  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning() && paymentWorker.isRunning();
   response.writeHead(ready?200:503, {'Content-Type':'application/json'});response.end(JSON.stringify({status:ready?'ok':'unavailable'}));
 }) : null;
 if (health) health.listen(Number(process.env.WORKER_HEALTH_PORT),'127.0.0.1');
@@ -96,10 +122,19 @@ const cleanupTimer = setInterval(() => {
   cleanupTask = media.cleanupOne().then(()=>{}).catch(()=>console.error(JSON.stringify({event:'media_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).then(()=>avatars.cleanupOne()).then(()=>{}).catch(()=>console.error(JSON.stringify({event:'avatar_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).then(()=>videos.cleanupOne()).then(()=>{}).catch(()=>console.error(JSON.stringify({event:'video_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).finally(()=>{cleaning=false;});
 },2000);
 void dispatch();
+let projecting=false;
+let notificationTask:Promise<unknown>=Promise.resolve();
+const notificationTimer=setInterval(()=>{
+  if(projecting)return;projecting=true;
+  notificationTask=notificationRepository.projectBatch().catch(()=>console.error(JSON.stringify({event:'notification_projection_error',code:'INTERNAL_ERROR'}))).finally(()=>{projecting=false;});
+},5000);
+let mailing=false;
+let emailTask:Promise<unknown>=Promise.resolve();
+const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).catch(()=>console.error(JSON.stringify({event:'email_worker_error',code:'INTERNAL_ERROR'}))).finally(()=>{mailing=false;});},2000);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await connection.quit(); storage?.close(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await connection.quit(); storage?.close(); await database.close();
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

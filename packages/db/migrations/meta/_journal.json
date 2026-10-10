@@ -148,6 +148,139 @@
       "when": 1791129736895,
       "tag": "0020_preserve_other_job_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791132796080,
+      "tag": "0021_long_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791133175928,
+      "tag": "0022_wild_shen",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791133617863,
+      "tag": "0023_modern_marauders",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791134034632,
+      "tag": "0024_superb_meteorite",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791134449472,
+      "tag": "0025_classy_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791134870685,
+      "tag": "0026_flowery_scrambler",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791136810643,
+      "tag": "0027_cloudy_stone_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791136889356,
+      "tag": "0028_robust_pixie",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791495465978,
+      "tag": "0029_strong_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791495963092,
+      "tag": "0030_colorful_dexter_bennett",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791496592910,
+      "tag": "0031_perfect_doomsday",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791499173792,
+      "tag": "0032_military_charles_xavier",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791501195447,
+      "tag": "0033_milky_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791502027392,
+      "tag": "0034_sleepy_mariko_yashida",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791502764444,
+      "tag": "0035_flashy_ezekiel_stane",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791503701419,
+      "tag": "0036_lovely_old_lace",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791504538931,
+      "tag": "0037_optimal_polaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791505066332,
+      "tag": "0038_slippery_gideon",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791660834512,
+      "tag": "0039_moaning_firestar",
+      "breakpoints": true
     }
   ]
 }

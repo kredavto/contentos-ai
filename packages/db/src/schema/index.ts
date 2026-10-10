@@ -14,3 +14,17 @@ export * from './publishing';
 export * from './analytics';
 export * from './channel-analytics';
 export * from './performance';
+export * from './billing';
+export * from './payment-tasks';
+export * from './webhooks';
+export * from './notifications';
+
+export * from './email';
+
+export * from './team';
+
+export * from './agency';
+
+export * from './admin';
+
+export * from './privacy';

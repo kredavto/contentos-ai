@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { onboardingSchema } from './onboarding';
+import { brandBrainSchema } from './brand-brain';
 import {strategySchema,platformSchema,funnelSchema,type StrategyOutput} from './strategy';
 import {performanceEvidenceSchema,performanceOutputSchema,type PerformanceOutput} from './performance';
 export {strategySchema,platformSchema,funnelSchema,type StrategyOutput} from './strategy';
@@ -25,7 +25,7 @@ export const generationOptionsSchema = z.object({
   edit: z.enum(['GENERATE', 'REWRITE', 'SHORTEN', 'EXPAND', 'PROVOCATIVE', 'EXPERT', 'EMOTIONAL', 'SALES', 'CHANGE_CTA']).default('GENERATE'),
 }).strict();
 export const generationRequestSchema = z.object({ type: z.enum(workflowTypes), options: generationOptionsSchema.default(() => generationOptionsSchema.parse({})), idempotencyKey: z.uuid() }).strict();
-export const generationInputSchema = z.object({ brain: onboardingSchema, options: generationOptionsSchema, brandRevision: z.number().int().nonnegative(), previousScript: scriptSchema.optional(), performance:z.object({evidence:performanceEvidenceSchema,strategyId:z.uuid(),strategyVersion:z.number().int().positive(),strategy:strategySchema}).strict().optional() }).strict();
+export const generationInputSchema = z.object({ brain: brandBrainSchema, options: generationOptionsSchema, brandRevision: z.number().int().nonnegative(), previousScript: scriptSchema.optional(), performance:z.object({evidence:performanceEvidenceSchema,strategyId:z.uuid(),strategyVersion:z.number().int().positive(),strategy:strategySchema}).strict().optional() }).strict();
 export type GenerationInput = z.infer<typeof generationInputSchema>;
 export type GenerationOptions = z.infer<typeof generationOptionsSchema>;
 export type IdeasOutput = z.infer<typeof ideasSchema>;
