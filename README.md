@@ -52,3 +52,7 @@ The integration suite runs when TEST_DATABASE_URL is present; otherwise it is ex
 ## Private photo library
 
 The brand content studio includes a Media tab for private photo uploads, short-lived previews and durable deletion. Configure the same private S3 bucket on web and worker using `.env.example`. Details and limits: [media storage](docs/media-storage.md). Without storage credentials the UI reports that configuration is required. Avatar/video jobs use the same storage and durable worker. See ENVIRONMENT.md for video configuration.
+
+## Brand Guardian
+
+Saved scripts can be reviewed asynchronously against their versioned brand context. Reports quote the source text, identify possible rule/tone issues and flag claims for human verification; they never auto-approve or rewrite content. See [review behavior and limits](docs/brand-guardian.md).

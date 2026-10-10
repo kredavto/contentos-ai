@@ -1,7 +1,7 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { DomainError, type ScriptOutput } from '@contentos/types';
 import type { Database } from '../index';
-import { strategies, strategyVersions, ideas, scripts, scriptVersions, contentItems, auditLogs, brands } from '../schema';
+import { strategies, strategyVersions, ideas, scripts, scriptVersions, contentItems, auditLogs, brands, brandReviews, jobs } from '../schema';
 import { assertMembership, lockTenant } from './ledger';
 export class ContentRepository {
   constructor(private readonly db:Database) {}
@@ -13,7 +13,8 @@ export class ContentRepository {
       const strategy = await tx.select({id:strategyVersions.id,strategyId:strategyVersions.strategyId,version:strategyVersions.version,content:strategyVersions.content,createdAt:strategyVersions.createdAt}).from(strategyVersions).innerJoin(strategies,and(eq(strategies.tenantId,strategyVersions.tenantId),eq(strategies.id,strategyVersions.strategyId))).where(and(eq(strategies.tenantId,tenantId),eq(strategies.brandId,brandId))).orderBy(desc(strategyVersions.version)).limit(20);
       const ideaRows = await tx.select().from(ideas).where(and(eq(ideas.tenantId,tenantId),eq(ideas.brandId,brandId))).orderBy(desc(ideas.createdAt)).limit(100);
       const scriptRows = await tx.select({id:scripts.id,currentVersion:scripts.currentVersion,approvedVersion:scripts.approvedVersion,platform:scripts.platform,duration:scripts.duration,content:scriptVersions.content}).from(scripts).innerJoin(scriptVersions,and(eq(scriptVersions.tenantId,scripts.tenantId),eq(scriptVersions.scriptId,scripts.id),eq(scriptVersions.version,scripts.currentVersion))).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId))).orderBy(desc(scripts.createdAt)).limit(100);
-      return {strategies:strategy,ideas:ideaRows,scripts:scriptRows};
+      const reviews = await tx.select({ id:brandReviews.id, scriptId:brandReviews.scriptId, scriptVersion:brandReviews.scriptVersion, brandRevision:brandReviews.brandRevision, content:brandReviews.content, createdAt:brandReviews.createdAt, provider:jobs.provider, rules:sql<Array<{name:string;description:string}>>`coalesce(${jobs.input}->'brain'->'rules', '[]'::jsonb)` }).from(brandReviews).innerJoin(jobs,and(eq(jobs.tenantId,brandReviews.tenantId),eq(jobs.id,brandReviews.jobId))).where(and(eq(brandReviews.tenantId,tenantId),eq(brandReviews.brandId,brandId))).orderBy(desc(brandReviews.createdAt),desc(brandReviews.id)).limit(50);
+      return {strategies:strategy,ideas:ideaRows,scripts:scriptRows,reviews,brandRevision: (await tx.select({revision:brands.revision}).from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))))[0]!.revision};
     });
   }
   async history(userId:string,tenantId:string,brandId:string,scriptId:string) {

@@ -1,8 +1,8 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { and, eq, sql, desc } from 'drizzle-orm';
-import { DomainError, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
+import { DomainError, validateBrandReview, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
 import type { Database } from '../index';
-import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions } from '../schema';
+import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions, brandReviews } from '../schema';
 import { lockTenant, assertMembership, reserveInTransaction, settleInTransaction, type Transaction } from './ledger';
 import {snapshotPerformance,persistPerformance} from './performance';
 export type StoredJob = typeof jobs.$inferSelect;
@@ -25,10 +25,16 @@ export class JobRepository {
       const [brand] = await tx.select().from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))).for('share');
       if (!brand) throw new DomainError('NOT_FOUND',404);
       if (!brand.onboardingCompletedAt || brand.revision !== input.brandRevision) throw new DomainError('CONFLICT',409);
+      if (type === 'REVIEW_SCRIPT' && (!input.options.scriptId || !input.options.revision || input.options.ideaId || input.options.edit !== 'GENERATE')) throw new DomainError('INVALID_INPUT');
       if (input.options.scriptId) {
         const [script] = await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId),eq(scripts.id,input.options.scriptId)));
         if (!script) throw new DomainError('NOT_FOUND',404);
         if (script.currentVersion !== input.options.revision) throw new DomainError('CONFLICT',409);
+        if (type === 'REVIEW_SCRIPT') {
+          const [snapshot] = await tx.select({ content: scriptVersions.content }).from(scriptVersions).where(and(eq(scriptVersions.tenantId,tenantId), eq(scriptVersions.scriptId,script.id), eq(scriptVersions.version,script.currentVersion)));
+          if (!snapshot) throw new DomainError('CONFLICT',409);
+          input = { ...input, previousScript: snapshot.content };
+        }
       }
       if (input.options.ideaId) {
         const [idea] = await tx.select({id:ideas.id}).from(ideas).where(and(eq(ideas.tenantId,tenantId),eq(ideas.brandId,brandId),eq(ideas.id,input.options.ideaId)));
@@ -92,7 +98,12 @@ export class JobRepository {
       if ((job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO')) throw new DomainError('INVALID_INPUT');
       const input = generationInputSchema.parse(job.input);
       let result: {internalId:string;version:number};
-      if(job.type==='OPTIMIZE_STRATEGY'){
+      if (job.type === 'REVIEW_SCRIPT') {
+        const parsed = validateBrandReview(output, input);
+        if (!parsed.success || !input.options.scriptId || !input.options.revision) throw new DomainError('PROVIDER_REJECTED',502);
+        await tx.insert(brandReviews).values({ tenantId, brandId: job.brandId, jobId: id, scriptId: input.options.scriptId, scriptVersion: input.options.revision, brandRevision: input.brandRevision, content: parsed.data });
+        result = { internalId: input.options.scriptId, version: input.options.revision };
+      } else if(job.type==='OPTIMIZE_STRATEGY'){
         result=await persistPerformance(tx,job,input,output);
       } else if (job.type === 'GENERATE_STRATEGY') {
         const content = workflowSchemas.GENERATE_STRATEGY.parse(output);

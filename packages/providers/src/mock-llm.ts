@@ -22,6 +22,11 @@ export class MockLLMProvider implements LLMProvider {
       plan:Array.from({length:30},(_,i)=>({day:i+1,topic:`[ДЕМО] ${topic}: совет ${i+1}`,platform:options.platform,format:'POST',funnelStage:'AWARENESS' as const,cta})),
     };
     else if (request.workflow === 'GENERATE_IDEAS') json = {ideas:Array.from({length:5},(_,i)=>({title:`[ДЕМО] ${topic}: идея ${i+1}`,angle:'Практический разбор',hook:`Что важно знать о ${topic}?`,audienceSegment:brain.audience[0]?.name || 'Аудитория бренда',contentPillar:'Практические советы',funnelStage:'AWARENESS' as const,platform:options.platform,format:'SHORT_VIDEO' as const,scores:{relevance:70,novelty:50,brandFit:75,conversionPotential:40,viralityPotential:30},rationale:'Демонстрационная редакционная оценка, не прогноз.'})),caveat:'ДЕМО: оценки условные, результат не гарантирован.'};
+    else if (request.workflow === 'REVIEW_SCRIPT') {
+      const snapshot = generationInputSchema.parse(request.sourceData).previousScript;
+      if (!snapshot) throw new DomainError('INVALID_INPUT');
+      json = { summary: '[ДЕМО] Пример редакторской проверки, а не заключение AI.', findings: [{ category: 'FACT_CHECK', field: 'proof', quote: snapshot.proof.slice(0, 1000), ruleIndex: null, explanation: '[ДЕМО] Проверьте подтверждение этого фрагмента.', suggestion: 'Добавьте проверенный источник или уточните формулировку.' }] };
+    }
     else json = {hook:`[ДЕМО] Как разобраться в ${topic}?`,context:`Материал для ${brain.audience[0]?.name || 'аудитории бренда'}.`,core:`Начните с потребности. Сравните варианты. Проверьте, соответствует ли ${topic} вашей задаче.`,proof:'Добавьте проверенный пример из собственной практики.',cta,factCheckNotes:['Демонстрационный текст. Фактические утверждения требуют проверки.']};
     return {json,usage:{model:'mock-v1',inputUnits:0,outputUnits:0,costMicrounits:0,currency:'USD'}};
   }

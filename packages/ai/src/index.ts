@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DomainError, workflowSchemas, generationInputSchema, type GenerationInput, type GenerationOutput, type WorkflowType, type LLMProvider, type OperationContext, type Usage, performanceEvidenceSchema, performanceOutputSchema, validatePerformanceOutput, strategySchema, type PerformanceEvidence, type PerformanceOutput, type StrategyOutput } from '@contentos/types';
+import { DomainError, validateBrandReview, brandReviewSchema, workflowSchemas, generationInputSchema, type GenerationInput, type GenerationOutput, type WorkflowType, type LLMProvider, type OperationContext, type Usage, performanceEvidenceSchema, performanceOutputSchema, validatePerformanceOutput, strategySchema, type PerformanceEvidence, type PerformanceOutput, type StrategyOutput } from '@contentos/types';
 
 export interface ModelRoute { provider: LLMProvider; model: string }
 export interface CallRecorder {
@@ -8,6 +8,7 @@ export interface CallRecorder {
   failed(call: number, code: string, durationMs: number): Promise<void>;
 }
 const instructions: Record<WorkflowType, string> = {
+  REVIEW_SCRIPT: 'Review the saved script against the supplied brand voice and rules. Return advisory findings only. Quote an exact substring of the selected script field for every finding. BRAND_RULE must cite the zero-based index in brain.rules; TONE and FACT_CHECK must use ruleIndex:null. FACT_CHECK identifies claims for human verification, never declares a claim true or false. Do not invent evidence, citations, sources, brand rules or a compliance score. No findings does not mean approval or factual accuracy. Do not rewrite the script or change brand data.',
   OPTIMIZE_STRATEGY: 'Analyze immutable performance evidence.',
   GENERATE_STRATEGY: 'Build a practical marketing strategy with exactly 30 distinct numbered days. Distinguish assumptions from known brand facts. Do not imply market research was performed.',
   GENERATE_IDEAS: 'Generate 5 distinct actionable content ideas. Scores are subjective editorial estimates, never guaranteed predictions; state that in caveat. Use the selected platform and brand context.',
@@ -20,6 +21,10 @@ export class GenerationOrchestrator {
     if(type==='OPTIMIZE_STRATEGY'){
       if(!input.performance)throw new DomainError('INVALID_INPUT');
       return this.analyzePerformance(input.performance.evidence,input.performance.strategy,context,recorder);
+    }
+    if (type === 'REVIEW_SCRIPT') {
+      if (!input.previousScript) throw new DomainError('INVALID_INPUT');
+      return this.generate(instructions[type], { workflow: type, sourceData: input }, brandReviewSchema, value => validateBrandReview(value, input), context, recorder);
     }
     const schema = workflowSchemas[type];
     return this.generate<GenerationOutput>(instructions[type],{ workflow:type,sourceData:input },schema,value=>schema.safeParse(value),context,recorder);

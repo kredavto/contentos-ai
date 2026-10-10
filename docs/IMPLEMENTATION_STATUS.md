@@ -472,3 +472,17 @@ Five new unit/integration checks passed, including conflict rollback, concurrent
 Read-only NL recheck still shows 2 CPUs, 3915 MiB RAM (905 MiB available), 3394 MiB used swap and 8.0 GiB free root disk. Existing server services were not changed. Previous funnel commit c60a371 passed remote CI run 38088588556.
 
 Final seed validation: 327 tests across 54 files passed with PostgreSQL and real FFmpeg. Workspace/CLI/test typecheck, lint and production build passed. No schema migration or UI change was required.
+
+## Brand Guardian script review
+
+Added a saved-version review workflow using the existing asynchronous job/outbox, LLM abstraction, bounded repair, cached responses and reserve/capture/release accounting. Strict findings reference actual quoted script text and, for brand-rule findings, an existing rule in the saved context. Semantic checks run at generation, cache reuse and repository completion. The worker rechecks permissions before persistence.
+
+The script editor requests a review, opens the completed report, shows exact quotes and rule snapshots, labels demo responses and warns when script or brand revisions change. Reviews never mutate scripts, approvals or Brand Brain. FACT_CHECK findings only identify statements for human verification; no external source checking or claim of factual certification is implemented. The latest 50 brand reviews are exposed in this initial UI, with older records retained. See [Brand Guardian scope](brand-guardian.md).
+
+Migration 0042 adds immutable reports, script-version referential integrity and a configurable usage policy. Six focused unit/integration checks passed for evidence validation/repair, concurrent idempotency, version snapshots, permissions, stale content, immutable history and credit settlement. Local development/test migrations are applied. Browser and full-regression verification are in progress; no paid provider request was made.
+
+Chrome verification passed through the actual worker: request/credit capture, report persistence, stale-version warning, unsaved-draft guard, read-only role and CSRF denial. The mobile screenshot was inspected without horizontal overflow. Initial browser attempts exposed fixture JSON serialization and an existing nested-label accessible-name issue in the script selector; both were fixed before the passing run.
+
+Final workspace/test typecheck and lint passed. Full regression: 332 of 333 tests passed; the password hashing test alone exceeded its 30-second limit during substantial local slowdown. Its isolated rerun (120-second invocation limit, no source/cryptography changes) passed both password tests in 13.44 seconds. The six new review tests passed in the full run, including replacement of a forged caller snapshot with the saved database version. Production build and schema drift check are in progress.
+
+Production build passed; schema generation reports no drift. Development PostgreSQL confirms 43 applied migrations and 85 public tables. Previous seed commit 3087d88 passed remote CI 38089510804. Broader product completion and configured production infrastructure remain outstanding.

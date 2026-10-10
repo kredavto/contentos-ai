@@ -1,0 +1,62 @@
+import { randomUUID } from 'node:crypto';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { BrandRepository, ContentRepository, JobRepository, LedgerRepository } from '../../packages/db/src/index';
+import { GenerationService } from '../../packages/core/src/generation';
+import { seedDevelopment, demoIds } from '../../packages/db/src/development-seed';
+import { generationInputSchema, type BrandReviewOutput } from '../../packages/types/src/index';
+import { isolatedTestDatabase } from '../helpers/isolated-database';
+const url = process.env.TEST_DATABASE_URL;
+describe.skipIf(!url)('durable version-bound Brand Guardian', () => {
+  const database = isolatedTestDatabase(url), jobs = new JobRepository(database.db), brands = new BrandRepository(database.db), ledger = new LedgerRepository(database.db), content = new ContentRepository(database.db);
+  const service = new GenerationService(jobs, brands, ledger, content, { provider: 'mock', model: 'mock-v1', ready: true });
+  const { user, tenant, brand, script } = demoIds, correlation = randomUUID();
+  const request = (revision = 1) => ({ type: 'REVIEW_SCRIPT', options: { scriptId: script, revision }, idempotencyKey: randomUUID() });
+  let jobId = '', lease = '';
+  const output: BrandReviewOutput = { summary: 'Advisory review', findings: [{ category: 'FACT_CHECK', field: 'proof', quote: 'Добавьте собственный проверенный пример', ruleIndex: null, explanation: 'Source needed', suggestion: 'Check the example' }] };
+  beforeAll(async () => { await seedDevelopment(database.db, `scrypt:v1:${'0'.repeat(32)}:${'0'.repeat(128)}`); });
+  it('creates one reserved job for concurrent retries and captures the saved version', async () => {
+    const input = request();
+    const brain = await brands.getBrandBrain(user, tenant, brand);
+    const forged = generationInputSchema.parse({ brain: brain.data, brandRevision: brain.brand.revision, options: input.options, previousScript: { hook:'Forged',context:'Forged',core:'Forged',proof:'Forged',cta:'Forged',factCheckNotes:[] } });
+    const results = await Promise.all([jobs.enqueue(user, tenant, brand, 'REVIEW_SCRIPT', forged, input.idempotencyKey, 'mock', 'mock-v1', correlation), service.enqueue(user, tenant, brand, input, correlation)]);
+    expect(results[0]?.id).toBe(results[1]?.id); jobId = results[0]!.id;
+    const claimed = await jobs.claim(tenant, jobId); lease = claimed!.leaseToken!;
+    expect(generationInputSchema.parse(claimed!.input).previousScript?.proof).toContain('проверенный пример');
+    await expect(service.enqueue(user, tenant, brand, { ...input, options: { ...input.options, topic: 'Changed intent' } }, correlation)).rejects.toThrow('CONFLICT');
+    expect((await ledger.overview(user, tenant)).balances.AI_CREDITS).toEqual({ available: 97, reserved: 2 });
+  });
+  it('rejects invented evidence without charging, then preserves a historical result after edits', async () => {
+    await expect(jobs.complete(tenant, jobId, lease, { ...output, findings: [{ ...output.findings[0]!, quote: 'Invented' }] })).rejects.toThrow('PROVIDER_REJECTED');
+    expect((await ledger.overview(user, tenant)).balances.AI_CREDITS.reserved).toBe(2);
+    const old = (await content.overview(user, tenant, brand)).scripts[0]!.content;
+    await content.editScript(user, tenant, brand, script, 1, { ...old, proof: 'Edited proof' }, correlation);
+    await database.client`update brands set revision=revision+1 where id=${brand}`;
+    await jobs.complete(tenant, jobId, lease, output);
+    const overview = await content.overview(user, tenant, brand);
+    expect(overview.reviews[0]?.scriptVersion).toBe(1); expect(overview.reviews[0]?.brandRevision).toBe(0);
+    expect(overview.scripts[0]?.currentVersion).toBe(2); expect(overview.scripts[0]?.approvedVersion).toBeNull(); expect(overview.scripts[0]?.content.proof).toBe('Edited proof');
+    expect(overview.brandRevision).toBe(1); expect((await ledger.overview(user, tenant)).balances.AI_CREDITS).toEqual({ available: 97, reserved: 0 });
+    await expect(jobs.complete(tenant, jobId, lease, output)).rejects.toThrow('CONFLICT');
+    await expect(database.client`update brand_reviews set brand_revision=42 where job_id=${jobId}`).rejects.toThrow();
+    await expect(database.client`delete from brand_reviews where job_id=${jobId}`).rejects.toThrow();
+  });
+  it('requires a current saved script, content-writing role and matching brand', async () => {
+    await expect(service.enqueue(user, tenant, brand, request(), correlation)).rejects.toThrow('CONFLICT');
+    await expect(service.enqueue(user, tenant, brand, { ...request(2), options: {} }, correlation)).rejects.toThrow('INVALID_INPUT');
+    await expect(service.enqueue(user, tenant, brand, { ...request(2), options: { scriptId: randomUUID(), revision: 1 } }, correlation)).rejects.toThrow('NOT_FOUND');
+    const sibling = randomUUID(); await database.client`insert into brands(id,tenant_id,workspace_id,name,onboarding_completed_at) values(${sibling},${tenant},${demoIds.workspace},'Sibling',now())`;
+    await expect(service.enqueue(user, tenant, sibling, request(2), correlation)).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
+    await expect(service.enqueue(user, tenant, brand, request(2), correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    expect((await content.overview(user, tenant, brand)).reviews).toHaveLength(1);
+    await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
+  });
+  it('rechecks membership before committing and returns the reservation on failure', async () => {
+    const job = await service.enqueue(user, tenant, brand, request(2), correlation), claimed = await jobs.claim(tenant, job.id);
+    await database.client`delete from organization_members where tenant_id=${tenant} and user_id=${user}`;
+    await expect(jobs.complete(tenant, job.id, claimed!.leaseToken!, output)).rejects.toThrow('NOT_FOUND');
+    await jobs.fail(tenant, job.id, claimed!.leaseToken!, 'NOT_AUTHORIZED', false);
+    const [reservation] = await database.client`select status from usage_reservations where id=${claimed!.reservationId}`; expect(reservation?.status).toBe('RELEASED');
+    await expect(content.overview(user, tenant, brand)).rejects.toThrow('NOT_FOUND');
+  });
+});

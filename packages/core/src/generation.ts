@@ -15,8 +15,9 @@ export class GenerationService {
     if(request.type==='OPTIMIZE_STRATEGY'&&!this.configuration.analyticsAI)throw new DomainError('CONFIGURATION_REQUIRED',503);
     if((request.type==='OPTIMIZE_STRATEGY')!==(request.options.analysisDays!==undefined))throw new DomainError('INVALID_INPUT');
     if (!this.configuration.ready) throw new DomainError('CONFIGURATION_REQUIRED',503);
-    if (request.type !== 'GENERATE_SCRIPT' && (request.options.scriptId || request.options.ideaId)) throw new DomainError('INVALID_INPUT');
+    if (!['GENERATE_SCRIPT', 'REVIEW_SCRIPT'].includes(request.type) && (request.options.scriptId || request.options.ideaId)) throw new DomainError('INVALID_INPUT');
     if (request.options.edit !== 'GENERATE' && !request.options.scriptId) throw new DomainError('INVALID_INPUT');
+    if (request.type === 'REVIEW_SCRIPT' && (!request.options.scriptId || !request.options.revision || request.options.ideaId || request.options.edit !== 'GENERATE')) throw new DomainError('INVALID_INPUT');
     const brain = await this.brands.getBrandBrain(userId,tenantId,brandId);
     let previousScript: GenerationInput['previousScript'];
     if (request.options.scriptId) {

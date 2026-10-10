@@ -28,5 +28,5 @@ export const scripts = pgTable('scripts', {
 export const scriptVersions = pgTable('script_versions', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), scriptId: uuid('script_id').notNull(), jobId: uuid('job_id'),
   version: integer('version').notNull(), content: jsonb('content').$type<ScriptOutput>().notNull(), createdBy: uuid('created_by').notNull().references(() => users.id), createdAt: createdAt(),
-}, t => [unique('script_version_number_uq').on(t.scriptId, t.version), unique('script_version_job_uq').on(t.jobId),
+}, t => [unique('script_version_tenant_number_uq').on(t.tenantId, t.scriptId, t.version), unique('script_version_number_uq').on(t.scriptId, t.version), unique('script_version_job_uq').on(t.jobId),
   foreignKey({ columns: [t.tenantId, t.scriptId], foreignColumns: [scripts.tenantId, scripts.id] }), foreignKey({ columns: [t.tenantId, t.jobId], foreignColumns: [jobs.tenantId, jobs.id] })]);
