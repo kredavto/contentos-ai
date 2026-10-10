@@ -15,7 +15,7 @@ The role argument is required by the command; revocation audits the existing sto
 
 ## Read projections
 
-The console has bounded, cursor-paginated views of users, organizations, jobs/failures, subscription terms, plan versions, usage ledger entries, webhook events, social connection status, AI call costs/models, organization flags, audit headers, email delivery status, payment tasks and support actions. Applicable views can filter by organization UUID; users can filter by user UUID. Cursors use timestamp/UUID ordering and limits cannot exceed 50 rows.
+The console has bounded, cursor-paginated views of users, organizations, jobs/failures, subscription terms, plan versions, usage ledger entries, webhook events, social connection status, AI call costs/models, organization flags, audit headers, email delivery status, payment tasks, support actions and account deletion request metadata. Applicable views can filter by organization UUID; users can filter by user UUID. Cursors use timestamp/UUID ordering and limits cannot exceed 50 rows.
 
 Queries explicitly select allowed fields. Password hashes, session/token hashes, credentials/envelopes, raw webhook or payment data, AI inputs/outputs, email payloads and job error messages are excluded. Authorized operators can see account names/emails for support. Audit views omit arbitrary metadata. Successful data/configuration reads are themselves audited without query text or content. Unknown AI cost remains null. A separate financial evidence report adds confirmed receipts, recorded cost attribution and resource captures; gross-margin and full per-video economics still require complete expense data. See [financial reporting](financial-reporting.md).
 

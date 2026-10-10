@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated 2026-10-09. This is an implementation inventory, not a claim that the full specification is complete.
+Updated 2026-10-10. This is an implementation inventory, not a claim that the full specification is complete.
 
 ## Verified working slice
 
@@ -10,10 +10,10 @@ Updated 2026-10-09. This is an implementation inventory, not a claim that the fu
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and completed summary. A profile/voice editor is implemented with transactional role checks and optimistic revisions; all 13 structured collections now have an editor with stable IDs and archiving. See [profile editing](brand-profile.md).
-- Database schema: 80 tables with thirty-eight SQL migrations (0000–0037). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 81 tables with thirty-nine SQL migrations (0000–0038). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for tariff-publishing commit f2f9e97 (run 37862636240). Newer financial-reporting changes are locally verified and awaiting remote CI.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for financial-reporting commit cef28e0 (run 37863563406). Newer Privacy Center changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -415,3 +415,14 @@ Final pricing-only Chrome rerun passed after making its fixture name unique acro
 
 Financial reporting validation: 293 tests / 47 files passed; the six financial integration tests passed again after the report time limit and migration 0037 period indexes. Both local databases have the additive migration.
 Workspace/test typecheck, lint and production build passed. Both admin Chrome scenarios passed with the financial report; the mobile finance screenshot was inspected without page overflow.
+
+
+## Privacy Center and deletion request intake
+
+- Added an authenticated Privacy Center for session revocation and navigation to the existing brand consent/social/avatar/video/photo controls; existing service authorization and cleanup workflows remain authoritative.
+- Added durable, password-confirmed account-deletion requests with explicit acknowledgement, email verification, user-lock/password-change fencing, idempotency, one-active-request enforcement, revision-checked cancellation and content-free audit events. Operator queue projection is gated separately from organization roles.
+- This is request intake, not account erasure. The UI explicitly preserves that distinction. Account-data export and the actual multi-resource account deletion workflow remain outstanding. See [privacy scope](privacy-center.md).
+
+Privacy validation: 299 tests across 48 files passed with PostgreSQL/Redis/real FFmpeg; workspace/test typecheck and lint passed. Schema generation reports no drift after migration 0038. No real account deletion was requested or performed.
+Privacy browser verification passed after narrowing the wrong-password alert selector to exclude Next.js’s route announcer. The two existing admin scenarios also passed. Six privacy integration cases passed again after switching cancellation timestamps to the database clock. The mobile screenshot was inspected without page overflow.
+Final workspace/test typecheck, lint and production build passed for Privacy Center. NL read-only recheck still shows 2 CPUs / 4 GB RAM and about 8.2 GB free disk; no existing server services were modified.

@@ -5,7 +5,7 @@ import { adminCategories, adminListSchema, adminRevokeSessionsSchema, type Admin
 import { api } from '../lib/api-client';
 import { AdminFinance } from './admin-finance';
 import { AdminPricing } from './admin-pricing';
-const labels: Record<AdminCategory, string> = { users: 'Пользователи', organizations: 'Организации', jobs: 'Задания', failed_jobs: 'Ошибки и сверка заданий', subscriptions: 'Периоды подписок', plans: 'Версии тарифов', usage: 'Учёт ресурсов', webhooks: 'Webhook-события', social: 'Социальные подключения', costs: 'Расходы AI', feature_flags: 'Флаги организаций', audit: 'Аудит', email: 'Доставка писем', payment_tasks: 'Платёжные задания', actions: 'Действия поддержки' };
+const labels: Record<AdminCategory, string> = { users: 'Пользователи', organizations: 'Организации', jobs: 'Задания', failed_jobs: 'Ошибки и сверка заданий', subscriptions: 'Периоды подписок', plans: 'Версии тарифов', usage: 'Учёт ресурсов', webhooks: 'Webhook-события', social: 'Социальные подключения', costs: 'Расходы AI', feature_flags: 'Флаги организаций', audit: 'Аудит', email: 'Доставка писем', payment_tasks: 'Платёжные задания', actions: 'Действия поддержки', deletion_requests: 'Запросы удаления аккаунтов' };
 const columns: Record<string, string> = { id: 'ID', userId: 'Пользователь', actorId: 'Оператор', tenantId: 'Организация', brandId: 'Бренд', email: 'Email', name: 'Название / имя', verifiedAt: 'Почта подтверждена', disabledAt: 'Отключён', createdAt: 'Дата', status: 'Статус', type: 'Тип', progress: 'Прогресс, %', provider: 'Провайдер', model: 'Модель', attempt: 'Попытка', errorCode: 'Ошибка', correlationId: 'ID запроса', startsAt: 'Начало', endsAt: 'Окончание', amountMinor: 'Цена в копейках', currency: 'Валюта', costMicrounits: 'Расход, микроединицы валюты', inputUnits: 'Входные единицы', outputUnits: 'Выходные единицы', durationMs: 'Длительность, мс', amount: 'Количество', availableDelta: 'Изменение доступного', reservedDelta: 'Изменение резерва', enabled: 'Включён', revision: 'Ревизия', version: 'Версия', ticket: 'Обращение', reason: 'Причина', revokedSessions: 'Отозвано сессий', operation: 'Операция', action: 'Событие' };
 type Provider = { name: string; provider: string; model: string | null; status: string };
 type Page = { rows: Array<Record<string, string | number | boolean | null>>; next: { beforeAt: string; beforeId: string } | null };
@@ -37,7 +37,7 @@ export function AdminCenter() {
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось завершить сессии'); }
     finally { setPending(false); }
   }
-  const filterable = !['plans', 'webhooks', 'email', 'actions'].includes(category);
+  const filterable = !['plans', 'webhooks', 'email', 'actions', 'deletion_requests'].includes(category);
   return <div className="page-container admin-center"><Link className="back-link" href="/dashboard">В рабочее пространство</Link><div className="page-eyebrow">ОПЕРАТОР ПЛАТФОРМЫ</div><h1>Администрирование</h1>
     {loading ? <p role="status">Проверяем доступ…</p> : null}{pending ? <p role="status">Выполняем запрос…</p> : null}{error ? <p className="notice error" role="alert">{error}</p> : null}{message ? <p className="saved-message" role="status">{message}</p> : null}
     {access ? <>

@@ -267,6 +267,13 @@
       "when": 1791504538931,
       "tag": "0037_optimal_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791505066332,
+      "tag": "0038_slippery_gideon",
+      "breakpoints": true
     }
   ]
 }

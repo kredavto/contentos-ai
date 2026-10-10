@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -36,6 +36,9 @@ async function dispatch(request: Request, context: RouteContext) {
       await auth.throttle('mutation', user.userId);
       if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
     }
+    if (key === 'privacy' && request.method === 'GET') return ok(await privacy.overview(user.userId));
+    if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
+    if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
       if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
       if (key === 'admin/finance' && request.method === 'GET') { await auth.throttle('admin-finance', user.userId); return ok(await admin.finance(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId)); }

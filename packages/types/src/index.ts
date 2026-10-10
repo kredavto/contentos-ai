@@ -43,3 +43,5 @@ export * from './brand-brain';
 export * from './agency';
 
 export * from './admin';
+
+export * from './privacy';

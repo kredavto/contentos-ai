@@ -40,3 +40,5 @@ export * from './repositories/agency';
 export * from './repositories/admin';
 
 export * from './repositories/admin-finance';
+
+export * from './repositories/privacy';

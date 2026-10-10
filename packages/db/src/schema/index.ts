@@ -26,3 +26,5 @@ export * from './team';
 export * from './agency';
 
 export * from './admin';
+
+export * from './privacy';
