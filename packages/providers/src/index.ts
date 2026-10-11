@@ -10,3 +10,4 @@ export * from './captions';
 export * from './telegram';
 export * from './telegram-publishing';
 export * from './yookassa';
+export * from './images';

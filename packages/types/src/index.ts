@@ -57,3 +57,4 @@ export * from './posts';
 export * from './covers';
 
 export * from './carousels';
+export * from './images';

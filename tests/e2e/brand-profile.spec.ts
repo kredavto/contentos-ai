@@ -36,7 +36,7 @@ test('completed profile edits persist, reject stale saves and preserve structure
     await database.client`update brands set revision=revision+1 where id=${brand}`;
     await page.getByLabel('Название бренда', { exact: true }).fill('Устаревшая запись');
     await page.getByRole('button', { name: 'Сохранить профиль', exact: true }).click();
-    await expect(page.getByRole('alert')).toBeVisible(); expect((await service.getBrandBrain(user, tenant, brand)).data.company).toBe('Обновлённый бренд');
+    await expect(page.getByRole('alert').filter({hasText:'Данные изменились'})).toBeVisible(); expect((await service.getBrandBrain(user, tenant, brand)).data.company).toBe('Обновлённый бренд');
     await page.reload();
     await page.getByLabel('Раздел', { exact: true }).selectOption('rules');
     await page.getByRole('button', { name: 'Добавить пункт', exact: true }).click();

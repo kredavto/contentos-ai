@@ -2,6 +2,8 @@
 
 Contracts: LLMProvider, ImageProvider, AvatarProvider, VoiceProvider, VideoProvider, CaptionProvider, TrendProvider, PublishingProvider, AnalyticsProvider, PaymentProvider, StorageProvider; additionally EmailProvider and ErrorReporter.
 
+ImageProvider now has a real OpenAI Images implementation plus a production-forbidden local fixture. It preserves unknown metering, bounds output and marks uncertain mutations for reconciliation without retry. The adapter is not yet connected to application jobs/UI. See [image integration status and required lifecycle](docs/image-generation.md).
+
 All return validated normalized results and provider/external_id/internal_id/metadata mappings. Calls carry correlation ID, operation idempotency key and abort signal. Adapters own endpoint/API versions, credential access, official schemas, timeouts, retries and safe request metrics. UI only sees internal IDs and safe capability/status descriptions.
 
 First avatar adapter: HeyGen. First payments adapter: YooKassa; Stripe-ready contract. LLM/image/captions may use OpenAI behind contracts. Publishing targets YouTube, TikTok, Instagram, VK and Telegram via official APIs; implement enabled capabilities honestly and report unsupported capabilities. OAuth includes state, PKCE where applicable, encrypted tokens, refresh and revocation.

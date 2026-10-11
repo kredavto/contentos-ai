@@ -23,7 +23,10 @@ export interface LLMProvider {
   generate(input: { system: string; prompt: string; jsonSchema: Record<string, unknown>; model: string }, context: OperationContext): Promise<{ json: unknown; usage: Usage }>;
 }
 export interface ImageProvider {
-  generate(input: { prompt: string; width: number; height: number }, context: OperationContext): Promise<{ reference: ProviderReference; bytes: Uint8Array; mimeType: string; usage: Usage }>;
+  readonly name:string;
+  /** A synchronous remote mutation: callers must persist submission before calling,
+   * and must not replay an uncertain outcome. No remote idempotency is assumed. */
+  generate(input: import('./images').ImageGenerationInput, context: OperationContext): Promise<{ reference: ProviderReference|null; bytes: Uint8Array; mimeType: string; usage: import('./images').ImageUsage }>;
 }
 export interface AvatarProvider {
   create(input: { photoUrl: string; name: string; groupReference?: ProviderReference }, context: OperationContext): Promise<ProviderReference>;

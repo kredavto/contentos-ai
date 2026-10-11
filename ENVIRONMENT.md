@@ -14,6 +14,8 @@ Implemented identity slice: SMTP_URL (smtp/smtps connection URI), EMAIL_FROM. Us
 
 Set `AI_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL` on both web and worker for real generation. Model selection is explicit; no model or API key is silently provisioned. Missing configuration returns `CONFIGURATION_REQUIRED`. Use `AI_PROVIDER=mock` only for local/CI fixture generation; production validation rejects it. The UI identifies mock output visibly. `WORKER_HEALTH_PORT` optionally serves loopback `/health`; expose via an internal proxy only. Web and worker must use the same PostgreSQL, Redis and AI configuration.
 
+The image adapter accepts `IMAGE_PROVIDER=openai`, `IMAGE_GENERATION_ENABLED=true`, `OPENAI_API_KEY` and an explicit allowlisted `OPENAI_IMAGE_MODEL`. Defaults are disabled; there is no automatic model choice. Local fixtures use `IMAGE_PROVIDER=mock` and an absolute `MOCK_IMAGE_FILE`; production validation forbids mock images. These settings currently configure only the adapter factory: Image Studio routes, durable image jobs, credit settlement and storage lifecycle are still pending, so setting them does not expose image generation in the application. See [image integration contract](docs/image-generation.md).
+
 Local: copy `.env.example` to `.env`, choose `AI_PROVIDER=mock` for a no-cost walkthrough, run `pnpm db:migrate`, then `pnpm dev` to run web and worker. Request starter credits once from the content studio after verifying email. Credit prices come from `usage_policies`, not UI constants. The starter grant is one per verified owner account across organizations.
 
 ## Photo storage
