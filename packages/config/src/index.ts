@@ -1,5 +1,8 @@
 import { z } from 'zod';
 const serverSchema = z.object({
+  ERROR_REPORTING_PROVIDER: z.enum(['disabled','sentry']).default('disabled'),
+  SENTRY_DSN: z.string().max(2048).optional(),
+  SENTRY_RELEASE: z.string().regex(/^[a-zA-Z0-9._-]{1,80}$/).optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_NAME: z.string().min(1).max(80).default('CONTENTOS AI'),
   APP_URL: z.url(),

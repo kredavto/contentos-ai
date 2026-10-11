@@ -1,3 +1,5 @@
+import type {ErrorReporter} from '@contentos/types';
+import {reportError} from './error-reporting';
 import { BillingRepository, PaymentTaskRepository } from '@contentos/db';
 import { DomainError, ProviderRequestError, type CreatePayment, type PaymentProvider, type PaymentResult } from '@contentos/types';
 import { CredentialVault } from './credential-vault';
@@ -5,7 +7,7 @@ import { PaymentMethodService } from './payment-methods';
 /** Checkout transport runs only here, behind the provider interface and durable send marker. */
 export class PaymentProcessor {
   private readonly methods: PaymentMethodService;
-  constructor(private readonly tasks: PaymentTaskRepository, private readonly billing: BillingRepository, private readonly provider: PaymentProvider | null, private readonly merchant: { provider: string; merchantId: string; test: boolean } | null, private readonly vault: CredentialVault | null, private readonly renewalsEnabled = false) {
+  constructor(private readonly tasks: PaymentTaskRepository, private readonly billing: BillingRepository, private readonly provider: PaymentProvider | null, private readonly merchant: { provider: string; merchantId: string; test: boolean } | null, private readonly vault: CredentialVault | null, private readonly renewalsEnabled = false,private readonly errors?:ErrorReporter) {
     this.methods = new PaymentMethodService(billing, vault);
   }
   async run(tenantId: string, id: string) {
@@ -14,9 +16,11 @@ export class PaymentProcessor {
     const task = await this.tasks.claim(tenantId, id);
     if (!task?.leaseToken) return;
     const token = task.leaseToken;
+    let correlationId=id;
     try {
       const operation = await this.tasks.prepare(tenantId, id, token, this.merchant, Boolean(this.vault), this.renewalsEnabled);
       if (!operation) return;
+      correlationId=operation.order.correlationId;
       const context = { tenantId, internalId: id, idempotencyKey: id, correlationId: operation.order.correlationId, signal: AbortSignal.timeout(45_000) };
       let input: CreatePayment | null = null;
       if (operation.mode === 'CREATE') {
@@ -42,6 +46,7 @@ export class PaymentProcessor {
       }
       await this.tasks.finish(tenantId, id, token);
     } catch (error) {
+      reportError(this.errors,error,{correlationId,jobId:id});
       // Stale workers cannot mutate the new lease. Any post-send failure remains recoverable by GET/replay.
       try { await this.tasks.fail(tenantId, id, token, false); }
       catch (failure) { if (!(failure instanceof DomainError && failure.code === 'CONFLICT')) throw failure; }

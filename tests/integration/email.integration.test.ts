@@ -26,8 +26,9 @@ describe.skipIf(!url)('durable encrypted authentication mail',()=>{
   });
   it('retries transient delivery with the same message/token and fences an expired lease',async()=>{
     const f=await fixture();let failed=0;
-    const failing=new EmailProcessor(repository,{send:async()=>{failed++;throw new DomainError('PROVIDER_UNAVAILABLE');}},vault);
-    await failing.runOnce(f.id);expect(failed).toBe(1);expect(await processor.runOnce(f.id)).toBe(false);
+    let reports=0;
+    const failing=new EmailProcessor(repository,{send:async()=>{failed++;throw new DomainError('PROVIDER_UNAVAILABLE');}},vault,{capture(_error,context){reports++;expect(context.correlationId).toBe(f.correlation);expect(context.jobId).toBe(f.id);throw new Error('monitor offline');}});
+    await failing.runOnce(f.id);expect(failed).toBe(1);expect(reports).toBe(1);expect(await processor.runOnce(f.id)).toBe(false);
     await database.client`update email_outbox set next_attempt_at=now() where id=${f.id}`;
     const old=await repository.claim(f.id);expect(old?.attempt).toBe(2);
     await database.client`update email_outbox set lease_until=now()-interval '1 second' where id=${f.id}`;

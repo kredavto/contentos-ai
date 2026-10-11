@@ -1,3 +1,5 @@
+import type {ErrorReporter} from '@contentos/types';
+import {reportError} from './error-reporting';
 import {z} from 'zod';
 import {CoverRepository} from '@contentos/db';
 import {DomainError,coverRequestSchema,coverSelectionSchema,coverDesignSchema,type StorageProvider,type CoverRenderingProvider,type OperationContext} from '@contentos/types';
@@ -15,7 +17,7 @@ export class CoverService{
   }
 }
 export class CoverProcessor{
-  constructor(private readonly repository:CoverRepository,private readonly storage:StorageProvider|null,private readonly renderer:CoverRenderingProvider|null){}
+  constructor(private readonly repository:CoverRepository,private readonly storage:StorageProvider|null,private readonly renderer:CoverRenderingProvider|null,private readonly errors?:ErrorReporter){}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job)return;
     const context:OperationContext={tenantId,internalId:id,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:AbortSignal.timeout(240_000)};
@@ -28,6 +30,6 @@ export class CoverProcessor{
       await this.repository.prepare(job,avatarConsentPolicies());context.signal.throwIfAborted();
       await this.storage.put(job.storageKey,output.bytes,'image/jpeg',context);
       await this.repository.complete(job,avatarConsentPolicies());
-    }catch(error){const code=error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE';try{await this.repository.fail(job,code);}catch(failure){if(!(failure instanceof DomainError&&failure.code==='CONFLICT'))throw failure;}}
+    }catch(error){reportError(this.errors,error,{correlationId:job.correlationId,jobId:id});const code=error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE';try{await this.repository.fail(job,code);}catch(failure){if(!(failure instanceof DomainError&&failure.code==='CONFLICT'))throw failure;}}
   }
 }

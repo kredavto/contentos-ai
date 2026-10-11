@@ -29,6 +29,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await context.addCookies([{ name: 'contentos_session', value: operatorToken, url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
     await page.goto('/dashboard'); await page.getByRole('link', { name: 'Администрирование', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Конфигурация сервисов', exact: true })).toBeVisible();
+    await expect(page.getByText('Мониторинг ошибок', {exact:true})).toBeVisible();
     await expect(page.getByRole('button', { name: 'Обновить с начала', exact: true })).toBeEnabled();
     await page.getByLabel('ID пользователя (необязательно)', { exact: true }).fill(target);
     await page.getByRole('button', { name: 'Обновить с начала', exact: true }).click();

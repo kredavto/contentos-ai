@@ -41,3 +41,5 @@ The provider SDK has retries disabled. A durable STARTED checkpoint precedes sub
 ## Local cover rendering
 
 `CoverRenderingProvider.renderCover` consumes private final-video bytes and a validated design, returning bounded JPEG bytes/dimensions. `FFmpegVideoProcessor` implements it without an external image/avatar API call or video re-encoding. The worker reuses the same literal-text ASS composition used by initial video covers; relative positions or an absolute timestamp select the decoded frame. Storage and consent checks remain outside this adapter. The separate `contentos-covers` queue handles versioned jobs, retries and credit settlement. See [Cover Studio](docs/video-covers.md).
+
+ErrorReporter is implemented by an isolated official Sentry Node client. Only safe code/correlation/job metadata is sent; automatic integrations and raw exception payloads are excluded. It is disabled by default and has bounded flush/burst behavior. See [coverage, configuration and limitations](docs/error-monitoring.md).

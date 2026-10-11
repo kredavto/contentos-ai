@@ -37,3 +37,5 @@ export * from './utm';
 export * from './funnels';
 
 export * from './covers';
+
+export * from './error-reporting';

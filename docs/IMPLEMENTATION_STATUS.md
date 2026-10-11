@@ -76,7 +76,7 @@ This is an implementation inventory, not a claim that the full specification is 
 - Private voice cloning/import, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
 - Comment inbox/reply safety modes, automatic click-to-lead attribution beyond UTM links and manual funnel reports, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
-- Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, Sentry-compatible monitoring and provider readiness views.
+- Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, live monitoring setup and expanded provider readiness views.
 - Complete development seed and final platform-wide security/architecture reviews. The full MVP browser chain is verified with fixture transports; real configured-provider end-to-end verification remains pending.
 - Fresh AMD64 release images, GLOBAL/RU infrastructure placement, backups/restore drills, production credentials and complete Vercel/runtime deployment. The NL capacity upgrade and SMTP sender domain are still pending.
 
@@ -535,3 +535,17 @@ Chrome passed the complete carousel scenario (1.6 minutes), including real worke
 Previous commit cdfbd17 failed Linux CI 38179179726 on a late-frame cover test: the container duration included an audio tail beyond the last video frame, yielding no JPEG. Frame clamping now uses video-stream duration/rate, with a specific longer-audio regression. Local rendering passes; Linux confirmation will come from the next CI run. Seeking semantics were checked against the [official FFmpeg documentation](https://ffmpeg.org/ffmpeg.html#Main-options).
 
 Final workspace/test typecheck, lint and production build passed (build 18.9 seconds). No real provider generation, social posting or remote infrastructure change was performed in this slice.
+
+## Server error monitoring
+
+Implemented the provider-independent ErrorReporter with an isolated official Sentry Node SDK client. API 5xx and Next Node rendering errors, worker queues/operational loops and domain processor failures are wired. Events carry only allowlisted codes, validated correlation/job UUIDs and service/release metadata; original errors, user content and credentials are excluded. Reporting is bounded and best-effort, with disabled/configuration-required operator status until configured. See [coverage and limitations](error-monitoring.md).
+
+Ten focused SDK/SMTP integration checks passed, including rejected transport, sensitive payload exclusion, invalid identifiers, burst bounds and durable email retries despite a throwing reporter. Workspace typecheck passed. Full regression and production build are in progress. Previous carousel/FFmpeg commit 37982d6 passed Linux CI unit tests and build; remote browser checks are still running, confirming the late-frame fix no longer fails the Linux renderer tests.
+
+Remote CI 38180174930 for 37982d6 completed successfully, including Linux FFmpeg and the full browser suite.
+
+Final monitoring verification: workspace/test typecheck and lint passed; production build passed after separating the monitoring import and externalizing the Node SDK (1m23.6s). The final full run had 358 passed / 1 timeout across 359 tests in 63 files. The unchanged privacy-export file then passed all three tests in isolation in 14.3 seconds with the original 30-second limit. The earlier full run passed all 357 then-existing tests, and the two added API checks passed separately.
+
+Two dev-server browser attempts exceeded the existing 120-second startup deadline on the loaded local host. No deadline was increased. Added an explicit PLAYWRIGHT_WEB_MODE=production option and verified the built app instead: Chrome operator scenario passed in 1.3 minutes, including the monitoring readiness row, ordinary-user denial, CSRF protection, session revocation/audit and mobile overflow. Screenshot inspected. Next emits its existing standalone/next-start warning in this test mode; deployment still uses the configured standalone output/Vercel integration. Browser fixtures explicitly disable outbound error reporting.
+
+No monitoring account was provisioned, no live event was sent, and no NL infrastructure was changed. Live endpoint verification and alert configuration require the selected monitoring service's DSN.

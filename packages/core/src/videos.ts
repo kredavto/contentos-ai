@@ -1,3 +1,5 @@
+import type {ErrorReporter} from '@contentos/types';
+import {reportError} from './error-reporting';
 import {z} from 'zod';
 import {VideoRepository,JobRepository,AICallRepository,type Database} from '@contentos/db';
 import {DomainError,ProviderRequestError,videoRequestSchema,videoApprovalSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
@@ -52,7 +54,7 @@ export class VideoService {
 export class VideoProcessor {
   private readonly repository:VideoRepository;
   private readonly jobs:JobRepository;
-  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
+  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null,private readonly errors?:ErrorReporter){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job?.leaseToken)return;
     const abort=new AbortController(),context:OperationContext={tenantId,internalId:id,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:abort.signal};
@@ -77,7 +79,7 @@ export class VideoProcessor {
       else{
         polling=true;
         const result=await this.connection.provider.status(project.reference,context);polling=false;
-        if(result.status==='FAILED'){await this.repository.fail(job,'PROVIDER_REJECTED');return;}
+        if(result.status==='FAILED'){reportError(this.errors,new DomainError('PROVIDER_REJECTED'),{correlationId:job.correlationId,jobId:id});await this.repository.fail(job,'PROVIDER_REJECTED');return;}
         if(result.status==='PROCESSING'){await this.repository.wait(job);return;}
         if(!result.downloadUrl)throw new DomainError('RECONCILIATION_REQUIRED',409);
         await this.repository.prepare(job,avatarConsentPolicies());
@@ -111,6 +113,7 @@ export class VideoProcessor {
       await this.repository.complete(job,avatarConsentPolicies(),final.durationSeconds,final.bytes.byteLength);
     }catch(error){
       const code=polling&&error instanceof DomainError&&error.code==='PROVIDER_REJECTED'?'RECONCILIATION_REQUIRED':error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE';
+      reportError(this.errors,error,{correlationId:job.correlationId,jobId:id,code});
       try{await this.repository.fail(job,code,error instanceof ProviderRequestError&&error.definitiveRejection);}
       catch(failure){if(!(failure instanceof DomainError&&failure.code==='CONFLICT'))throw failure;}
       console.log(JSON.stringify({event:'video_job_error',jobId:id,correlationId:job.correlationId,code}));

@@ -6,7 +6,7 @@ Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web d
 
 ## Local development
 
-Requires Node.js 22+ (24 used in CI), pnpm 10.30.3 and Docker.
+Requires Node.js 22.12+ (24 recommended and used in CI), pnpm 10.30.3 and Docker.
 
 ```sh
 cp .env.example .env
@@ -60,3 +60,5 @@ Saved scripts can be reviewed asynchronously against their versioned brand conte
 The [Post Writer](docs/posts.md) creates versioned plain-text posts and lets an approved post prefill a separately reviewed calendar draft.
 
 The [Carousel Studio](docs/carousels.md) generates editable, versioned slides with approval and browser PNG export. Album publishing is not yet connected.
+
+Optional [server error monitoring](docs/error-monitoring.md) sends only safe operational metadata and is disabled until configured.

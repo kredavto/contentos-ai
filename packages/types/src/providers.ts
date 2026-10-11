@@ -80,6 +80,7 @@ export interface EmailProvider {
   send(input: { recipient: string; subject: string; text: string }, context: OperationContext): Promise<ProviderReference>;
 }
 export interface ErrorReporter {
+  flush?(timeout?:number):Promise<boolean>;
   capture(error: Error, context: { correlationId: string; code: string; jobId?: string }): void;
 }
 export interface SocialConnectionProvider {

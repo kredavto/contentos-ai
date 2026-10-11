@@ -1,3 +1,5 @@
+import type {ErrorReporter} from '@contentos/types';
+import {reportError} from './error-reporting';
 import { z } from 'zod';
 import { AvatarRepository,AICallRepository,JobRepository,type Database,type StoredJob } from '@contentos/db';
 import { DomainError,ProviderRequestError,avatarRequestSchema,type AvatarProvider,type StorageProvider,type OperationContext } from '@contentos/types';
@@ -33,7 +35,7 @@ export class AvatarService {
 export class AvatarProcessor {
   private readonly repository:AvatarRepository;
   private readonly jobs:JobRepository;
-  constructor(private readonly db:Database,private readonly connection:AvatarConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean){this.repository=new AvatarRepository(db);this.jobs=new JobRepository(db);}
+  constructor(private readonly db:Database,private readonly connection:AvatarConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean,private readonly errors?:ErrorReporter){this.repository=new AvatarRepository(db);this.jobs=new JobRepository(db);}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job?.leaseToken)return;
     const abort=new AbortController();const context=contextFor(job,abort.signal);
@@ -61,11 +63,12 @@ export class AvatarProcessor {
         polling=true;
         const result=await this.connection.provider.status(data.look.reference,context);
         if(result.status==='READY')await this.repository.complete(job,avatarConsentPolicies());
-        else if(result.status==='FAILED')await this.repository.fail(job,'PROVIDER_REJECTED');
+        else if(result.status==='FAILED'){reportError(this.errors,new DomainError('PROVIDER_REJECTED'),{correlationId:job.correlationId,jobId:id});await this.repository.fail(job,'PROVIDER_REJECTED');}
         else await this.repository.wait(job);
       }
     }catch(error){
       const code=polling&&error instanceof DomainError&&error.code==='PROVIDER_REJECTED'?'RECONCILIATION_REQUIRED':error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE';
+      reportError(this.errors,error,{correlationId:job.correlationId,jobId:id,code});
       try{await this.repository.fail(job,code,error instanceof ProviderRequestError&&error.definitiveRejection);}
       catch(failure){if(!(failure instanceof DomainError&&failure.code==='CONFLICT'))throw failure;}
       console.log(JSON.stringify({event:'avatar_job_error',jobId:job.id,correlationId:job.correlationId,code}));

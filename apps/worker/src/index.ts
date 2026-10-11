@@ -1,35 +1,39 @@
+import {errorReporterFromEnvironment} from '@contentos/providers/error-reporting';
+import {randomUUID} from 'node:crypto';
 import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
 import { CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { CoverProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { reportError, CoverProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, validateBrandReview, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
 import { SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
+const errors=errorReporterFromEnvironment(env,'worker');
+function operationalError(event:string,code:string,error:unknown){const correlationId=randomUUID();console.error(JSON.stringify({event,code,correlationId}));reportError(errors,error,{correlationId,code});}
 const database = createDatabase(env.DATABASE_URL);
 const repository = new JobRepository(database.db);
 const emailRepository=new EmailRepository(database.db);
-const emailProcessor=new EmailProcessor(emailRepository,env.SMTP_URL&&env.EMAIL_FROM?new SmtpEmailProvider(env.SMTP_URL,env.EMAIL_FROM,env.NODE_ENV==='production'):null,credentialVaultFromEnvironment(env));
+const emailProcessor=new EmailProcessor(emailRepository,env.SMTP_URL&&env.EMAIL_FROM?new SmtpEmailProvider(env.SMTP_URL,env.EMAIL_FROM,env.NODE_ENV==='production'):null,credentialVaultFromEnvironment(env),errors);
 const storage = storageFromEnvironment(env);
 const media = new MediaService(new MediaRepository(database.db),storage);
 const avatarConnection = avatarFromEnvironment(env);
 const avatars = new AvatarService(new AvatarRepository(database.db),avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true');
-const avatarProcessor = new AvatarProcessor(database.db,avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true');
+const avatarProcessor = new AvatarProcessor(database.db,avatarConnection,storage,env.AVATAR_GENERATION_ENABLED==='true',errors);
 const videoConnection=videoFromEnvironment(env);
 const videos=new VideoService(new VideoRepository(database.db),videoConnection,storage,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env));
-const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env));
+const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env),errors);
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const coverRepository=new CoverRepository(database.db);
-const coverProcessor=new CoverProcessor(coverRepository,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null);
+const coverProcessor=new CoverProcessor(coverRepository,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,errors);
 const coverQueue=new Queue('contentos-covers',{connection});
 const coverWorker=new Worker<{tenantId:string;id:string}>('contentos-covers',delivery=>coverProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:1});
-coverWorker.on('error',()=>console.error(JSON.stringify({event:'cover_worker_error',code:'QUEUE_UNAVAILABLE'})));
+coverWorker.on('error',error=>operationalError('cover_worker_error','QUEUE_UNAVAILABLE',error));
 const channelAnalyticsRepository=new ChannelAnalyticsRepository(database.db);
-const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env));
+const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env),errors);
 const notificationRepository=new NotificationRepository(database.db);
 const paymentRepository = new PaymentTaskRepository(database.db);
 const paymentProvider = paymentsFromEnvironment(env);
@@ -37,20 +41,20 @@ const renewalRepository = new RenewalBillingRepository(database.db);
 const renewalMerchant = paymentProvider && env.YOOKASSA_SHOP_ID ? {provider:'yookassa' as const,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'} : null;
 const renewalVaultReady = Boolean(credentialVaultFromEnvironment(env));
 const renewalFiscal = env.PAYMENT_RECEIPT_VAT_CODE && env.PAYMENT_RECEIPT_SUBJECT ? {vatCode:Number(env.PAYMENT_RECEIPT_VAT_CODE),subject:env.PAYMENT_RECEIPT_SUBJECT,mode:'full_payment' as const,...(env.PAYMENT_RECEIPT_TAX_SYSTEM_CODE?{taxSystemCode:Number(env.PAYMENT_RECEIPT_TAX_SYSTEM_CODE)}:{})} : null;
-const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env), env.PAYMENT_RENEWALS_ENABLED==='true');
+const paymentProcessor = new PaymentProcessor(paymentRepository, new BillingRepository(database.db), paymentProvider, paymentProvider && env.YOOKASSA_SHOP_ID ? { provider: paymentProvider.name, merchantId: env.YOOKASSA_SHOP_ID, test: env.YOOKASSA_TEST_MODE === 'true' } : null, credentialVaultFromEnvironment(env), env.PAYMENT_RENEWALS_ENABLED==='true',errors);
 const paymentWebhookRepository=new PaymentWebhookRepository(database.db);
-const paymentWebhookProcessor=new PaymentWebhookProcessor(paymentWebhookRepository,new BillingRepository(database.db),paymentProvider,paymentProvider&&env.YOOKASSA_SHOP_ID?{provider:paymentProvider.name,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'}:null,credentialVaultFromEnvironment(env));
+const paymentWebhookProcessor=new PaymentWebhookProcessor(paymentWebhookRepository,new BillingRepository(database.db),paymentProvider,paymentProvider&&env.YOOKASSA_SHOP_ID?{provider:paymentProvider.name,merchantId:env.YOOKASSA_SHOP_ID,test:env.YOOKASSA_TEST_MODE==='true'}:null,credentialVaultFromEnvironment(env),errors);
 const paymentQueue = new Queue('contentos-payments', { connection });
 const paymentWorker = new Worker<{tenantId:string;id:string}>('contentos-payments', delivery => delivery.name==='webhook'?paymentWebhookProcessor.run(delivery.data.id):paymentProcessor.run(delivery.data.tenantId, delivery.data.id), { connection, concurrency: 2 });
-paymentWorker.on('error', () => console.error(JSON.stringify({ event: 'payment_worker_error', code: 'QUEUE_UNAVAILABLE' })));
+paymentWorker.on('error',error=>operationalError('payment_worker_error','QUEUE_UNAVAILABLE',error));
 const analyticsQueue=new Queue('contentos-analytics',{connection});
 const analyticsWorker=new Worker<{tenantId:string;id:string}>('contentos-analytics',delivery=>channelAnalyticsProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
-analyticsWorker.on('error',()=>console.error(JSON.stringify({event:'analytics_worker_error',code:'QUEUE_UNAVAILABLE'})));
+analyticsWorker.on('error',error=>operationalError('analytics_worker_error','QUEUE_UNAVAILABLE',error));
 const publishingRepository=new PublishingRepository(database.db);
-const publishingProcessor=new PublishingProcessor(publishingRepository,publishingFromEnvironment(env),socialFromEnvironment(env),credentialVaultFromEnvironment(env),storage);
+const publishingProcessor=new PublishingProcessor(publishingRepository,publishingFromEnvironment(env),socialFromEnvironment(env),credentialVaultFromEnvironment(env),storage,errors);
 const publishingQueue=new Queue('contentos-publishing',{connection});
 const publishingWorker=new Worker<{tenantId:string;id:string}>('contentos-publishing',delivery=>publishingProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
-publishingWorker.on('error',()=>console.error(JSON.stringify({event:'publishing_worker_error',code:'QUEUE_UNAVAILABLE'})));
+publishingWorker.on('error',error=>operationalError('publishing_worker_error','QUEUE_UNAVAILABLE',error));
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];
 const orchestrator = new GenerationOrchestrator(routes);
 const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-generation', async delivery => {
@@ -74,13 +78,17 @@ const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-g
     console.log(JSON.stringify({event:'job_completed',jobId:job.id,correlationId:job.correlationId,provider:job.provider,attempt:job.attempt}));
   } catch (error) {
     const code = error instanceof DomainError ? error.code : 'PROVIDER_UNAVAILABLE';
+    reportError(errors,error,{correlationId:job.correlationId,jobId:job.id,code});
     try { await repository.fail(job.tenantId,job.id,leaseToken,code,code === 'PROVIDER_UNAVAILABLE'); }
     catch (failure) { if (!(failure instanceof DomainError && failure.code === 'CONFLICT')) throw failure; }
     console.log(JSON.stringify({event:'job_error',jobId:job.id,correlationId:job.correlationId,code}));
   } finally { clearInterval(heartbeat); }
 },{connection,concurrency:3});
-worker.on('error',()=>console.error(JSON.stringify({event:'worker_error',code:'QUEUE_UNAVAILABLE'})));
-connection.on('error',()=>console.error(JSON.stringify({event:'redis_error',code:'QUEUE_UNAVAILABLE'})));
+worker.on('error',error=>operationalError('worker_error','QUEUE_UNAVAILABLE',error));
+connection.on('error',error=>operationalError('redis_error','QUEUE_UNAVAILABLE',error));
+for(const backgroundWorker of [worker,coverWorker,publishingWorker,analyticsWorker,paymentWorker]){
+  backgroundWorker.on('failed',(delivery,error)=>{const id=delivery?.data?.id;reportError(errors,error,{correlationId:randomUUID(),...(typeof id==='string'?{jobId:id}:{})});});
+}
 let dispatching = false;
 async function dispatch() {
   if (dispatching) return;
@@ -113,7 +121,7 @@ async function dispatch() {
       await queue.add('generate',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await repository.dispatched(job.tenantId,job.id);
     }
-  } catch { console.error(JSON.stringify({event:'dispatch_error',code:'QUEUE_UNAVAILABLE'})); }
+  } catch(error) { operationalError('dispatch_error','QUEUE_UNAVAILABLE',error); }
   finally { dispatching = false; }
 }
 const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=> {
@@ -128,22 +136,22 @@ let cleanupTask: Promise<void> = Promise.resolve();
 const cleanupTimer = setInterval(() => {
   if (cleaning) return;
   cleaning = true;
-  cleanupTask = media.cleanupOne().then(()=>{}).catch(()=>console.error(JSON.stringify({event:'media_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).then(()=>avatars.cleanupOne()).then(()=>{}).catch(()=>console.error(JSON.stringify({event:'avatar_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).then(()=>videos.cleanupOne()).then(()=>{}).catch(()=>console.error(JSON.stringify({event:'video_cleanup_error',code:'PROVIDER_UNAVAILABLE'}))).finally(()=>{cleaning=false;});
+  cleanupTask = media.cleanupOne().then(()=>{}).catch(error=>operationalError('media_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>avatars.cleanupOne()).then(()=>{}).catch(error=>operationalError('avatar_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>videos.cleanupOne()).then(()=>{}).catch(error=>operationalError('video_cleanup_error','PROVIDER_UNAVAILABLE',error)).finally(()=>{cleaning=false;});
 },2000);
 void dispatch();
 let projecting=false;
 let notificationTask:Promise<unknown>=Promise.resolve();
 const notificationTimer=setInterval(()=>{
   if(projecting)return;projecting=true;
-  notificationTask=notificationRepository.projectBatch().catch(()=>console.error(JSON.stringify({event:'notification_projection_error',code:'INTERNAL_ERROR'}))).finally(()=>{projecting=false;});
+  notificationTask=notificationRepository.projectBatch().catch(error=>operationalError('notification_projection_error','INTERNAL_ERROR',error)).finally(()=>{projecting=false;});
 },5000);
 let mailing=false;
 let emailTask:Promise<unknown>=Promise.resolve();
-const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).catch(()=>console.error(JSON.stringify({event:'email_worker_error',code:'INTERNAL_ERROR'}))).finally(()=>{mailing=false;});},2000);
+const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).catch(error=>operationalError('email_worker_error','INTERNAL_ERROR',error)).finally(()=>{mailing=false;});},2000);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await connection.quit(); storage?.close(); await database.close();
+  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

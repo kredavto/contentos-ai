@@ -1,3 +1,4 @@
+import {errorReporter} from './error-reporting';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { DomainError, maxPhotoUploadBytes, mediaUploadSchema } from '@contentos/types';
@@ -66,6 +67,7 @@ export async function apiResponse(action: (correlationId: string) => Promise<Res
     const code = error instanceof DomainError ? error.code : error instanceof ZodError ? 'INVALID_INPUT' : 'INTERNAL_ERROR';
     const status = error instanceof DomainError ? error.status : error instanceof ZodError ? 400 : 500;
     console.error(JSON.stringify({ event: 'api_error', correlationId, code, status, durationMs: Math.round(performance.now() - started) }));
+    if(status>=500){const errors=errorReporter();errors.capture(error instanceof Error?error:new Error(code),{correlationId,code});await errors.flush?.(1000);}
     return Response.json({ error: { code, message: messages[code] ?? 'Не удалось выполнить действие. Попробуйте позже.', correlationId } }, { status, headers: { 'Cache-Control': 'no-store', 'X-Request-Id': correlationId, ...(status === 429 ? { 'Retry-After': '900' } : {}) } });
   }
 }

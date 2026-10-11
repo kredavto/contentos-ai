@@ -52,3 +52,5 @@ Production SMTP onboarding and the compatible Resend configuration are described
 Agency mode is gated by `AGENCY_MODE_ENABLED` (default `false`) and explicit owner activation of the organization's `agency_mode` flag. Enabling the deployment flag grants no cross-tenant access or pooled billing. See [agency portfolio](docs/agency.md).
 
 `PLATFORM_ADMIN_ENABLED` defaults to `false`. Enabling it does not grant anyone operator rights: a trusted host operator must explicitly provision an existing verified account. The console exposes only selected configuration names/statuses, never environment credentials. See [platform administration](docs/platform-admin.md).
+
+Server-only monitoring: ERROR_REPORTING_PROVIDER defaults to disabled. Set sentry plus SENTRY_DSN and optional SENTRY_RELEASE in web and worker secrets to enable metadata-only reports. Invalid DSN is CONFIGURATION_REQUIRED in operator readiness; see [error monitoring](docs/error-monitoring.md). Never expose these as NEXT_PUBLIC settings.
