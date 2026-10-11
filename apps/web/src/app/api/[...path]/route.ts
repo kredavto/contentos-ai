@@ -190,6 +190,10 @@ async function dispatch(request: Request, context: RouteContext) {
           if (request.method === 'GET') return ok(await generation.postHistory(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editPost(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }
         }
+        if (path[3] && path[4] === 'carousels' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await generation.carouselHistory(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editCarousel(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }
+        }
         if (path[3] && path[4] === 'scripts' && path[5] && path.length === 6) {
           if (request.method === 'GET') return ok(await generation.history(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') {

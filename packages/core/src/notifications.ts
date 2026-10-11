@@ -17,7 +17,7 @@ export class NotificationService {
   async list(userId:string,tenantId:string,raw:unknown){
     z.uuid().parse(tenantId);const {cursor}=z.object({cursor:z.uuid().optional()}).strict().parse(raw);
     const result=await this.repository.list(userId,tenantId,cursor);
-    return {...result,items:result.items.map(({jobType,...item})=>{const text=item.type==='CONTENT_APPROVAL_REQUIRED'&&jobType==='GENERATE_POST'?{...copy[item.type],body:'Проверьте пост перед дальнейшей работой.',tab:'posts'}:copy[item.type];return {...item,...text,href:item.brandId?`/brands/${item.brandId}/content?organization=${tenantId}&tab=${text.tab??'jobs'}`:`/billing?organization=${tenantId}`};})};
+    return {...result,items:result.items.map(({jobType,...item})=>{const text=item.type==='CONTENT_APPROVAL_REQUIRED'&&jobType==='GENERATE_CAROUSEL'?{...copy[item.type],body:'Проверьте слайды карусели перед дальнейшей работой.',tab:'carousels'}:item.type==='CONTENT_APPROVAL_REQUIRED'&&jobType==='GENERATE_POST'?{...copy[item.type],body:'Проверьте пост перед дальнейшей работой.',tab:'posts'}:copy[item.type];return {...item,...text,href:item.brandId?`/brands/${item.brandId}/content?organization=${tenantId}&tab=${text.tab??'jobs'}`:`/billing?organization=${tenantId}`};})};
   }
   markRead(userId:string,tenantId:string,raw:unknown){return this.repository.markRead(userId,z.uuid().parse(tenantId),notificationReadSchema.parse(raw).id);}
 }

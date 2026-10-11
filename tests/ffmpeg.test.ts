@@ -52,6 +52,14 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     const pixel=await sharp(late.thumbnail).extract({left:300,top:50,width:1,height:1}).raw().toBuffer();expect(pixel[0]).toBeGreaterThan(220);expect(pixel[1]).toBeLessThan(20);expect(first.thumbnail).not.toEqual(late.thumbnail);
     const regenerated=await processor.renderCover({bytes:first.bytes,design:{...cover,headline:'Новый заголовок',framePercent:0,frameSeconds:.75}},context());expect(regenerated.width).toBe(720);expect(regenerated.height).toBe(1280);expect((await sharp(regenerated.bytes).metadata()).format).toBe('jpeg');expect(regenerated.bytes).not.toEqual(late.thumbnail);const chosenPixel=await sharp(regenerated.bytes).extract({left:300,top:50,width:1,height:1}).raw().toBuffer();expect(chosenPixel[0]).toBeGreaterThan(220);
   });
+  it('clamps cover selection to the video stream when audio extends beyond its last frame',async()=>{
+    const file=join(directory,'audio-tail.mp4');
+    await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=red:s=320x240:r=30:d=1','-f','lavfi','-i','sine=frequency=440:duration=2','-map','0:v','-map','1:a','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac','-movflags','+faststart',file]);
+    const cover=coverDesignSchema.parse({framePercent:95,headline:'Tail',background:'FRAME',font:'SANS',layout:'BOTTOM',textColor:'#ffffff',backgroundColor:'#182338'});
+    const rendered=await processor.renderCover({bytes:await readFile(file),design:cover},context());
+    expect((await sharp(rendered.bytes).metadata()).width).toBe(320);
+    const pixel=await sharp(rendered.bytes).extract({left:0,top:0,width:1,height:1}).raw().toBuffer();expect(pixel[0]).toBeGreaterThan(220);
+  });
   it('extracts bounded mono PCM WAV for transcription',async()=>{const audio=await processor.prepareAudio(bytes,context());expect(Buffer.from(audio.bytes.subarray(0,4)).toString()).toBe('RIFF');expect(Buffer.from(audio.bytes.subarray(8,12)).toString()).toBe('WAVE');expect(audio.bytes.length).toBeLessThan(6000000);expect(audio.durationSeconds).toBeGreaterThan(.8);});
   it('fails closed for missing binaries and honors cancellation',async()=>{
     await expect(new FFmpegVideoProcessor('/nonexistent/ffmpeg','/nonexistent/ffprobe').process({bytes,options:videoProcessingSchema.parse({})},context())).rejects.toThrow('CONFIGURATION_REQUIRED');

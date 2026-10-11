@@ -45,7 +45,7 @@ export class NotificationRepository {
     const jobId=event.action.startsWith('AVATAR_')?event.metadata.jobId:id;
     if(typeof jobId!=='string'||!z.uuid().safeParse(jobId).success)return [];
     const [job]=await tx.select({brandId:jobs.brandId,type:jobs.type}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,jobId)));
-    if(!job||(event.action==='JOB_SUCCEEDED'&&!['GENERATE_SCRIPT','GENERATE_POST'].includes(job.type)))return [];
+    if(!job||(event.action==='JOB_SUCCEEDED'&&!['GENERATE_SCRIPT','GENERATE_POST','GENERATE_CAROUSEL'].includes(job.type)))return [];
     return [{type:event.action==='JOB_SUCCEEDED'?'CONTENT_APPROVAL_REQUIRED':'JOB_FAILED',audience:event.action==='JOB_SUCCEEDED'?'APPROVERS':'EDITORS',resourceId:jobId,brandId:job.brandId}];
   }
   async projectBatch(tenantId?:string){

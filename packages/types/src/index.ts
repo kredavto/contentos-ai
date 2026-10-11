@@ -55,3 +55,5 @@ export * from './brand-review';
 export * from './posts';
 
 export * from './covers';
+
+export * from './carousels';

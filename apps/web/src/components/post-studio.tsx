@@ -4,7 +4,7 @@ import type { GenerationService } from '@contentos/core';
 import { postPublicationText, type PostOutput, type GenerationOptions } from '@contentos/types';
 import { api } from '../lib/api-client';
 type Post=Awaited<ReturnType<GenerationService['overview']>>['posts'][number];
-export type PostPlanDraft={title:string;body:string;hashtags:string[];platform:GenerationOptions['platform']};
+export type PostPlanDraft={type?:'POST'|'CAROUSEL';title:string;body:string;hashtags:string[];platform:GenerationOptions['platform']};
 export function PostStudio({base,posts,canWrite,canApprove,ready,cost,onRefresh,onPlan}:{base:string;posts:Post[];canWrite:boolean;canApprove:boolean;ready:boolean;cost:number|undefined;onRefresh:()=>Promise<void>;onPlan:(post:PostPlanDraft)=>void}){
   const [topic,setTopic]=useState(''),[platform,setPlatform]=useState<GenerationOptions['platform']>('TELEGRAM');
   const [selected,setSelected]=useState<Post|null>(null),[draft,setDraft]=useState<PostOutput|null>(null),[tags,setTags]=useState('');

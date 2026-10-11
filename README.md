@@ -58,3 +58,5 @@ The brand content studio includes a Media tab for private photo uploads, short-l
 Saved scripts can be reviewed asynchronously against their versioned brand context. Reports quote the source text, identify possible rule/tone issues and flag claims for human verification; they never auto-approve or rewrite content. See [review behavior and limits](docs/brand-guardian.md).
 
 The [Post Writer](docs/posts.md) creates versioned plain-text posts and lets an approved post prefill a separately reviewed calendar draft.
+
+The [Carousel Studio](docs/carousels.md) generates editable, versioned slides with approval and browser PNG export. Album publishing is not yet connected.

@@ -72,7 +72,7 @@ This is an implementation inventory, not a claim that the full specification is 
 ## Full objective still outstanding
 
 - Production SMTP/domain setup and live mail verification; OAuth authentication flows.
-- Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery and external evidence-backed fact-checking interfaces. Advisory Brand Guardian and standalone Post Writer are now implemented.
+- Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image generation, trend discovery and external evidence-backed fact-checking interfaces. Advisory Brand Guardian and standalone Post Writer are now implemented.
 - Private voice cloning/import, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
 - Comment inbox/reply safety modes, automatic click-to-lead attribution beyond UTM links and manual funnel reports, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
@@ -88,7 +88,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with image/carousel generation, private voice workflows, additional official social adapters and operator resolution for uncertain submissions. Advisory reviews, Post Writer, normalized analytics/Performance Analyst and billing are implemented as described below; remaining original requirements stay in scope. Research official APIs before implementing new external integrations.
+Continue with image generation, private voice workflows, additional official social adapters and operator resolution for uncertain submissions. Advisory reviews, Post Writer, normalized analytics/Performance Analyst and billing are implemented as described below; remaining original requirements stay in scope. Research official APIs before implementing new external integrations.
 
 ## Local environment notes
 
@@ -523,3 +523,15 @@ Chrome passed both full-chain and CSRF scenarios in 4.7 minutes after adding the
 Final review also bound video approval to the current cover revision. A stale browser now receives CONFLICT instead of approving a cover changed by another editor; approval audits include the selected version/revision. All 13 video integration tests passed with this guard. The final Chrome rerun explicitly checks stale-approval HTTP 409 before approving the current revision.
 
 Final delivery checks passed: workspace/test typecheck, lint and production build (15.8 seconds). Schema generation reports no changes. Final Chrome rerun passed both scenarios in 4.6 minutes, explicitly rejecting stale cover approval with HTTP 409 before successful current-version approval and mock publication. No paid avatar render, real social send or remote infrastructure mutation was made.
+
+## Carousel Studio
+
+Implemented structured 2–10-slide generation, immutable versions, separate writer/approver permissions, optimistic editing, approval reset and durable approval notifications. Design presets render real square/portrait PNGs locally in the browser. Approved captions can prefill a separate CAROUSEL calendar draft. No automatic album publication or persistent slide media is claimed; see [scope and limits](carousels.md).
+
+Focused unit and PostgreSQL integration checks passed (5 tests), covering idempotency, one credit capture, concurrent edits, immutable history, roles, scope, notifications and revoked actors. Final browser/regression verification is in progress.
+
+Chrome passed the complete carousel scenario (1.6 minutes), including real worker/ledger, slide reordering, version approval/history, an actual 1080×1350 PNG download, independent calendar draft, CSRF/role checks and a mobile screenshot with no overflow. PNG and screenshot inspected. Full regression passed 351 tests across 61 files; the subsequent FFmpeg regression file passed all 12 checks. Local development schema has 46 migrations / 90 tables and schema generation reports no drift.
+
+Previous commit cdfbd17 failed Linux CI 38179179726 on a late-frame cover test: the container duration included an audio tail beyond the last video frame, yielding no JPEG. Frame clamping now uses video-stream duration/rate, with a specific longer-audio regression. Local rendering passes; Linux confirmation will come from the next CI run. Seeking semantics were checked against the [official FFmpeg documentation](https://ffmpeg.org/ffmpeg.html#Main-options).
+
+Final workspace/test typecheck, lint and production build passed (build 18.9 seconds). No real provider generation, social posting or remote infrastructure change was performed in this slice.
