@@ -1,6 +1,6 @@
 # CONTENTOS AI
 
-AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script generation, script approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Avatar/voice selection and basic video generation, FFmpeg processing, storage and approval are implemented. Approval-based Telegram publishing, analytics/recommendations, monthly billing and in-app notifications are implemented. Additional providers and richer editing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
+AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script and standalone post generation, content approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Avatar/voice selection and basic video generation, FFmpeg processing, storage and approval are implemented. Approval-based Telegram publishing, analytics/recommendations, monthly billing and in-app notifications are implemented. Additional providers and richer editing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
 
 Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web deployment target: Vercel team digagency. Long-running media/queue work requires a separate worker service. No production deployment yet. [Staging web preview](https://contentos-54l7vlhlu-digagency.vercel.app) is available; account operations require the still-unconfigured production data/worker services.
 
@@ -56,3 +56,5 @@ The brand content studio includes a Media tab for private photo uploads, short-l
 ## Brand Guardian
 
 Saved scripts can be reviewed asynchronously against their versioned brand context. Reports quote the source text, identify possible rule/tone issues and flag claims for human verification; they never auto-approve or rewrite content. See [review behavior and limits](docs/brand-guardian.md).
+
+The [Post Writer](docs/posts.md) creates versioned plain-text posts and lets an approved post prefill a separately reviewed calendar draft.

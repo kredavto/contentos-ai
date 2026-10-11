@@ -45,7 +45,7 @@ export class NotificationRepository {
     const jobId=event.action.startsWith('AVATAR_')?event.metadata.jobId:id;
     if(typeof jobId!=='string'||!z.uuid().safeParse(jobId).success)return [];
     const [job]=await tx.select({brandId:jobs.brandId,type:jobs.type}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,jobId)));
-    if(!job||(event.action==='JOB_SUCCEEDED'&&job.type!=='GENERATE_SCRIPT'))return [];
+    if(!job||(event.action==='JOB_SUCCEEDED'&&!['GENERATE_SCRIPT','GENERATE_POST'].includes(job.type)))return [];
     return [{type:event.action==='JOB_SUCCEEDED'?'CONTENT_APPROVAL_REQUIRED':'JOB_FAILED',audience:event.action==='JOB_SUCCEEDED'?'APPROVERS':'EDITORS',resourceId:jobId,brandId:job.brandId}];
   }
   async projectBatch(tenantId?:string){
@@ -66,7 +66,7 @@ export class NotificationRepository {
       const visible=and(eq(notifications.tenantId,tenantId),eq(notifications.userId,userId),inArray(notifications.audience,audiences(member.role)));
       const [before]=cursor?await tx.select({id:notifications.id,createdAt:notifications.createdAt}).from(notifications).where(and(visible,eq(notifications.id,cursor))):[];
       if(cursor&&!before)throw new DomainError('NOT_FOUND',404);
-      const items=await tx.select({id:notifications.id,type:notifications.type,resourceId:notifications.resourceId,brandId:notifications.brandId,createdAt:notifications.createdAt,readAt:notifications.readAt}).from(notifications).where(and(visible,before?sql`(${notifications.createdAt},${notifications.id}) < (select n.created_at,n.id from notifications n where n.id=${before.id}::uuid)`:undefined)).orderBy(desc(notifications.createdAt),desc(notifications.id)).limit(51);
+      const items=await tx.select({id:notifications.id,type:notifications.type,resourceId:notifications.resourceId,brandId:notifications.brandId,createdAt:notifications.createdAt,readAt:notifications.readAt,jobType:jobs.type}).from(notifications).leftJoin(jobs,and(eq(jobs.tenantId,notifications.tenantId),eq(jobs.id,notifications.resourceId))).where(and(visible,before?sql`(${notifications.createdAt},${notifications.id}) < (select n.created_at,n.id from notifications n where n.id=${before.id}::uuid)`:undefined)).orderBy(desc(notifications.createdAt),desc(notifications.id)).limit(51);
       const [count]=await tx.select({value:sql<number>`count(*)::int`}).from(notifications).where(and(visible,isNull(notifications.readAt)));
       return {items:items.slice(0,50),nextCursor:items.length>50?items[49]!.id:null,unread:count?.value??0};
     });

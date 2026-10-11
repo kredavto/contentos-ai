@@ -72,7 +72,7 @@ This is an implementation inventory, not a claim that the full specification is 
 ## Full objective still outstanding
 
 - Production SMTP/domain setup and live mail verification; OAuth authentication flows.
-- Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery, Brand Guardian and fact-checking interfaces.
+- Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery and external evidence-backed fact-checking interfaces. Advisory Brand Guardian and standalone Post Writer are now implemented.
 - Private voice cloning/import, cover design, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
 - Comment inbox/reply safety modes, automatic click-to-lead attribution beyond UTM links and manual funnel reports, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
@@ -88,7 +88,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with normalized analytics/Performance Analyst, Cover Studio and operator resolution for uncertain submissions. Additional social providers, payments and all other original requirements remain in scope. Research official APIs first.
+Continue with image/carousel generation, Cover Studio, private voice workflows, additional official social adapters and operator resolution for uncertain submissions. Advisory reviews, Post Writer, normalized analytics/Performance Analyst and billing are implemented as described below; remaining original requirements stay in scope. Research official APIs before implementing new external integrations.
 
 ## Local environment notes
 
@@ -486,3 +486,16 @@ Chrome verification passed through the actual worker: request/credit capture, re
 Final workspace/test typecheck and lint passed. Full regression: 332 of 333 tests passed; the password hashing test alone exceeded its 30-second limit during substantial local slowdown. Its isolated rerun (120-second invocation limit, no source/cryptography changes) passed both password tests in 13.44 seconds. The six new review tests passed in the full run, including replacement of a forged caller snapshot with the saved database version. Production build and schema drift check are in progress.
 
 Production build passed; schema generation reports no drift. Development PostgreSQL confirms 43 applied migrations and 85 public tables. Previous seed commit 3087d88 passed remote CI 38089510804. Broader product completion and configured production infrastructure remain outstanding.
+
+
+## Standalone Post Writer and versioned editor
+
+Added GENERATE_POST using the existing metered asynchronous generation pipeline, a strict title/body/hashtags/fact-check-note output and explicit demo fixture. Persistent posts and immutable content_versions distinguish editable text from video scripts. Verified content writers may generate/edit; approvers authorize only a saved current version. Edits append history and clear prior approval; concurrent edits reject stale revisions. Reads and writes retain tenant/brand isolation and worker permission rechecks.
+
+The Posts tab supports generation, editing, history, approval and plain-text copying. An approved post prefills an independent editable calendar draft; no publication is queued until the existing explicit publishing workflow is used. Platform limits are checked at delivery, and other social adapters remain pending. See [post workflow and limits](posts.md).
+
+Migration 0043 adds posts/content_versions and the usage policy; local development/test databases are migrated. Five focused schema/integration tests passed, including concurrent retry/editing, ledger settlement, immutable history, writer/approver roles and account disable fencing. Typecheck and lint passed; browser and full regression are being verified. Previous f285a6a passed full remote CI 38091267130.
+
+Post Writer browser verification passed in Chrome (40.3 seconds): actual worker generation and credit capture, versioned editing/approval, persisted history, separate editable calendar copy without publishing tasks, CSRF/role denial and mobile overflow. Screenshot inspected. Durable approval notifications now route post recipients to the Posts tab; integration coverage checks deduplication. Read-only NL check on October 12 still shows 2 CPUs, 3915 MiB RAM (867 MiB available), 3419 MiB used swap and 7.8 GiB free disk; remote services were not changed.
+
+Final Post Writer validation: all 338 tests across 58 files passed on the first full run, including existing notification/Brand Guardian regressions. Workspace/test typecheck, lint and production build passed. Schema generation reports no drift; local databases now have 44 migrations and 87 tables. No real AI call, social publication or remote infrastructure mutation was performed.

@@ -1,3 +1,4 @@
+import { postSchema, type PostOutput } from './posts';
 import { brandReviewSchema, type BrandReviewOutput } from './brand-review';
 import { z } from 'zod';
 import { brandBrainSchema } from './brand-brain';
@@ -5,7 +6,7 @@ import {strategySchema,platformSchema,funnelSchema,type StrategyOutput} from './
 import {performanceEvidenceSchema,performanceOutputSchema,type PerformanceOutput} from './performance';
 export {strategySchema,platformSchema,funnelSchema,type StrategyOutput} from './strategy';
 const text = z.string().min(1).max(4000);
-export const workflowTypes = ['GENERATE_STRATEGY', 'GENERATE_IDEAS', 'GENERATE_SCRIPT', 'OPTIMIZE_STRATEGY', 'REVIEW_SCRIPT'] as const;
+export const workflowTypes = ['GENERATE_STRATEGY', 'GENERATE_IDEAS', 'GENERATE_SCRIPT', 'OPTIMIZE_STRATEGY', 'REVIEW_SCRIPT', 'GENERATE_POST'] as const;
 export type JobType = WorkflowType | 'CREATE_AVATAR' | 'GENERATE_VIDEO';
 export type WorkflowType = (typeof workflowTypes)[number];
 const score = z.number().min(0).max(100);
@@ -31,8 +32,8 @@ export type GenerationInput = z.infer<typeof generationInputSchema>;
 export type GenerationOptions = z.infer<typeof generationOptionsSchema>;
 export type IdeasOutput = z.infer<typeof ideasSchema>;
 export type ScriptOutput = z.infer<typeof scriptSchema>;
-export type GenerationOutput = StrategyOutput | IdeasOutput | ScriptOutput | PerformanceOutput | BrandReviewOutput;
-export const workflowSchemas = { GENERATE_STRATEGY: strategySchema, GENERATE_IDEAS: ideasSchema, GENERATE_SCRIPT: scriptSchema, OPTIMIZE_STRATEGY:performanceOutputSchema, REVIEW_SCRIPT:brandReviewSchema };
+export type GenerationOutput = StrategyOutput | IdeasOutput | ScriptOutput | PerformanceOutput | BrandReviewOutput | PostOutput;
+export const workflowSchemas = { GENERATE_STRATEGY: strategySchema, GENERATE_IDEAS: ideasSchema, GENERATE_SCRIPT: scriptSchema, OPTIMIZE_STRATEGY:performanceOutputSchema, REVIEW_SCRIPT:brandReviewSchema, GENERATE_POST:postSchema };
 export const jobStates = ['QUEUED', 'RUNNING', 'RETRY', 'SUCCEEDED', 'FAILED', 'WAITING_EXTERNAL', 'WAITING_REVIEW', 'RECONCILIATION'] as const;
 export type JobState = (typeof jobStates)[number];
 export type UsageUnit = 'AI_CREDITS' | 'VIDEO_SECONDS';

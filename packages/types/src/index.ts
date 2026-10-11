@@ -51,3 +51,5 @@ export * from './utm';
 export * from './funnels';
 
 export * from './brand-review';
+
+export * from './posts';

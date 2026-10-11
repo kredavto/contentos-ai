@@ -180,6 +180,10 @@ async function dispatch(request: Request, context: RouteContext) {
         }
         if (path[3] && path[4] === 'content' && path.length === 5 && request.method === 'GET') return ok(await generation.overview(user.userId, tenantId, path[3]));
         if (path[3] && path[4] === 'jobs' && path.length === 5 && request.method === 'POST') return ok(await generation.enqueue(user.userId, tenantId, path[3], await readBody(request), correlationId), 202);
+        if (path[3] && path[4] === 'posts' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await generation.postHistory(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editPost(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }
+        }
         if (path[3] && path[4] === 'scripts' && path[5] && path.length === 6) {
           if (request.method === 'GET') return ok(await generation.history(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') {

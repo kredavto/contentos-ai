@@ -34,3 +34,5 @@ export * from './utm';
 export * from './funnels';
 
 export * from './brand-reviews';
+
+export * from './posts';

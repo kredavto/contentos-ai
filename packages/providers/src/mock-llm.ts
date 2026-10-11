@@ -22,6 +22,7 @@ export class MockLLMProvider implements LLMProvider {
       plan:Array.from({length:30},(_,i)=>({day:i+1,topic:`[ДЕМО] ${topic}: совет ${i+1}`,platform:options.platform,format:'POST',funnelStage:'AWARENESS' as const,cta})),
     };
     else if (request.workflow === 'GENERATE_IDEAS') json = {ideas:Array.from({length:5},(_,i)=>({title:`[ДЕМО] ${topic}: идея ${i+1}`,angle:'Практический разбор',hook:`Что важно знать о ${topic}?`,audienceSegment:brain.audience[0]?.name || 'Аудитория бренда',contentPillar:'Практические советы',funnelStage:'AWARENESS' as const,platform:options.platform,format:'SHORT_VIDEO' as const,scores:{relevance:70,novelty:50,brandFit:75,conversionPotential:40,viralityPotential:30},rationale:'Демонстрационная редакционная оценка, не прогноз.'})),caveat:'ДЕМО: оценки условные, результат не гарантирован.'};
+    else if (request.workflow === 'GENERATE_POST') json = { title: `[ДЕМО] ${topic}`.slice(0,200), body: `[ДЕМО] Как разобраться в ${topic}?\n\nНачните со своей задачи, сравните варианты и проверьте факты перед решением.\n\n${cta}`, hashtags: ['практика'], factCheckNotes: ['Демонстрационный пост, не результат исследования.'] };
     else if (request.workflow === 'REVIEW_SCRIPT') {
       const snapshot = generationInputSchema.parse(request.sourceData).previousScript;
       if (!snapshot) throw new DomainError('INVALID_INPUT');

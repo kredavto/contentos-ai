@@ -8,6 +8,7 @@ export interface CallRecorder {
   failed(call: number, code: string, durationMs: number): Promise<void>;
 }
 const instructions: Record<WorkflowType, string> = {
+  GENERATE_POST: 'Write a standalone social media post for the selected platform and goal, with a useful opening, substantive body and a clear CTA. Title is an internal editorial label and must not be repeated automatically in body. Respect brand rules and tone. Return plain text, hashtags without the hash character and factCheckNotes for claims requiring human verification. Do not fabricate statistics, testimonials, proof, research or guarantees. Fit the target platform conservatively; the publishing adapter will enforce its actual limits.',
   REVIEW_SCRIPT: 'Review the saved script against the supplied brand voice and rules. Return advisory findings only. Quote an exact substring of the selected script field for every finding. BRAND_RULE must cite the zero-based index in brain.rules; TONE and FACT_CHECK must use ruleIndex:null. FACT_CHECK identifies claims for human verification, never declares a claim true or false. Do not invent evidence, citations, sources, brand rules or a compliance score. No findings does not mean approval or factual accuracy. Do not rewrite the script or change brand data.',
   OPTIMIZE_STRATEGY: 'Analyze immutable performance evidence.',
   GENERATE_STRATEGY: 'Build a practical marketing strategy with exactly 30 distinct numbered days. Distinguish assumptions from known brand facts. Do not imply market research was performed.',

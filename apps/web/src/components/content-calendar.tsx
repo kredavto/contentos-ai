@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import type {CalendarService,VideoService} from '@contentos/core';
 import {calendarFieldsSchema,calendarInstant,localMinute,type CalendarFields} from '@contentos/types';
+import type { PostPlanDraft } from './post-studio';
 import {api} from '../lib/api-client';
 type Entry=Awaited<ReturnType<CalendarService['list']>>[number];
 type Video=Awaited<ReturnType<VideoService['overview']>>['projects'][number];
@@ -14,10 +15,10 @@ function daysFor(anchor:string,view:'day'|'week'|'month'){
   const monday=addDays(start,-((weekday+6)%7));return Array.from({length:view==='month'?42:7},(_,index)=>addDays(monday,index));
 }
 const fields=(entry:Entry):CalendarFields=>({title:entry.title,type:entry.type,videoProjectId:entry.videoProjectId,platform:entry.platform as CalendarFields['platform'],localDateTime:localMinute(new Date(entry.plannedAt),entry.timeZone),timeZone:entry.timeZone,disambiguation:calendarInstant(localMinute(new Date(entry.plannedAt),entry.timeZone),entry.timeZone,'EARLIER').getTime()===new Date(entry.plannedAt).getTime()?'EARLIER':'LATER',caption:entry.caption,hashtags:entry.hashtags,privacy:entry.privacy,commentsEnabled:entry.commentsEnabled,publishingMode:entry.publishingMode});
-export function ContentCalendar({base,canWrite}:{base:string;canWrite:boolean}){
+export function ContentCalendar({base,canWrite,initialPost}:{base:string;canWrite:boolean;initialPost?:PostPlanDraft}){
   const [zone,setZone]=useState(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),[anchor,setAnchor]=useState(()=>localMinute(new Date(),Intl.DateTimeFormat().resolvedOptions().timeZone).slice(0,10)),[view,setView]=useState<'day'|'week'|'month'>('month');
   const [entries,setEntries]=useState<Entry[]>([]),[videos,setVideos]=useState<Video[]>([]),[loading,setLoading]=useState(true),[pending,setPending]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[refresh,setRefresh]=useState(0);
-  const [draft,setDraft]=useState<CalendarFields|null>(null),[selected,setSelected]=useState<Entry|null>(null),[tags,setTags]=useState('');
+  const [draft,setDraft]=useState<CalendarFields|null>(()=>initialPost?calendarFieldsSchema.parse({title:initialPost.title,type:'POST',platform:initialPost.platform,caption:initialPost.body,hashtags:initialPost.hashtags,localDateTime:localMinute(new Date(Date.now()+86400000),Intl.DateTimeFormat().resolvedOptions().timeZone),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone}):null),[selected,setSelected]=useState<Entry|null>(null),[tags,setTags]=useState(initialPost?.hashtags.join(' ')??'');
   const intent=useRef<{payload:string;key:string}|null>(null);
   const requestVersion=useRef(0);
   const days=daysFor(anchor,view),first=days[0]!,last=days.at(-1)!;
@@ -32,7 +33,7 @@ export function ContentCalendar({base,canWrite}:{base:string;canWrite:boolean}){
   function create(){setSelected(null);setDraft(calendarFieldsSchema.parse({type:'POST',platform:'TELEGRAM',localDateTime:`${anchor}T12:00`,timeZone:zone,title:'Новый материал'}));setTags('');intent.current=null;}
   function patch(value:Partial<CalendarFields>){setDraft(current=>current?{...current,...value}:null);}
   async function move(id:string,date:string){const entry=entries.find(item=>item.id===id);if(!entry||!canWrite||pending)return;await perform(async()=>{const time=localMinute(new Date(entry.plannedAt),zone).slice(11);await api(`${base}/calendar/${entry.id}`,'PUT',{...fields(entry),timeZone:zone,localDateTime:`${date}T${time}`,disambiguation:undefined,revision:entry.revision});setNotice('Дата в плане изменена');});}
-  return <section className="stack"><div className="section-heading"><h2>Календарь контента</h2>{canWrite?<button className="button primary" disabled={pending} onClick={create}>Добавить в план</button>:null}</div>
+  return <section className="stack">{initialPost?<p className="notice">Создаётся отдельная редактируемая копия поста в календаре. Проверьте дату и текст; для отправки потребуется отдельное одобрение публикации.</p>:null}<div className="section-heading"><h2>Календарь контента</h2>{canWrite?<button className="button primary" disabled={pending} onClick={create}>Добавить в план</button>:null}</div>
     <p className="notice warning">Сохранение даты создаёт план. Для отправки в Telegram одобрите материал во вкладке «Публикации». Перед изменением одобренного плана отмените ожидающую отправку.</p>
     {error?<p className="notice error" role="alert">{error}</p>:null}{notice?<p className="notice success" role="status">{notice}</p>:null}
     <div className="studio-form"><label>Дата календаря<input aria-label="Дата календаря" type="date" value={anchor} onChange={event=>{if(event.target.value)setAnchor(event.target.value);}}/></label><label>Вид календаря<select aria-label="Вид календаря" value={view} onChange={event=>setView(event.target.value as typeof view)}><option value="day">День</option><option value="week">Неделя</option><option value="month">Месяц</option></select></label><label>Часовой пояс календаря<select aria-label="Часовой пояс календаря" value={zone} onChange={event=>setZone(event.target.value)}>{Array.from(new Set([zone,'UTC',...Intl.supportedValuesOf('timeZone')])).map(value=><option key={value}>{value}</option>)}</select></label></div>

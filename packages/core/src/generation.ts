@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { JobRepository, BrandRepository, LedgerRepository, ContentRepository } from '@contentos/db';
-import { DomainError, generationRequestSchema, scriptSchema, type GenerationInput } from '@contentos/types';
+import { DomainError, generationRequestSchema, postEditSchema, scriptSchema, type GenerationInput } from '@contentos/types';
 const id = z.uuid();
 export class GenerationService {
   constructor(private readonly jobs:JobRepository,private readonly brands:BrandRepository,private readonly ledger:LedgerRepository,private readonly content:ContentRepository,private readonly configuration:{provider:string;model:string;ready:boolean;analyticsAI?:boolean}) {}
@@ -17,6 +17,7 @@ export class GenerationService {
     if (!this.configuration.ready) throw new DomainError('CONFIGURATION_REQUIRED',503);
     if (!['GENERATE_SCRIPT', 'REVIEW_SCRIPT'].includes(request.type) && (request.options.scriptId || request.options.ideaId)) throw new DomainError('INVALID_INPUT');
     if (request.options.edit !== 'GENERATE' && !request.options.scriptId) throw new DomainError('INVALID_INPUT');
+    if (request.type === 'GENERATE_POST' && (request.options.revision !== undefined || request.options.edit !== 'GENERATE')) throw new DomainError('INVALID_INPUT');
     if (request.type === 'REVIEW_SCRIPT' && (!request.options.scriptId || !request.options.revision || request.options.ideaId || request.options.edit !== 'GENERATE')) throw new DomainError('INVALID_INPUT');
     const brain = await this.brands.getBrandBrain(userId,tenantId,brandId);
     let previousScript: GenerationInput['previousScript'];
@@ -29,6 +30,8 @@ export class GenerationService {
     const job = await this.jobs.enqueue(userId,tenantId,brandId,request.type,input,request.idempotencyKey,this.configuration.provider,this.configuration.model,correlationId);
     return {id:job.id,status:job.status};
   }
+  postHistory(userId:string,tenantId:string,brandId:string,postId:string) { return this.content.postHistory(userId,id.parse(tenantId),id.parse(brandId),id.parse(postId)); }
+  editPost(userId:string,tenantId:string,brandId:string,postId:string,raw:unknown,correlationId:string) { return this.content.editPost(userId,id.parse(tenantId),id.parse(brandId),id.parse(postId),postEditSchema.parse(raw),correlationId); }
   grantTrial(userId:string,tenantId:string,correlationId:string) { return this.ledger.grantTrial(userId,id.parse(tenantId),correlationId); }
   history(userId:string,tenantId:string,brandId:string,scriptId:string) {return this.content.history(userId,id.parse(tenantId),id.parse(brandId),id.parse(scriptId));}
   editScript(userId:string,tenantId:string,brandId:string,scriptId:string,raw:unknown,correlationId:string) {
