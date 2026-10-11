@@ -73,7 +73,7 @@ This is an implementation inventory, not a claim that the full specification is 
 
 - Production SMTP/domain setup and live mail verification; OAuth authentication flows.
 - Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery and external evidence-backed fact-checking interfaces. Advisory Brand Guardian and standalone Post Writer are now implemented.
-- Private voice cloning/import, cover design, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
+- Private voice cloning/import, standalone Cover Studio editing/versioning (new-video cover design is implemented), B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
 - Comment inbox/reply safety modes, automatic click-to-lead attribution beyond UTM links and manual funnel reports, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
 - Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, Sentry-compatible monitoring and provider readiness views.
@@ -499,3 +499,12 @@ Migration 0043 adds posts/content_versions and the usage policy; local developme
 Post Writer browser verification passed in Chrome (40.3 seconds): actual worker generation and credit capture, versioned editing/approval, persisted history, separate editable calendar copy without publishing tasks, CSRF/role denial and mobile overflow. Screenshot inspected. Durable approval notifications now route post recipients to the Posts tab; integration coverage checks deduplication. Read-only NL check on October 12 still shows 2 CPUs, 3915 MiB RAM (867 MiB available), 3419 MiB used swap and 7.8 GiB free disk; remote services were not changed.
 
 Final Post Writer validation: all 338 tests across 58 files passed on the first full run, including existing notification/Brand Guardian regressions. Workspace/test typecheck, lint and production build passed. Schema generation reports no drift; local databases now have 44 migrations and 87 tables. No real AI call, social publication or remote infrastructure mutation was performed.
+
+
+## Designed covers for new videos
+
+Video creation now accepts an optional saved cover design: relative frame, editable headline, frame/solid background, three font presets, three layouts and explicit colors. FFmpeg renders a full-resolution private JPEG in the existing video worker; old requests preserve the first-frame thumbnail. Request idempotency includes the design, caption confirmation retains it, and video deletion scrubs it. No migration or new provider credential is needed. See [scope and remaining Cover Studio work](video-covers.md).
+
+Focused validation initially passed 24 tests for schema injection rejection, literal Unicode rendering, presets, persistence, permissions, idempotency and cleanup. A changing-frame fixture and browser coverage have been added; final regression checks are in progress. Independent editing/versioning of covers on already generated videos remains outstanding; this slice does not complete the full Cover Studio requirement.
+
+Final cover checks: all 344 tests across 59 files passed with PostgreSQL and real FFmpeg. A subsequent small adjustment bases seeking on measured final duration; all 13 renderer/schema checks passed again. Workspace/test typecheck and lint passed. Chrome passed both full-chain/CSRF scenarios in 4.9 minutes, including actual cover JPEG dimensions, retained design after caption editing, approval, mock publication and cleanup. The mobile screenshot was inspected. Previous Post Writer commit 96d95b9 passed remote CI 38175681324. Production build passed in 16 seconds; no external paid render or NL infrastructure change was performed.

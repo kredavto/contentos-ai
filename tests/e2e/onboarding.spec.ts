@@ -145,6 +145,12 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Одобренный сценарий',{exact:true}).selectOption({label:'Мой проверенный заголовок · v2'});
   await page.getByLabel('Образ аватара',{exact:true}).selectOption({index:1});
   await page.getByLabel('Субтитры',{exact:true}).selectOption('AUTO');
+  await page.getByLabel('Настроить обложку',{exact:true}).check();
+  await page.getByLabel('Заголовок обложки',{exact:true}).fill('Моя новая обложка');
+  await page.getByLabel('Кадр обложки',{exact:true}).selectOption('50');
+  await page.getByLabel('Фон обложки',{exact:true}).selectOption('SOLID');
+  await page.getByLabel('Шрифт обложки',{exact:true}).selectOption('SERIF');
+  await page.getByLabel('Расположение заголовка',{exact:true}).selectOption('TOP');
   await page.getByRole('button',{name:'Создать видео',exact:true}).click();
   const videoCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Мой проверенный заголовок',exact:true})});
   await expect(videoCard.getByRole('button',{name:'Редактировать субтитры',exact:true})).toBeVisible({timeout:90000});
@@ -163,6 +169,10 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await videoCard.getByRole('button',{name:'Смотреть видео',exact:true}).click();
   const video=page.getByLabel('Готовый ролик',{exact:true});
   await expect(video).toBeVisible();
+  await expect(videoCard.getByText('Обложка: Моя новая обложка',{exact:true})).toBeVisible();
+  const poster=await video.getAttribute('poster');expect(poster).toBeTruthy();
+  const posterResponse=await request.get(poster!);expect(posterResponse.ok()).toBe(true);
+  const coverMetadata=await sharp(await posterResponse.body()).metadata();expect(coverMetadata.width).toBe(720);expect(coverMetadata.height).toBe(1280);
   await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).videoWidth)).toBe(720);
   await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).duration)).toBeGreaterThan(.8);
   await videoCard.getByRole('button',{name:'Одобрить видео',exact:true}).click();

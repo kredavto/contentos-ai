@@ -3,6 +3,7 @@ import {mkdtemp,writeFile,readFile,stat,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
 import {z} from 'zod';
+import {coverComposition} from './cover-design';
 import {DomainError,videoProcessingSchema,videoDimensions,type VideoProcessingProvider,type VideoProcessingOptions,type OperationContext} from '@contentos/types';
 const maxBytes=256*1024*1024,maxDuration=180;
 const probeSchema=z.object({format:z.object({duration:z.coerce.number().finite().positive().max(maxDuration)}),streams:z.array(z.object({codec_type:z.string(),codec_name:z.string().optional(),width:z.number().int().positive().max(8192).optional(),height:z.number().int().positive().max(8192).optional(),pix_fmt:z.string().optional()})).max(8)});
@@ -59,10 +60,17 @@ export class FFmpegVideoProcessor implements VideoProcessingProvider {
       await input.onStage?.('BROLL_PROCESSING',{mode:'disabled'});
       const videoFilter=`${scale},setsar=1,fps=30${options.captions.length?',ass=filename=captions.ass':''}`;
       await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-filter_threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-i','source.mp4','-map','0:v:0','-map','0:a:0','-map_metadata','-1','-map_chapters','-1','-vf',videoFilter,'-af','loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000','-c:v','libx264','-preset','fast','-crf','22','-pix_fmt','yuv420p','-threads','2','-c:a','aac','-b:a','128k','-ac','2','-t',String(maxDuration),'-fs',String(maxBytes),'-movflags','+faststart','-f','mp4','final.mp4'],directory,context);
-      await input.onStage?.('COVER_GENERATING',{mode:'first-frame'});
-      await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-protocol_whitelist','file,pipe','-f','mov','-i','final.mp4','-frames:v','1','-vf','scale=480:-2','-q:v','3','-update','1','cover.jpg'],directory,context,30_000);
-      await input.onStage?.('QC',{});
       const final=await this.inspect('final.mp4',directory,context);
+      await input.onStage?.('COVER_GENERATING',{mode:options.cover?'designed-frame':'first-frame'});
+      let coverFilter='scale=480:-2';
+      if(options.cover){
+        const composition=coverComposition(options.cover,width,height);
+        await writeFile(join(directory,'cover.ass'),composition.ass,{mode:0o600});coverFilter=composition.filter;
+      }
+      // Select relative to the completed render, keeping the seek before the last frame.
+      const frameSeconds=options.cover?Math.max(0,Math.min(final.duration*.01*options.cover.framePercent,final.duration-.1)):0;
+      await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-filter_threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-ss',String(frameSeconds),'-f','mov','-i','final.mp4','-map','0:v:0','-an','-map_metadata','-1','-frames:v','1','-vf',coverFilter,'-q:v','3','-update','1','cover.jpg'],directory,context,30_000);
+      await input.onStage?.('QC',{});
       if(final.video.width!==width||final.video.height!==height||final.video.codec_name!=='h264'||final.audio.codec_name!=='aac'||final.video.pix_fmt!=='yuv420p'||Math.abs(final.duration-source.duration)>.3)throw new DomainError('INVALID_MEDIA',422);
       const [videoStat,coverStat]=await Promise.all([stat(join(directory,'final.mp4')),stat(join(directory,'cover.jpg'))]);
       if(!videoStat.size||videoStat.size>=maxBytes||!coverStat.size||coverStat.size>3*1024*1024)throw new DomainError('INVALID_MEDIA',422);

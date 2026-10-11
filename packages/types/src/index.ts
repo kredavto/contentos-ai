@@ -53,3 +53,5 @@ export * from './funnels';
 export * from './brand-review';
 
 export * from './posts';
+
+export * from './covers';

@@ -6,6 +6,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
 import {FFmpegVideoProcessor,captionAss} from '../packages/providers/src/ffmpeg';
+import sharp from 'sharp';
+import {coverDesignSchema} from '../packages/types/src/covers';
 import {videoProcessingSchema} from '../packages/types/src/video-processing';
 const ffmpeg=process.env.FFMPEG_PATH??(process.env.CI?'/usr/bin/ffmpeg':undefined),ffprobe=process.env.FFPROBE_PATH??(process.env.CI?'/usr/bin/ffprobe':undefined);
 const context=()=>({tenantId:randomUUID(),internalId:randomUUID(),idempotencyKey:randomUUID(),correlationId:randomUUID(),signal:new AbortController().signal});
@@ -18,7 +20,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
   const processor=new FFmpegVideoProcessor(ffmpeg??'/missing/ffmpeg',ffprobe??'/missing/ffprobe');let directory='',bytes:Buffer;
   beforeAll(async()=>{
     directory=await mkdtemp(join(tmpdir(),'contentos-fixture-'));
-    await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=green:s=320x240:r=30:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-map','0:v','-map','1:a','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart',join(directory,'fixture.mp4')]);
+    await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=green:s=320x240:r=30:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-map','0:v','-map','1:a','-vf',"drawbox=x=0:y=0:w=iw:h=ih:color=red:t=fill:enable='gte(t,0.5)'",'-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart',join(directory,'fixture.mp4')]);
     bytes=await readFile(join(directory,'fixture.mp4'));
   });
   afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
@@ -33,6 +35,21 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     expect(output.thumbnail).not.toEqual(plain.thumbnail);
     await expect(processor.process({bytes:new TextEncoder().encode('#EXTM3U\nhttp://127.0.0.1/private'),options:videoProcessingSchema.parse({})},context())).rejects.toThrow('INVALID_MEDIA');
     await expect(processor.process({bytes,options:videoProcessingSchema.parse({captions:[{start:0,end:10,text:'Too long'}]})},context())).rejects.toThrow('INVALID_INPUT');
+  });
+  it.each(['TOP','CENTER','BOTTOM'] as const)('renders a full-resolution %s cover with literal Unicode text and brand colors',async layout=>{
+    const cover=coverDesignSchema.parse({framePercent:50,headline:'Проверенный заголовок',background:'SOLID',font:layout==='TOP'?'SANS':layout==='CENTER'?'SERIF':'BOLD',layout,textColor:'#ffffff',backgroundColor:'#182338'});
+    const designed=await processor.process({bytes,options:videoProcessingSchema.parse({resolution:'720p',cover})},context());
+    const metadata=await sharp(designed.thumbnail).metadata();expect(metadata.width).toBe(720);expect(metadata.height).toBe(1280);expect(metadata.format).toBe('jpeg');
+    const pixel=await sharp(designed.thumbnail).extract({left:0,top:0,width:1,height:1}).raw().toBuffer();
+    expect(Math.abs(pixel[0]!-24)).toBeLessThan(6);expect(Math.abs(pixel[1]!-35)).toBeLessThan(6);expect(Math.abs(pixel[2]!-56)).toBeLessThan(6);
+    const stats=await sharp(designed.thumbnail).stats();expect(stats.channels[0]!.max).toBeGreaterThan(220);
+  });
+  it('uses the selected final-video frame while preserving the encoded video',async()=>{
+    const cover=coverDesignSchema.parse({framePercent:0,headline:'Тест',background:'FRAME',font:'BOLD',layout:'BOTTOM',textColor:'#ffffff',backgroundColor:'#182338'});
+    const first=await processor.process({bytes,options:videoProcessingSchema.parse({resolution:'720p',cover})},context());
+    const late=await processor.process({bytes,options:videoProcessingSchema.parse({resolution:'720p',cover:{...cover,framePercent:95}})},context());
+    expect(first.bytes).toEqual(late.bytes);expect(first.thumbnail.length).toBeLessThan(3*1024*1024);
+    const pixel=await sharp(late.thumbnail).extract({left:300,top:50,width:1,height:1}).raw().toBuffer();expect(pixel[0]).toBeGreaterThan(220);expect(pixel[1]).toBeLessThan(20);expect(first.thumbnail).not.toEqual(late.thumbnail);
   });
   it('extracts bounded mono PCM WAV for transcription',async()=>{const audio=await processor.prepareAudio(bytes,context());expect(Buffer.from(audio.bytes.subarray(0,4)).toString()).toBe('RIFF');expect(Buffer.from(audio.bytes.subarray(8,12)).toString()).toBe('WAVE');expect(audio.bytes.length).toBeLessThan(6000000);expect(audio.durationSeconds).toBeGreaterThan(.8);});
   it('fails closed for missing binaries and honors cancellation',async()=>{
