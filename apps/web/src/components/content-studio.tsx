@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ArrowLeft, Sparkles, LoaderCircle, Check, History } from 'lucide-react';
 import type { GenerationService } from '@contentos/core';
 import { generationOptionsSchema, type GenerationOptions, type ScriptOutput, type WorkflowType } from '@contentos/types';
+import {ImageStudio} from './image-studio';
 import {CarouselStudio} from './carousel-studio';
 import { PostStudio, type PostPlanDraft } from './post-studio';
 import { BrandReviewPanel } from './brand-review-panel';
@@ -24,7 +25,7 @@ type Script = Overview['scripts'][number];
 const labels = {GENERATE_CAROUSEL:'Карусель',GENERATE_POST:'Пост',REVIEW_SCRIPT:'Проверка сценария',OPTIMIZE_STRATEGY:'Анализ эффективности',GENERATE_STRATEGY:'Стратегия',GENERATE_IDEAS:'Идеи',GENERATE_SCRIPT:'Сценарий',CREATE_AVATAR:'Аватар',GENERATE_VIDEO:'Видео'};
 const states:Record<string,string> = {WAITING_REVIEW:'Ожидает проверки',QUEUED:'В очереди',RUNNING:'Генерируется',RETRY:'Повторная попытка',SUCCEEDED:'Готово',FAILED:'Ошибка',WAITING_EXTERNAL:'Обрабатывается провайдером',RECONCILIATION:'Требуется проверка'};
 const edits: Array<[GenerationOptions['edit'],string]> = [['GENERATE','Новый сценарий'],['REWRITE','Переписать'],['SHORTEN','Сократить'],['EXPAND','Расширить'],['PROVOCATIVE','Более провокационно'],['EXPERT','Более экспертно'],['EMOTIONAL','Более эмоционально'],['SALES','Больше акцента на продаже'],['CHANGE_CTA','Изменить CTA']];
-const studioTabs=['carousels','posts','strategy','ideas','scripts','jobs','consents','media','avatars','videos','calendar','integrations','publishing','analytics','utm','funnels'] as const;
+const studioTabs=['images','carousels','posts','strategy','ideas','scripts','jobs','consents','media','avatars','videos','calendar','integrations','publishing','analytics','utm','funnels'] as const;
 export function ContentStudio({tenantId,brandId,brandName,role,verified,initialTab}:{tenantId:string;brandId:string;brandName:string;role:string;verified:boolean;initialTab?:string}) {
   const base = `organizations/${tenantId}/brands/${brandId}`;
   const [data,setData] = useState<Overview|null>(null); const [error,setError] = useState(''); const [pending,setPending] = useState(false);
@@ -63,7 +64,8 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified,initialT
     {data&&!data.configuration.ready?<p className="notice warning">CONFIGURATION_REQUIRED: AI-провайдер ещё не настроен.</p>:null}
     {!verified?<p className="notice warning">Подтвердите email для генерации и одобрения контента.</p>:null}
     {error?<p className="notice error" role="alert">{error}</p>:null}
-    <nav className="studio-tabs" aria-label="Контент">{([['carousels','Карусели'],['posts','Посты'],['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео'],['calendar','Календарь'],['integrations','Интеграции'],['publishing','Публикации'],['analytics','Аналитика'],['utm','UTM-ссылки'],['funnels','Воронки']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>{setPostPlan(null);setTab(key);}}>{label}</button>)}</nav>
+    <nav className="studio-tabs" aria-label="Контент">{([['images','Изображения'],['carousels','Карусели'],['posts','Посты'],['strategy','Стратегия'],['ideas','Идеи'],['scripts','Сценарии'],['jobs','Задачи'],['consents','Согласия'],['media','Медиа'],['avatars','Аватары'],['videos','Видео'],['calendar','Календарь'],['integrations','Интеграции'],['publishing','Публикации'],['analytics','Аналитика'],['utm','UTM-ссылки'],['funnels','Воронки']] as const).map(([key,label])=><button className={tab===key?'active':''} aria-pressed={tab===key} key={key} onClick={()=>{setPostPlan(null);setTab(key);}}>{label}</button>)}</nav>
+    {tab==='images'?<ImageStudio key={base} base={base} canWrite={canGenerate} canApprove={canApprove}/>:null}
     {tab==='carousels'&&data?<CarouselStudio base={base} carousels={data.carousels} canWrite={canGenerate} canApprove={canApprove} ready={data.configuration.ready} cost={cost('GENERATE_CAROUSEL')} onRefresh={refresh} onPlan={draft=>{setPostPlan(draft);setTab('calendar');}}/>:null}
     {tab==='posts'&&data?<PostStudio base={base} posts={data.posts} canWrite={canGenerate} canApprove={canApprove} ready={data.configuration.ready} cost={cost('GENERATE_POST')} onRefresh={refresh} onPlan={post=>{setPostPlan(post);setTab('calendar');}}/>:null}
     {tab==='analytics'&&data?<section className="stack"><PerformanceStudio base={base} canManage={canStrategy} overview={data}/><AnalyticsStudio base={base} canManage={canStrategy}/></section>:null}

@@ -12,22 +12,28 @@ export class AdminFinanceRepository {
       await assertPlatformOperator(tx, userId);
       const from = input.from, to = input.to;
       const callScope = sql`a.created_at >= ${from}::timestamptz and a.created_at < ${to}::timestamptz ${input.tenantId ? sql`and a.tenant_id = ${input.tenantId}::uuid` : sql``}`;
-      const group = input.groupBy === 'USER' ? sql`j.requested_by::text` : input.groupBy === 'BRAND' ? sql`j.brand_id::text` : sql`a.provider`;
+      const group = input.groupBy === 'USER' ? sql`a.requested_by::text` : input.groupBy === 'BRAND' ? sql`a.brand_id::text` : sql`a.provider`;
+      const calls=sql`with metered_calls as (
+        select a.created_at,a.tenant_id,a.provider,a.currency,a.provider_cost_microunits,j.requested_by,j.brand_id
+        from ai_calls a join jobs j on j.tenant_id=a.tenant_id and j.id=a.job_id
+        union all select submitted_at,tenant_id,provider,currency,(usage->>'costMicrounits')::numeric,requested_by,brand_id
+        from generated_images where submitted_at is not null
+      )`;
       const revenue = await tx.execute<AdminFinanceReport['revenue'][number]>(sql`
         select o.currency, sum(o.amount_minor)::text as "amountMinor", count(*)::text as payments
         from payment_settlements p join billing_orders o on o.tenant_id=p.tenant_id and o.id=p.order_id
         where p.created_at >= ${from}::timestamptz and p.created_at < ${to}::timestamptz and o.test=${input.paymentMode === 'TEST'}
           ${input.tenantId ? sql`and p.tenant_id=${input.tenantId}::uuid` : sql``}
         group by o.currency order by o.currency`);
-      const costs = await tx.execute<AdminFinanceReport['costs'][number]>(sql`
+      const costs = await tx.execute<AdminFinanceReport['costs'][number]>(sql`${calls}
         select a.currency, coalesce(sum(a.provider_cost_microunits) filter(where a.provider_cost_microunits >= 0),0)::text as "knownMicrounits",
           count(*)::text as calls, count(*) filter(where a.provider_cost_microunits is null or a.provider_cost_microunits < 0)::text as "unknownCalls"
-        from ai_calls a where ${callScope} group by a.currency order by a.currency`);
-      const groups = await tx.execute<AdminFinanceReport['groups'][number]>(sql`
+        from metered_calls a where ${callScope} group by a.currency order by a.currency`);
+      const groups = await tx.execute<AdminFinanceReport['groups'][number]>(sql`${calls}
         select ${group} as "entityId", a.currency,
           coalesce(sum(a.provider_cost_microunits) filter(where a.provider_cost_microunits >= 0),0)::text as "knownMicrounits",
           count(*)::text as calls, count(*) filter(where a.provider_cost_microunits is null or a.provider_cost_microunits < 0)::text as "unknownCalls"
-        from ai_calls a join jobs j on j.tenant_id=a.tenant_id and j.id=a.job_id where ${callScope}
+        from metered_calls a where ${callScope}
         group by ${group},a.currency order by count(*) desc,${group},a.currency limit 51`);
       const captured = await tx.execute<AdminFinanceReport['captured'][number]>(sql`
         select unit,sum(amount)::text as amount from usage_ledger
@@ -35,7 +41,7 @@ export class AdminFinanceRepository {
           ${input.tenantId ? sql`and tenant_id=${input.tenantId}::uuid` : sql``}
         group by unit order by unit`);
       const [coverage] = await tx.execute<{ jobs: string; videos: string }>(sql`
-        select count(*)::text as jobs,count(*) filter(where j.type='GENERATE_VIDEO')::text as videos
+        select (count(*)+(select count(*) from generated_images i where i.created_at >= ${from}::timestamptz and i.created_at < ${to}::timestamptz ${input.tenantId?sql`and i.tenant_id=${input.tenantId}::uuid`:sql``} and (i.usage->>'costMicrounits') is null))::text as jobs,count(*) filter(where j.type='GENERATE_VIDEO')::text as videos
         from jobs j where j.created_at >= ${from}::timestamptz and j.created_at < ${to}::timestamptz
           ${input.tenantId ? sql`and j.tenant_id=${input.tenantId}::uuid` : sql``}
           and not exists(select 1 from ai_calls a where a.tenant_id=j.tenant_id and a.job_id=j.id and a.provider_cost_microunits >= 0)`);

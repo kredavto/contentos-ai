@@ -2,7 +2,7 @@
 
 Contracts: LLMProvider, ImageProvider, AvatarProvider, VoiceProvider, VideoProvider, CaptionProvider, TrendProvider, PublishingProvider, AnalyticsProvider, PaymentProvider, StorageProvider; additionally EmailProvider and ErrorReporter.
 
-ImageProvider now has a real OpenAI Images implementation plus a production-forbidden local fixture. It preserves unknown metering, bounds output and marks uncertain mutations for reconciliation without retry. The adapter is not yet connected to application jobs/UI. See [image integration status and required lifecycle](docs/image-generation.md).
+ImageProvider now has a real OpenAI Images implementation plus a production-forbidden local fixture. It preserves unknown metering, bounds output and marks uncertain mutations for reconciliation without retry. Image Studio now calls it only through a fenced durable worker; credit settlement and private-file lifecycle remain in the domain layer. See [image integration status and required lifecycle](docs/image-generation.md).
 
 All return validated normalized results and provider/external_id/internal_id/metadata mappings. Calls carry correlation ID, operation idempotency key and abort signal. Adapters own endpoint/API versions, credential access, official schemas, timeouts, retries and safe request metrics. UI only sees internal IDs and safe capability/status descriptions.
 

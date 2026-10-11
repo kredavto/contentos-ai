@@ -16,3 +16,8 @@ export interface ImageUsage {
   costMicrounits:number|null;
   currency:string;
 }
+export const imageRequestSchema=z.object({
+  name:z.string().trim().min(1).max(160).refine(value=>!/[\p{Cc}\p{Cf}]/u.test(value)),
+  input:imageGenerationSchema,idempotencyKey:z.uuid(),
+}).strict();
+export type ImageRequest=z.infer<typeof imageRequestSchema>;

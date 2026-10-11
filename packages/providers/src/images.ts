@@ -32,7 +32,8 @@ async function readResponse(response:Response,signal:AbortSignal){
 /** OpenAI Images API. Deliberately no SDK/network retries or idempotency guarantee. */
 export class OpenAIImageProvider implements ImageProvider{
   readonly name='openai';
-  private readonly model:z.infer<typeof openAIImageModelSchema>;
+  readonly currency='USD';
+  readonly model:z.infer<typeof openAIImageModelSchema>;
   constructor(private readonly apiKey:string,model:string,private readonly transport:typeof fetch=fetch){
     const parsed=openAIImageModelSchema.safeParse(model);
     if(!apiKey.trim()||!parsed.success)throw new DomainError('CONFIGURATION_REQUIRED',503);
@@ -81,13 +82,16 @@ export class OpenAIImageProvider implements ImageProvider{
 /** Offline raster fixture, visibly identified as demo; production cannot enable it. */
 export class MockImageProvider implements ImageProvider{
   readonly name='mock-image';
+  readonly currency='USD';
+  readonly model='offline-image-fixture';
   constructor(environment:string,private readonly fixture:string){if(!['development','test'].includes(environment)||!isAbsolute(fixture))throw new DomainError('CONFIGURATION_REQUIRED',503);}
   async generate(raw:Parameters<ImageProvider['generate']>[0],context:OperationContext){
     if(!imageGenerationSchema.safeParse(raw).success)throw new ProviderRequestError('INVALID_INPUT',400,true);
     context.signal.throwIfAborted();
     try{
-      const info=await stat(this.fixture);if(!info.isFile()||info.size>maxGeneratedImageBytes)throw new DomainError('INVALID_MEDIA',422);
-      const bytes=await readFile(this.fixture,{signal:context.signal});
+      const fixture=this.fixture.replace('{size}',`${raw.width}x${raw.height}`);
+      const info=await stat(fixture);if(!info.isFile()||info.size>maxGeneratedImageBytes)throw new DomainError('INVALID_MEDIA',422);
+      const bytes=await readFile(fixture,{signal:context.signal});
       if(bytes.length>maxGeneratedImageBytes)throw new DomainError('INVALID_MEDIA',422);
       return {reference:{provider:this.name,internalId:context.internalId,externalId:`mock-image:${context.internalId}`,metadata:{demo:true}},bytes,mimeType:'image/png',usage:{model:'offline-image-fixture',inputUnits:0,outputUnits:0,costMicrounits:0,currency:'USD'}};
     }catch(error){if(error instanceof DomainError)throw error;throw new DomainError('CONFIGURATION_REQUIRED',503);}

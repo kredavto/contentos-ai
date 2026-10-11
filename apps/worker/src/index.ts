@@ -4,11 +4,11 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { reportError, CoverProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { ImageRepository, CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { ImageProcessor, reportError, CoverProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, validateBrandReview, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
-import { SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
+import { SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, imageFromEnvironment, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
 const env = parseServerEnvironment(process.env);
 const errors=errorReporterFromEnvironment(env,'worker');
@@ -27,6 +27,11 @@ const videos=new VideoService(new VideoRepository(database.db),videoConnection,s
 const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,env.VIDEO_GENERATION_ENABLED==='true',captionsFromEnvironment(env),errors);
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
+const imageRepository=new ImageRepository(database.db);
+const imageProcessor=new ImageProcessor(imageRepository,imageFromEnvironment(env),storage,errors);
+const imageQueue=new Queue('contentos-images',{connection});
+const imageWorker=new Worker<{tenantId:string;id:string}>('contentos-images',delivery=>imageProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:1});
+imageWorker.on('error',error=>operationalError('image_worker_error','QUEUE_UNAVAILABLE',error));
 const coverRepository=new CoverRepository(database.db);
 const coverProcessor=new CoverProcessor(coverRepository,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,errors);
 const coverQueue=new Queue('contentos-covers',{connection});
@@ -86,7 +91,7 @@ const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-g
 },{connection,concurrency:3});
 worker.on('error',error=>operationalError('worker_error','QUEUE_UNAVAILABLE',error));
 connection.on('error',error=>operationalError('redis_error','QUEUE_UNAVAILABLE',error));
-for(const backgroundWorker of [worker,coverWorker,publishingWorker,analyticsWorker,paymentWorker]){
+for(const backgroundWorker of [worker,imageWorker,coverWorker,publishingWorker,analyticsWorker,paymentWorker]){
   backgroundWorker.on('failed',(delivery,error)=>{const id=delivery?.data?.id;reportError(errors,error,{correlationId:randomUUID(),...(typeof id==='string'?{jobId:id}:{})});});
 }
 let dispatching = false;
@@ -113,6 +118,10 @@ async function dispatch() {
       await publishingQueue.add('publish',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await publishingRepository.dispatched(job.tenantId,job.id);
     }
+    for(const job of await imageRepository.due()){
+      await imageQueue.add('GENERATE_IMAGE',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
+      await imageRepository.dispatched(job.tenantId,job.id);
+    }
     for(const job of await coverRepository.due()){
       await coverQueue.add('GENERATE_COVER',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await coverRepository.dispatched(job.tenantId,job.id);
@@ -126,7 +135,7 @@ async function dispatch() {
 }
 const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=> {
   if (request.url !== '/health') {response.writeHead(404);response.end();return;}
-  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning() && paymentWorker.isRunning() && coverWorker.isRunning();
+  const ready = connection.status === 'ready' && worker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning() && paymentWorker.isRunning() && coverWorker.isRunning() && imageWorker.isRunning();
   response.writeHead(ready?200:503, {'Content-Type':'application/json'});response.end(JSON.stringify({status:ready?'ok':'unavailable'}));
 }) : null;
 if (health) health.listen(Number(process.env.WORKER_HEALTH_PORT),'127.0.0.1');
@@ -136,7 +145,7 @@ let cleanupTask: Promise<void> = Promise.resolve();
 const cleanupTimer = setInterval(() => {
   if (cleaning) return;
   cleaning = true;
-  cleanupTask = media.cleanupOne().then(()=>{}).catch(error=>operationalError('media_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>avatars.cleanupOne()).then(()=>{}).catch(error=>operationalError('avatar_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>videos.cleanupOne()).then(()=>{}).catch(error=>operationalError('video_cleanup_error','PROVIDER_UNAVAILABLE',error)).finally(()=>{cleaning=false;});
+  cleanupTask = media.cleanupOne().then(()=>{}).catch(error=>operationalError('media_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>avatars.cleanupOne()).then(()=>{}).catch(error=>operationalError('avatar_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>videos.cleanupOne()).then(()=>{}).catch(error=>operationalError('video_cleanup_error','PROVIDER_UNAVAILABLE',error)).then(()=>imageProcessor.cleanupOne()).then(()=>{}).catch(error=>operationalError('image_cleanup_error','PROVIDER_UNAVAILABLE',error)).finally(()=>{cleaning=false;});
 },2000);
 void dispatch();
 let projecting=false;
@@ -151,7 +160,7 @@ const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=email
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
+  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await imageWorker.close(); await cleanupTask; await queue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await imageQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

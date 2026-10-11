@@ -2,12 +2,12 @@ import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { DomainError, type NotificationType, type NotificationAudience, type Role } from '@contentos/types';
 import type { Database } from '../index';
-import { notifications, notificationReceipts, organizationMembers, users, auditLogs, videoProjects, jobs, publishingJobs, socialConnections, channelAnalyticsJobs, paymentSettlements, paymentTasks, subscriptionTerms } from '../schema';
+import { generatedImages, notifications, notificationReceipts, organizationMembers, users, auditLogs, videoProjects, jobs, publishingJobs, socialConnections, channelAnalyticsJobs, paymentSettlements, paymentTasks, subscriptionTerms } from '../schema';
 import { assertMembership, type Transaction } from './ledger';
 const roles:Record<NotificationAudience,Role[]>={ALL:['OWNER','ADMIN','MANAGER','EDITOR','CLIENT_APPROVER','VIEWER'],OWNERS:['OWNER'],EDITORS:['OWNER','ADMIN','MANAGER','EDITOR'],APPROVERS:['OWNER','ADMIN','MANAGER','CLIENT_APPROVER'],MANAGERS:['OWNER','ADMIN','MANAGER']};
 const audiences=(role:Role)=>(Object.keys(roles) as NotificationAudience[]).filter(key=>roles[key].includes(role));
 type Notice={type:NotificationType;audience:NotificationAudience;resourceId:string;brandId?:string};
-const actions=['VIDEO_READY','VIDEO_FAILED','VIDEO_RECONCILIATION_REQUIRED','AVATAR_FAILED','AVATAR_RECONCILIATION_REQUIRED','JOB_FAILED','JOB_SUCCEEDED','PUBLICATION_PUBLISHED','PUBLICATION_FAILED','PUBLICATION_RECONCILIATION','PAYMENT_SETTLED','SOCIAL_CHECK_FAILED','CHANNEL_ANALYTICS_FAILED'];
+const actions=['IMAGE_READY','IMAGE_FAILED','IMAGE_RECONCILIATION','VIDEO_READY','VIDEO_FAILED','VIDEO_RECONCILIATION_REQUIRED','AVATAR_FAILED','AVATAR_RECONCILIATION_REQUIRED','JOB_FAILED','JOB_SUCCEEDED','PUBLICATION_PUBLISHED','PUBLICATION_FAILED','PUBLICATION_RECONCILIATION','PAYMENT_SETTLED','SOCIAL_CHECK_FAILED','CHANNEL_ANALYTICS_FAILED'];
 /** Internal projection consumes durable domain facts; HTTP cannot create notifications. */
 export class NotificationRepository {
   constructor(private readonly db:Database,private readonly now:()=>Date=()=>new Date()){}
@@ -23,6 +23,11 @@ export class NotificationRepository {
     if(event.action==='PAYMENT_SETTLED'){
       const [paid]=await tx.select({orderId:paymentSettlements.orderId}).from(paymentSettlements).where(and(eq(paymentSettlements.tenantId,tenantId),eq(paymentSettlements.id,id)));
       return paid?[{type:'PAYMENT_SUCCESS',audience:'OWNERS',resourceId:paid.orderId}]:[];
+    }
+    if(event.action.startsWith('IMAGE_')){
+      const [image]=await tx.select({brandId:generatedImages.brandId,status:generatedImages.status,approvedAt:generatedImages.approvedAt}).from(generatedImages).where(and(eq(generatedImages.tenantId,tenantId),eq(generatedImages.id,id)));
+      if(!image||['DELETE_PENDING','DELETED'].includes(image.status)||(event.action==='IMAGE_READY'&&(image.status!=='READY'||image.approvedAt)))return [];
+      return [{type:event.action==='IMAGE_READY'?'CONTENT_APPROVAL_REQUIRED':'JOB_FAILED',audience:event.action==='IMAGE_READY'?'APPROVERS':'EDITORS',resourceId:id,brandId:image.brandId}];
     }
     if(event.action.startsWith('VIDEO_')){
       const [video]=await tx.select({brandId:videoProjects.brandId}).from(videoProjects).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.id,id)));
@@ -66,7 +71,7 @@ export class NotificationRepository {
       const visible=and(eq(notifications.tenantId,tenantId),eq(notifications.userId,userId),inArray(notifications.audience,audiences(member.role)));
       const [before]=cursor?await tx.select({id:notifications.id,createdAt:notifications.createdAt}).from(notifications).where(and(visible,eq(notifications.id,cursor))):[];
       if(cursor&&!before)throw new DomainError('NOT_FOUND',404);
-      const items=await tx.select({id:notifications.id,type:notifications.type,resourceId:notifications.resourceId,brandId:notifications.brandId,createdAt:notifications.createdAt,readAt:notifications.readAt,jobType:jobs.type}).from(notifications).leftJoin(jobs,and(eq(jobs.tenantId,notifications.tenantId),eq(jobs.id,notifications.resourceId))).where(and(visible,before?sql`(${notifications.createdAt},${notifications.id}) < (select n.created_at,n.id from notifications n where n.id=${before.id}::uuid)`:undefined)).orderBy(desc(notifications.createdAt),desc(notifications.id)).limit(51);
+      const items=await tx.select({id:notifications.id,type:notifications.type,resourceId:notifications.resourceId,brandId:notifications.brandId,createdAt:notifications.createdAt,readAt:notifications.readAt,jobType:jobs.type,imageId:generatedImages.id}).from(notifications).leftJoin(jobs,and(eq(jobs.tenantId,notifications.tenantId),eq(jobs.id,notifications.resourceId))).leftJoin(generatedImages,and(eq(generatedImages.tenantId,notifications.tenantId),eq(generatedImages.id,notifications.resourceId))).where(and(visible,before?sql`(${notifications.createdAt},${notifications.id}) < (select n.created_at,n.id from notifications n where n.id=${before.id}::uuid)`:undefined)).orderBy(desc(notifications.createdAt),desc(notifications.id)).limit(51);
       const [count]=await tx.select({value:sql<number>`count(*)::int`}).from(notifications).where(and(visible,isNull(notifications.readAt)));
       return {items:items.slice(0,50),nextCursor:items.length>50?items[49]!.id:null,unread:count?.value??0};
     });

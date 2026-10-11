@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -124,6 +124,13 @@ async function dispatch(request: Request, context: RouteContext) {
             if(request.method==='GET')return ok(await funnels.measurements(user.userId,tenantId,path[3],path[5],query));
             if(request.method==='POST')return ok(await funnels.measure(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),201);
           }
+        }
+        if(path[3]&&path[4]==='images'){
+          if(path.length===5&&request.method==='GET')return ok(await images.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST')return ok(await images.request(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
+          if(path[5]&&path.length===7&&path[6]==='delete'&&request.method==='POST')return ok(await images.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+          if(path[5]&&path.length===7&&path[6]==='approve'&&request.method==='POST'){await images.approve(user.userId,tenantId,path[3],path[5],correlationId);return ok({approved:true});}
+          if(path[5]&&path.length===7&&['preview','download'].includes(path[6]!)&&request.method==='GET')return ok(await images.download(user.userId,tenantId,path[3],path[5],path[6]==='download',correlationId));
         }
         if(path[3]&&path[4]==='utm'){
           if(path.length===5&&request.method==='GET')return ok(await utm.list(user.userId,tenantId,path[3],Object.fromEntries(new URL(request.url).searchParams)));

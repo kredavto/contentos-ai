@@ -62,3 +62,5 @@ The [Post Writer](docs/posts.md) creates versioned plain-text posts and lets an 
 The [Carousel Studio](docs/carousels.md) generates editable, versioned slides with approval and browser PNG export. Album publishing is not yet connected.
 
 Optional [server error monitoring](docs/error-monitoring.md) sends only safe operational metadata and is disabled until configured.
+
+The [Image Studio](docs/image-generation.md) queues metered image generation, stores private normalized JPEGs and supports review, approval and durable deletion. OpenAI/S3 configuration is required for real output; local fixtures are clearly marked as demo.

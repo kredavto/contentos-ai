@@ -24,6 +24,8 @@ export interface LLMProvider {
 }
 export interface ImageProvider {
   readonly name:string;
+  readonly model:string;
+  readonly currency:string;
   /** A synchronous remote mutation: callers must persist submission before calling,
    * and must not replay an uncertain outcome. No remote idempotency is assumed. */
   generate(input: import('./images').ImageGenerationInput, context: OperationContext): Promise<{ reference: ProviderReference|null; bytes: Uint8Array; mimeType: string; usage: import('./images').ImageUsage }>;
