@@ -9,7 +9,7 @@ const objects = new Map<string,{bytes:Buffer;mime:string}>();
 const server = createServer(async(request,response)=>{
   const path = new URL(request.url ?? '/', 'http://127.0.0.1:8027').pathname;
   if (path === '/health') {response.end('ok');return;}
-  if (!/^\/contentos-e2e\/[a-f0-9-]+\/(?:[a-f0-9-]+\/photos\/[a-f0-9-]+\.jpg|videos\/[a-f0-9-]+\/(?:original\.mp4|final\.mp4|cover\.jpg))$/.test(path)) {response.writeHead(404);response.end();return;}
+  if (!/^\/contentos-e2e\/[a-f0-9-]+\/(?:[a-f0-9-]+\/photos\/[a-f0-9-]+\.jpg|videos\/[a-f0-9-]+\/(?:original\.mp4|final\.mp4|cover\.jpg|covers\/[a-f0-9-]+\.jpg))$/.test(path)) {response.writeHead(404);response.end();return;}
   try {
     if (request.method === 'PUT') {
       const chunks:Buffer[]=[];let size=0;

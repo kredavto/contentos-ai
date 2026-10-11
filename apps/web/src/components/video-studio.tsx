@@ -3,6 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {AvatarService,GenerationService,VideoService} from '@contentos/core';
 import {videoReservationSeconds,type VideoRequest,type VideoStage} from '@contentos/types';
 import {api} from '../lib/api-client';
+import {CoverStudio} from './cover-studio';
 import {CaptionEditor} from './caption-editor';
 import {CoverControls,initialCoverDesign} from './cover-controls';
 type Overview=Awaited<ReturnType<VideoService['overview']>>;
@@ -19,6 +20,7 @@ export function VideoStudio({base,scripts,canWrite,canApprove,canManage,maximum,
   const [captionMode,setCaptionMode]=useState<VideoRequest['captionMode']>('NONE');
   const [captionReview,setCaptionReview]=useState<{id:string;data:Awaited<ReturnType<VideoService['captionReview']>>}|null>(null);
   const [customCover,setCustomCover]=useState(false),[cover,setCover]=useState(initialCoverDesign);
+  const [coverProject,setCoverProject]=useState<string|null>(null);
   const [deleting,setDeleting]=useState<string|null>(null);
   const intent=useRef<{payload:string;key:string}|null>(null);
   useEffect(()=>{let active=true;let timer:ReturnType<typeof setTimeout>;async function poll(){try{
@@ -61,7 +63,7 @@ export function VideoStudio({base,scripts,canWrite,canApprove,canManage,maximum,
       {project.jobStatus==='RECONCILIATION'?<p className="notice warning">Результат требует проверки. Резерв сохранён; не создавайте дубликат этой задачи.</p>:null}
       {project.jobStatus==='RETRY'?<p className="muted">Повторная попытка обработки…</p>:null}
       {project.stage==='FAILED'?<p className="notice error">{project.errorCode}. Зарезервированные видеосекунды возвращены.</p>:null}
-      {project.options.cover?<p className="muted">Обложка: {project.options.cover.headline}</p>:null}
+      {project.coverVersion>0?<p className="muted">Обложка: версия {project.coverVersion}</p>:project.options.cover?<p className="muted">Обложка: {project.options.cover.headline}</p>:null}
       {preview?.id===project.id&&project.lifecycle==='ACTIVE'?<video className="video-preview" aria-label="Готовый ролик" controls preload="metadata" src={preview.videoUrl} poster={preview.coverUrl}/>:null}
       {project.lifecycle==='DELETE_PENDING'?<p className="notice warning">{project.deleteError==='RECONCILIATION_REQUIRED'?'Исход запроса неизвестен. Доступ закрыт; удаление у провайдера требует проверки.':'Доступ закрыт. Файлы удаляются у провайдера и в хранилище; при ошибке операция повторится.'}</p>:null}
       {captionReview?.id===project.id&&project.lifecycle==='ACTIVE'?<CaptionEditor key={project.id} base={`${base}/videos/${project.id}/captions`} initial={captionReview.data} onDone={()=>{setCaptionReview(null);void perform(async()=>{});}}/>:null}
@@ -69,13 +71,15 @@ export function VideoStudio({base,scripts,canWrite,canApprove,canManage,maximum,
         {project.jobStatus==='WAITING_REVIEW'&&project.lifecycle==='ACTIVE'&&canWrite?<button className="button primary" disabled={pending} onClick={()=>void perform(async()=>setCaptionReview({id:project.id,data:await api(`${base}/videos/${project.id}/captions`)}))}>Редактировать субтитры</button>:null}
         {project.jobStatus==='RECONCILIATION'&&project.captionMode==='AUTO'&&project.captionMutationState==='UNKNOWN'&&project.lifecycle==='ACTIVE'&&canWrite?<button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/videos/${project.id}/manual-captions`,'POST');setNotice('Резерв за распознавание возвращён. Добавьте субтитры вручную.');})}>Продолжить с ручными субтитрами</button>:null}
 
+        {project.stage==='READY'&&project.lifecycle==='ACTIVE'?<button className="button secondary" disabled={pending} onClick={()=>setCoverProject(coverProject===project.id?null:project.id)}>{coverProject===project.id?'Закрыть редактор обложек':'Редактировать обложку'}</button>:null}
         {preview?.id===project.id&&project.lifecycle==='ACTIVE'?<a className="button secondary" href={preview.coverUrl} target="_blank" rel="noreferrer">Открыть обложку</a>:null}
-        {project.stage==='READY'&&project.lifecycle==='ACTIVE'?<><button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>setPreview({id:project.id,...await api<Awaited<ReturnType<VideoService['download']>>>(`${base}/videos/${project.id}/download`)}))}>Смотреть видео</button><button className="button primary" disabled={pending||!canApprove||!!project.approvedAt} onClick={()=>void perform(async()=>{await api(`${base}/videos/${project.id}/approve`,'POST');setNotice('Видео одобрено');})}>Одобрить видео</button></>:null}
+        {project.stage==='READY'&&project.lifecycle==='ACTIVE'?<><button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>setPreview({id:project.id,...await api<Awaited<ReturnType<VideoService['download']>>>(`${base}/videos/${project.id}/download`)}))}>Смотреть видео</button><button className="button primary" disabled={pending||!canApprove||!!project.approvedAt} onClick={()=>void perform(async()=>{await api(`${base}/videos/${project.id}/approve`,'POST',{coverRevision:project.coverRevision});setNotice('Видео одобрено');})}>Одобрить видео</button></>:null}
         {project.jobStatus==='RECONCILIATION'&&project.lifecycle==='ACTIVE'&&canManage&&!(project.captionMode==='AUTO'&&project.captionMutationState==='UNKNOWN')?<button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/videos/${project.id}/resume`,'POST');setNotice('Проверка возобновлена');})}>Повторить проверку</button>:null}
         {project.lifecycle==='ACTIVE'&&canWrite?<button className="text-button" disabled={pending} onClick={()=>setDeleting(project.id)}>Удалить видео</button>:null}
         <button className="text-button" disabled={pending} onClick={()=>void perform(async()=>setHistory({id:project.id,items:await api(`${base}/videos/${project.id}/history`)}))}>История обработки</button>
       </div>
       {deleting===project.id&&project.lifecycle==='ACTIVE'?<div className="notice warning"><p>Удалить исходник, готовое видео и обложку? Это действие необратимо. Секунды за уже готовое видео не возвращаются.</p><div className="studio-actions"><button className="button secondary" disabled={pending} onClick={()=>setDeleting(null)}>Отмена</button><button className="button primary" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/videos/${project.id}/delete`,'POST');setDeleting(null);if(preview?.id===project.id)setPreview(null);setNotice('Видео поставлено на удаление');})}>Подтвердить удаление видео</button></div></div>:null}
+      {coverProject===project.id&&project.stage==='READY'&&project.lifecycle==='ACTIVE'?<CoverStudio key={project.id} base={`${base}/videos/${project.id}`} canWrite={canWrite} onSelected={()=>{setPreview(null);void perform(async()=>{});}}/>:null}
       {history?.id===project.id?<ol>{history.items.map(item=><li key={item.revision}>{stages[item.to]}{item.details.mode==='disabled'?' — отключено':''}</li>)}</ol>:null}
     </article>)}</div>
   </section>;

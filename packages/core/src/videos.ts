@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {VideoRepository,JobRepository,AICallRepository,type Database} from '@contentos/db';
-import {DomainError,ProviderRequestError,videoRequestSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
+import {DomainError,ProviderRequestError,videoRequestSchema,videoApprovalSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
 import {avatarConsentPolicies} from './avatars';
 export type VideoConnection={provider:VideoProvider;name:string}|null;
 export type CaptionConnection={provider:CaptionProvider;name:string;model:string}|null;
@@ -28,7 +28,7 @@ export class VideoService {
   editCaptions(userId:string,tenantId:string,brandId:string,id:string,input:unknown,correlationId:string){return this.repository.editCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),captionEditSchema.parse(input),correlationId);}
   confirmCaptions(userId:string,tenantId:string,brandId:string,id:string,input:unknown,correlationId:string){return this.repository.editCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),{...captionConfirmSchema.parse(input),segments:[],style:'clean'},correlationId,true);}
   manualCaptions(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.manualCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
-  async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),true,correlationId);return {approved:true};}
+  async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId:string,raw:unknown={coverRevision:0}){const input=videoApprovalSchema.parse(raw);await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),true,correlationId,input.coverRevision);return {approved:true};}
   delete(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.delete(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),correlationId);}
   resume(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.resume(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
   async cleanupOne(){
@@ -38,7 +38,11 @@ export class VideoService {
     let succeeded=false;
     try{
       if(project.reference)await this.connection.provider.delete(project.reference,context);
-      for(const key of [project.originalKey,project.finalKey,project.coverKey])await this.storage.delete(key,context);
+      // At most 50 cover versions plus original media: bounded parallel deletes
+      // keep the whole cleanup within its lease even on a slow object store.
+      const keys=new Set([project.originalKey,project.finalKey,project.coverKey,`${project.tenantId}/videos/${project.id}/cover.jpg`,...(await this.repository.coverKeys(project.tenantId,project.id)).map(row=>row.key)]);
+      const deleted=await Promise.allSettled([...keys].map(key=>this.storage!.delete(key,context)));
+      if(deleted.some(result=>result.status==='rejected'))throw new DomainError('PROVIDER_UNAVAILABLE',503);
       succeeded=true;
     }catch{/* Durable retry retains deletion state and keeps downloads blocked. */}
     await this.repository.finishDeletion(project,succeeded);return true;

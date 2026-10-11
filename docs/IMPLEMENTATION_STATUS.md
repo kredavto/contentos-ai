@@ -73,7 +73,7 @@ This is an implementation inventory, not a claim that the full specification is 
 
 - Production SMTP/domain setup and live mail verification; OAuth authentication flows.
 - Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image/carousel generation, trend discovery and external evidence-backed fact-checking interfaces. Advisory Brand Guardian and standalone Post Writer are now implemented.
-- Private voice cloning/import, standalone Cover Studio editing/versioning (new-video cover design is implemented), B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
+- Private voice cloning/import, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
 - YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
 - Comment inbox/reply safety modes, automatic click-to-lead attribution beyond UTM links and manual funnel reports, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
 - Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, Sentry-compatible monitoring and provider readiness views.
@@ -88,7 +88,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with image/carousel generation, Cover Studio, private voice workflows, additional official social adapters and operator resolution for uncertain submissions. Advisory reviews, Post Writer, normalized analytics/Performance Analyst and billing are implemented as described below; remaining original requirements stay in scope. Research official APIs before implementing new external integrations.
+Continue with image/carousel generation, private voice workflows, additional official social adapters and operator resolution for uncertain submissions. Advisory reviews, Post Writer, normalized analytics/Performance Analyst and billing are implemented as described below; remaining original requirements stay in scope. Research official APIs before implementing new external integrations.
 
 ## Local environment notes
 
@@ -508,3 +508,18 @@ Video creation now accepts an optional saved cover design: relative frame, edita
 Focused validation initially passed 24 tests for schema injection rejection, literal Unicode rendering, presets, persistence, permissions, idempotency and cleanup. A changing-frame fixture and browser coverage have been added; final regression checks are in progress. Independent editing/versioning of covers on already generated videos remains outstanding; this slice does not complete the full Cover Studio requirement.
 
 Final cover checks: all 344 tests across 59 files passed with PostgreSQL and real FFmpeg. A subsequent small adjustment bases seeking on measured final duration; all 13 renderer/schema checks passed again. Workspace/test typecheck and lint passed. Chrome passed both full-chain/CSRF scenarios in 4.9 minutes, including actual cover JPEG dimensions, retained design after caption editing, approval, mock publication and cleanup. The mobile screenshot was inspected. Previous Post Writer commit 96d95b9 passed remote CI 38175681324. Production build passed in 16 seconds; no external paid render or NL infrastructure change was performed.
+
+
+## Versioned Cover Studio for ready videos
+
+Migration 0044 adds durable cover tasks/versions, video selection revisions, immutable identity/design guards and a metered GENERATE_COVER policy. The separate worker queue renders from the existing private final MP4 without HeyGen submission. It rechecks actor/tenant/script/consent, uses bounded leases and retries, captures once on success and releases final failures. The editor browses the actual video, saves a selected timestamp, previews versions and explicitly selects a READY result. Selection clears video approval and is denied during pending/uncertain publishing. Version 0 remains available.
+
+Video deletion now fences cover jobs, refunds held cover reserves, waits through active leases, removes all version objects and scrubs their designs. Cover history is capped at 50 additional versions per video. Current social adapters do not upload custom cover thumbnails; AI headline suggestions and uploaded-image backgrounds remain optional enhancements. See [Cover Studio behavior and limits](video-covers.md).
+
+Focused renderer/repository tests passed. Full regression passed all 346 tests across 59 files, including disabled-actor enforcement, scheduled-publication blocking, immutable history, retries, stale-lease recovery and deletion fencing. The disabled-actor test initially expected NOT_AUTHORIZED; it was corrected to the existing membership layer's intentional NOT_FOUND response after verifying behavior. Typecheck/lint passed before the final UI timestamp/deletion batching adjustment; final checks and Chrome are in progress.
+
+Chrome passed both full-chain and CSRF scenarios in 4.7 minutes after adding the versioned-cover object path to the loopback S3 fixture. The first attempt correctly exhausted retries/refunded when that fixture rejected the new path. The passing run exercised real FFmpeg through the separate worker queue, actual-frame selection, saved versions, preview, approval reset/reapproval and mock publishing. Mobile screenshot inspected without overflow. All 26 focused renderer/repository checks passed again after the final deletion batching, dispatch cooldown grouping and timestamp changes. Local development/test databases have 45 migrations and 88 tables. Previous 22cba7f passed remote CI 38177037220.
+
+Final review also bound video approval to the current cover revision. A stale browser now receives CONFLICT instead of approving a cover changed by another editor; approval audits include the selected version/revision. All 13 video integration tests passed with this guard. The final Chrome rerun explicitly checks stale-approval HTTP 409 before approving the current revision.
+
+Final delivery checks passed: workspace/test typecheck, lint and production build (15.8 seconds). Schema generation reports no changes. Final Chrome rerun passed both scenarios in 4.6 minutes, explicitly rejecting stale cover approval with HTTP 409 before successful current-version approval and mock publication. No paid avatar render, real social send or remote infrastructure mutation was made.

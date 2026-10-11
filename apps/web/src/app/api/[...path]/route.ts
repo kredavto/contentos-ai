@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -137,6 +137,12 @@ async function dispatch(request: Request, context: RouteContext) {
           if(path[5]&&path.length===7&&path[6]==='cancel'&&request.method==='POST'){await calendar.cancel(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({cancelled:true});}
         }
         if(path[3]&&path[4]==='videos'){
+          if(path[5]&&path[6]==='covers'){
+            if(path.length===7&&request.method==='GET')return ok(await covers.overview(user.userId,tenantId,path[3],path[5]));
+            if(path.length===7&&request.method==='POST')return ok(await covers.request(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),202);
+            if(path.length===7&&request.method==='PUT')return ok(await covers.select(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+            if(path.length===8&&path[7]&&request.method==='GET')return ok(await covers.download(user.userId,tenantId,path[3],path[5],path[7],correlationId));
+          }
           if(path.length===8&&path[5]&&path[6]==='captions'&&path[7]==='confirm'&&request.method==='POST')return ok(await videos.confirmCaptions(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),202);
           if(path.length===5&&request.method==='GET')return ok(await videos.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await videos.create(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
@@ -148,7 +154,7 @@ async function dispatch(request: Request, context: RouteContext) {
             if(path[6]==='resume'&&request.method==='POST'){await videos.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
             if(path[6]==='download'&&request.method==='GET')return ok(await videos.download(user.userId,tenantId,path[3],path[5],correlationId));
             if(path[6]==='history'&&request.method==='GET')return ok(await videos.history(user.userId,tenantId,path[3],path[5]));
-            if(path[6]==='approve'&&request.method==='POST')return ok(await videos.approve(user.userId,tenantId,path[3],path[5],correlationId));
+            if(path[6]==='approve'&&request.method==='POST')return ok(await videos.approve(user.userId,tenantId,path[3],path[5],correlationId,await readBody(request)));
           }
         }
         if (path[3] && path[4] === 'voices') {

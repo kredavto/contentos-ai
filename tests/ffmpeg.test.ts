@@ -50,6 +50,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     const late=await processor.process({bytes,options:videoProcessingSchema.parse({resolution:'720p',cover:{...cover,framePercent:95}})},context());
     expect(first.bytes).toEqual(late.bytes);expect(first.thumbnail.length).toBeLessThan(3*1024*1024);
     const pixel=await sharp(late.thumbnail).extract({left:300,top:50,width:1,height:1}).raw().toBuffer();expect(pixel[0]).toBeGreaterThan(220);expect(pixel[1]).toBeLessThan(20);expect(first.thumbnail).not.toEqual(late.thumbnail);
+    const regenerated=await processor.renderCover({bytes:first.bytes,design:{...cover,headline:'Новый заголовок',framePercent:0,frameSeconds:.75}},context());expect(regenerated.width).toBe(720);expect(regenerated.height).toBe(1280);expect((await sharp(regenerated.bytes).metadata()).format).toBe('jpeg');expect(regenerated.bytes).not.toEqual(late.thumbnail);const chosenPixel=await sharp(regenerated.bytes).extract({left:300,top:50,width:1,height:1}).raw().toBuffer();expect(chosenPixel[0]).toBeGreaterThan(220);
   });
   it('extracts bounded mono PCM WAV for transcription',async()=>{const audio=await processor.prepareAudio(bytes,context());expect(Buffer.from(audio.bytes.subarray(0,4)).toString()).toBe('RIFF');expect(Buffer.from(audio.bytes.subarray(8,12)).toString()).toBe('WAVE');expect(audio.bytes.length).toBeLessThan(6000000);expect(audio.durationSeconds).toBeGreaterThan(.8);});
   it('fails closed for missing binaries and honors cancellation',async()=>{

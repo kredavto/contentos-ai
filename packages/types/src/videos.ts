@@ -11,3 +11,5 @@ export const videoReservationSeconds=(plannedDuration:number,maximum:number)=>Ma
 export const captionEditSchema=z.object({revision:z.number().int().nonnegative(),segments:captionSegmentsSchema,style:z.enum(['clean','bold'])}).strict();
 export const captionConfirmSchema=z.object({revision:z.number().int().nonnegative()}).strict();
 export type CaptionEdit= z.infer<typeof captionEditSchema>;
+
+export const videoApprovalSchema=z.object({coverRevision:z.number().int().nonnegative()}).strict();
