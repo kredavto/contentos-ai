@@ -31,7 +31,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await database.client`insert into content_items(id,tenant_id,brand_id,title,type,status) values(${contentId},${tenantId},${brandId},'Fixture','SHORT_VIDEO','APPROVED_SCRIPT')`;
     await database.client`insert into scripts(id,tenant_id,brand_id,content_item_id,current_version,approved_version,approved_by,platform,duration) values(${scriptId},${tenantId},${brandId},${contentId},1,1,${userId},'YOUTUBE',30)`;
     await database.client`insert into script_versions(tenant_id,script_id,version,content,created_by) values(${tenantId},${scriptId},1,${JSON.stringify({hook:'Hook',context:'Context',core:'Core',proof:'Proof',cta:'CTA',factCheckNotes:[]})}::jsonb,${userId})`;
-    return {scriptId,scriptVersion:1,lookId,orientation:'9:16' as const,resolution:'720p' as const,fit:'crop' as const,cover:{framePercent:50,headline:'Обложка проекта',background:'FRAME' as const,font:'BOLD' as const,layout:'BOTTOM' as const,textColor:'#ffffff',backgroundColor:'#182338'},idempotencyKey:randomUUID()};
+    return {scriptId,scriptVersion:1,lookId,orientation:'9:16' as const,resolution:'720p' as const,fit:'crop' as const,watermark:{text:'Мой бренд',position:'TOP_RIGHT' as const,opacity:60},cover:{framePercent:50,headline:'Обложка проекта',background:'FRAME' as const,font:'BOLD' as const,layout:'BOTTOM' as const,textColor:'#ffffff',backgroundColor:'#182338'},idempotencyKey:randomUUID()};
   }
   beforeAll(async()=>{
     await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${userId},${`video-${userId}@example.test`},'unusable','Owner',now()),(${viewerId},${`video-${viewerId}@example.test`},'unusable','Viewer',now())`;
@@ -71,7 +71,8 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect((await row(job.id)).status).toBe('SUCCEEDED');
     expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual({available:before-12,reserved:0});
     const project=(await service.overview(userId,tenantId,brandId)).projects[0]!;
-    expect(project.options.cover).toEqual(input.cover);
+    expect(project.options.cover).toEqual(input.cover);expect(project.options.watermark).toEqual(input.watermark);
+    await expect(service.create(userId,tenantId,brandId,{...input,watermark:{...input.watermark,text:'Другой бренд'}},correlationId)).rejects.toThrow('CONFLICT');
     await expect(service.create(userId,tenantId,brandId,{...input,cover:{...input.cover,headline:'Другой заголовок'}},correlationId)).rejects.toThrow('CONFLICT');
     expect(project.durationMs).toBe(11200);expect(JSON.stringify(project)).not.toContain('externalId');
     const history=await service.history(userId,tenantId,brandId,project.id);expect(history.map(item=>item.to)).toEqual(videoStages.slice(0,-1));
@@ -146,7 +147,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect(deleted?.script_text).toBe('');expect(deleted?.title).toBe('Удалённое видео');expect(deleted?.reference).toBeNull();expect(deleted?.deleted_at).not.toBeNull();
     expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(balance);
     expect((await service.delete(userId,tenantId,brandId,project.id,correlationId)).status).toBe('DELETED');
-    expect((await database.client`select options from video_projects where id=${project.id}`)[0]!.options.cover).toBeUndefined();
+    expect((await database.client`select options from video_projects where id=${project.id}`)[0]!.options.cover).toBeUndefined();expect((await database.client`select options from video_projects where id=${project.id}`)[0]!.options.watermark).toBeUndefined();
     expect(await database.client`select id from audit_logs where resource_id=${project.id} and action='VIDEO_DELETED'`).toHaveLength(1);
   });
   it('fences a canceled worker and waits for a late provider reference before deletion',async()=>{
@@ -178,7 +179,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await expect(service.editCaptions(userId,tenantId,brandId,project.id,{...input,revision:1},correlationId)).rejects.toThrow('CONFLICT');
     let options:unknown;
     const finishing=new VideoProcessor(database.db,{name:providerName,provider:{...provider,status:async()=>{throw new Error('Must reuse stored source');},download:async()=>{throw new Error('Must reuse stored source');}}},storage,{...processing,process:async(input,context)=>{options=input.options;return processing.process(input,context);}},true);
-    await due(job.id);await finishing.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(options).toMatchObject({captions:input.segments,captionStyle:'bold',cover:{headline:'Обложка проекта'}});expect(submissions-before).toBe(1);
+    await due(job.id);await finishing.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(options).toMatchObject({captions:input.segments,captionStyle:'bold',watermark:{text:'Мой бренд',position:'TOP_RIGHT',opacity:60},cover:{headline:'Обложка проекта'}});expect(submissions-before).toBe(1);
   });
   it('reserves and captures automatic caption credits only after reviewed final rendering',async()=>{
     let transcriptions=0;const caption={name:'fixture-caption',model:'fixture',provider:{transcribe:async()=>{transcriptions++;return [{start:0,end:1,text:'Распознано'}];}}};

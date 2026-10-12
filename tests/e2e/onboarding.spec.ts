@@ -145,6 +145,11 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Одобренный сценарий',{exact:true}).selectOption({label:'Мой проверенный заголовок · v2'});
   await page.getByLabel('Образ аватара',{exact:true}).selectOption({index:1});
   await page.getByLabel('Субтитры',{exact:true}).selectOption('AUTO');
+  await expect(page.getByLabel('Добавить водяной знак',{exact:true})).not.toBeChecked();
+  await page.getByLabel('Добавить водяной знак',{exact:true}).check();
+  await page.getByLabel('Текст водяного знака',{exact:true}).fill('Мой бренд');
+  await page.getByLabel('Положение водяного знака',{exact:true}).selectOption('TOP_RIGHT');
+  await page.getByLabel('Непрозрачность водяного знака',{exact:true}).fill('60');
   await page.getByLabel('Настроить обложку',{exact:true}).check();
   await page.getByLabel('Заголовок обложки',{exact:true}).fill('Моя новая обложка');
   await page.getByLabel('Кадр обложки',{exact:true}).selectOption('50');
@@ -153,6 +158,7 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Расположение заголовка',{exact:true}).selectOption('TOP');
   await page.getByRole('button',{name:'Создать видео',exact:true}).click();
   const videoCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Мой проверенный заголовок',exact:true})});
+  await expect(videoCard.getByText('Водяной знак: Мой бренд · 60%',{exact:true})).toBeVisible();
   await expect(videoCard.getByRole('button',{name:'Редактировать субтитры',exact:true})).toBeVisible({timeout:90000});
   await videoCard.getByRole('button',{name:'Редактировать субтитры',exact:true}).click();
   await page.getByLabel('Субтитр 1',{exact:true}).fill('Проверенные субтитры');

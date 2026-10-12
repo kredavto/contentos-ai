@@ -14,6 +14,14 @@ export function captionAss(options:VideoProcessingOptions,width:number,height:nu
   const text=(value:string)=>value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,'').replace(/\\/g,'＼').replace(/\{/g,'｛').replace(/\}/g,'｝').replace(/\r?\n/g,'\\N');
   return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,${options.captionStyle==='bold'?-1:0},0,0,0,100,100,0,0,1,2,1,2,${Math.round(width*.07)},${Math.round(width*.07)},${Math.round(height*.08)},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${options.captions.map(segment=>`Dialogue: 0,${timestamp(segment.start)},${timestamp(segment.end)},Default,,0,0,0,,${text(segment.text)}`).join('\n')}\n`;
 }
+/** Literal text lives in a private ASS file, never in the FFmpeg filter expression. */
+export function watermarkAss(watermark:NonNullable<VideoProcessingOptions['watermark']>,width:number,height:number){
+  const text=watermark.text.replace(/\\/g,'＼').replace(/\{/g,'｛').replace(/\}/g,'｝');
+  const fontSize=Math.max(12,Math.floor(Math.min(Math.min(width,height)*.035,width*.7/Array.from(text).length)));
+  const alpha=Math.round(255*(1-watermark.opacity/100)).toString(16).padStart(2,'0').toUpperCase();
+  const alignment={TOP_LEFT:7,TOP_RIGHT:9,BOTTOM_LEFT:1,BOTTOM_RIGHT:3}[watermark.position],margin=Math.round(Math.min(width,height)*.05);
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Mark,Arial,${fontSize},&H${alpha}FFFFFF,&H${alpha}FFFFFF,&H${alpha}000000,&HFF000000,0,0,0,0,100,100,0,0,1,1,0,${alignment},${margin},${margin},${margin},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:03:01.00,Mark,,0,0,0,,${text}\n`;
+}
 /** Worker-only local media processing. No URLs, shell fragments or user paths. */
 export class FFmpegVideoProcessor implements VideoProcessingProvider,CoverRenderingProvider {
   constructor(private readonly ffmpeg:string,private readonly ffprobe:string){if(!isAbsolute(ffmpeg)||!isAbsolute(ffprobe))throw new DomainError('CONFIGURATION_REQUIRED',503);}
@@ -82,8 +90,9 @@ export class FFmpegVideoProcessor implements VideoProcessingProvider,CoverRender
       const scale=options.fit==='crop'?`scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`:`scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
       await input.onStage?.('CAPTIONS_GENERATING',{mode:options.captions.length?'provided-segments':'disabled'});
       if(options.captions.length)await writeFile(join(directory,'captions.ass'),captionAss(options,width,height),{mode:0o600});
+      if(options.watermark)await writeFile(join(directory,'watermark.ass'),watermarkAss(options.watermark,width,height),{mode:0o600});
       await input.onStage?.('BROLL_PROCESSING',{mode:'disabled'});
-      const videoFilter=`${scale},setsar=1,fps=30${options.captions.length?',ass=filename=captions.ass':''}`;
+      const videoFilter=`${scale},setsar=1,fps=30${options.captions.length?',ass=filename=captions.ass':''}${options.watermark?',ass=filename=watermark.ass':''}`;
       await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-filter_threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-i','source.mp4','-map','0:v:0','-map','0:a:0','-map_metadata','-1','-map_chapters','-1','-vf',videoFilter,'-af','loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000','-c:v','libx264','-preset','fast','-crf','22','-pix_fmt','yuv420p','-threads','2','-c:a','aac','-b:a','128k','-ac','2','-t',String(maxDuration),'-fs',String(maxBytes),'-movflags','+faststart','-f','mp4','final.mp4'],directory,context);
       const final=await this.inspect('final.mp4',directory,context);
       await input.onStage?.('COVER_GENERATING',{mode:options.cover?'designed-frame':'first-frame'});

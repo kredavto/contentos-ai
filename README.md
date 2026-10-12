@@ -64,3 +64,5 @@ The [Carousel Studio](docs/carousels.md) generates editable, versioned slides wi
 Optional [server error monitoring](docs/error-monitoring.md) sends only safe operational metadata and is disabled until configured.
 
 The [Image Studio](docs/image-generation.md) queues metered image generation, stores private normalized JPEGs and supports review, approval and durable deletion. OpenAI/S3 configuration is required for real output; local fixtures are clearly marked as demo.
+
+Optional video watermark settings and behavior: [video watermarks](docs/video-watermarks.md).

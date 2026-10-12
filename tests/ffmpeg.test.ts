@@ -5,16 +5,25 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {FFmpegVideoProcessor,captionAss} from '../packages/providers/src/ffmpeg';
+import {FFmpegVideoProcessor,captionAss,watermarkAss} from '../packages/providers/src/ffmpeg';
 import sharp from 'sharp';
 import {coverDesignSchema} from '../packages/types/src/covers';
-import {videoProcessingSchema} from '../packages/types/src/video-processing';
+import {videoProcessingSchema,videoWatermarkSchema} from '../packages/types/src/video-processing';
 const ffmpeg=process.env.FFMPEG_PATH??(process.env.CI?'/usr/bin/ffmpeg':undefined),ffprobe=process.env.FFPROBE_PATH??(process.env.CI?'/usr/bin/ffprobe':undefined);
 const context=()=>({tenantId:randomUUID(),internalId:randomUUID(),idempotencyKey:randomUUID(),correlationId:randomUUID(),signal:new AbortController().signal});
 it('validates caption timing and prevents ASS override injection',()=>{
   expect(()=>videoProcessingSchema.parse({captions:[{start:1,end:2,text:'A'},{start:1.5,end:3,text:'B'}]})).toThrow();
   const ass=captionAss(videoProcessingSchema.parse({captions:[{start:0,end:1,text:'{\\pos(0,0)} Привет\nМир'}]}),720,1280);
   expect(ass).not.toContain('{\\pos');expect(ass).toContain('Привет\\NМир');
+});
+it('keeps watermark opt-in and rejects unsafe or unsupported settings',()=>{
+  expect(videoProcessingSchema.parse({}).watermark).toBeUndefined();
+  const valid={text:'Бренд',position:'TOP_RIGHT',opacity:60};
+  for(const text of ['', 'x'.repeat(41),'line\nnext','hidden\u202e','separator\u2028next'])expect(videoWatermarkSchema.safeParse({...valid,text}).success).toBe(false);
+  for(const opacity of [0,19,101,NaN,20.5])expect(videoWatermarkSchema.safeParse({...valid,opacity}).success).toBe(false);
+  expect(videoWatermarkSchema.safeParse({...valid,logoUrl:'https://example.com/image'}).success).toBe(false);
+  const ass=watermarkAss(videoWatermarkSchema.parse({...valid,text:'{\\pos(0,0)} Бренд'}),720,1280);
+  expect(ass).not.toContain('{\\pos');expect(ass).toContain('Бренд');expect(ass.match(/Dialogue:/g)).toHaveLength(1);
 });
 describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
   const processor=new FFmpegVideoProcessor(ffmpeg??'/missing/ffmpeg',ffprobe??'/missing/ffprobe');let directory='',bytes:Buffer;
@@ -59,6 +68,16 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     const rendered=await processor.renderCover({bytes:await readFile(file),design:cover},context());
     expect((await sharp(rendered.bytes).metadata()).width).toBe(320);
     const pixel=await sharp(rendered.bytes).extract({left:0,top:0,width:1,height:1}).raw().toBuffer();expect(pixel[0]).toBeGreaterThan(220);
+  });
+  it.each(['TOP_LEFT','TOP_RIGHT','BOTTOM_LEFT','BOTTOM_RIGHT'] as const)('burns a literal %s watermark into actual video frames only',async position=>{
+    const original=Buffer.from(bytes),watermark={text:'БРЕНД',position,opacity:100};
+    const output=await processor.process({bytes,options:videoProcessingSchema.parse({orientation:'1:1',resolution:'720p',watermark})},context());
+    const file=join(directory,`watermark-${position}.mp4`),frame=join(directory,`watermark-${position}.png`);
+    await (await import('node:fs/promises')).writeFile(file,output.bytes);
+    await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-ss','0.7','-i',file,'-frames:v','1','-update','1',frame]);
+    const raster=await sharp(frame).raw().toBuffer({resolveWithObject:true});let bright=0,elsewhere=0;
+    for(let y=0;y<720;y++)for(let x=0;x<720;x++){const offset=(y*720+x)*raster.info.channels;if(raster.data[offset]!>200&&raster.data[offset+1]!>200&&raster.data[offset+2]!>200){const inside=(position.endsWith('LEFT')?x<360:x>=360)&&(position.startsWith('TOP')?y<180:y>=540);if(inside)bright++;else elsewhere++;}}
+    expect(bright).toBeGreaterThan(100);expect(elsewhere).toBe(0);expect(bytes).toEqual(original);
   });
   it('extracts bounded mono PCM WAV for transcription',async()=>{const audio=await processor.prepareAudio(bytes,context());expect(Buffer.from(audio.bytes.subarray(0,4)).toString()).toBe('RIFF');expect(Buffer.from(audio.bytes.subarray(8,12)).toString()).toBe('WAVE');expect(audio.bytes.length).toBeLessThan(6000000);expect(audio.durationSeconds).toBeGreaterThan(.8);});
   it('fails closed for missing binaries and honors cancellation',async()=>{
