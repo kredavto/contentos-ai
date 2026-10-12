@@ -3,9 +3,10 @@ import {mkdtemp,writeFile,readFile,stat,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
 import {z} from 'zod';
-import {DomainError,videoProcessingSchema,videoDimensions,type VideoProcessingProvider,type VideoProcessingOptions,type OperationContext} from '@contentos/types';
+import {coverComposition} from './cover-design';
+import {DomainError,videoProcessingSchema,videoDimensions,type VideoProcessingProvider,type VideoProcessingOptions,type OperationContext,type CoverRenderingProvider} from '@contentos/types';
 const maxBytes=256*1024*1024,maxDuration=180;
-const probeSchema=z.object({format:z.object({duration:z.coerce.number().finite().positive().max(maxDuration)}),streams:z.array(z.object({codec_type:z.string(),codec_name:z.string().optional(),width:z.number().int().positive().max(8192).optional(),height:z.number().int().positive().max(8192).optional(),pix_fmt:z.string().optional()})).max(8)});
+const probeSchema=z.object({format:z.object({duration:z.coerce.number().finite().positive().max(maxDuration)}),streams:z.array(z.object({codec_type:z.string(),codec_name:z.string().optional(),duration:z.coerce.number().finite().positive().optional(),avg_frame_rate:z.string().optional(),width:z.number().int().positive().max(8192).optional(),height:z.number().int().positive().max(8192).optional(),pix_fmt:z.string().optional()})).max(8)});
 const timestamp=(seconds:number)=>{const centiseconds=Math.round(seconds*100);return `${Math.floor(centiseconds/360000)}:${String(Math.floor(centiseconds/6000)%60).padStart(2,'0')}:${String(Math.floor(centiseconds/100)%60).padStart(2,'0')}.${String(centiseconds%100).padStart(2,'0')}`;};
 export function captionAss(options:VideoProcessingOptions,width:number,height:number){
   const fontSize=Math.round(height*(options.captionStyle==='bold'?0.045:0.035));
@@ -13,8 +14,16 @@ export function captionAss(options:VideoProcessingOptions,width:number,height:nu
   const text=(value:string)=>value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,'').replace(/\\/g,'＼').replace(/\{/g,'｛').replace(/\}/g,'｝').replace(/\r?\n/g,'\\N');
   return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,${options.captionStyle==='bold'?-1:0},0,0,0,100,100,0,0,1,2,1,2,${Math.round(width*.07)},${Math.round(width*.07)},${Math.round(height*.08)},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${options.captions.map(segment=>`Dialogue: 0,${timestamp(segment.start)},${timestamp(segment.end)},Default,,0,0,0,,${text(segment.text)}`).join('\n')}\n`;
 }
+/** Literal text lives in a private ASS file, never in the FFmpeg filter expression. */
+export function watermarkAss(watermark:NonNullable<VideoProcessingOptions['watermark']>,width:number,height:number){
+  const text=watermark.text.replace(/\\/g,'＼').replace(/\{/g,'｛').replace(/\}/g,'｝');
+  const fontSize=Math.max(12,Math.floor(Math.min(Math.min(width,height)*.035,width*.7/Array.from(text).length)));
+  const alpha=Math.round(255*(1-watermark.opacity/100)).toString(16).padStart(2,'0').toUpperCase();
+  const alignment={TOP_LEFT:7,TOP_RIGHT:9,BOTTOM_LEFT:1,BOTTOM_RIGHT:3}[watermark.position],margin=Math.round(Math.min(width,height)*.05);
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Mark,Arial,${fontSize},&H${alpha}FFFFFF,&H${alpha}FFFFFF,&H${alpha}000000,&HFF000000,0,0,0,0,100,100,0,0,1,1,0,${alignment},${margin},${margin},${margin},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:03:01.00,Mark,,0,0,0,,${text}\n`;
+}
 /** Worker-only local media processing. No URLs, shell fragments or user paths. */
-export class FFmpegVideoProcessor implements VideoProcessingProvider {
+export class FFmpegVideoProcessor implements VideoProcessingProvider,CoverRenderingProvider {
   constructor(private readonly ffmpeg:string,private readonly ffprobe:string){if(!isAbsolute(ffmpeg)||!isAbsolute(ffprobe))throw new DomainError('CONFIGURATION_REQUIRED',503);}
   async prepareAudio(bytes:Uint8Array,context:OperationContext){
     if(bytes.byteLength<12||bytes.byteLength>maxBytes||Buffer.from(bytes.subarray(4,8)).toString('ascii')!=='ftyp')throw new DomainError('INVALID_MEDIA',422);
@@ -37,12 +46,37 @@ export class FFmpegVideoProcessor implements VideoProcessingProvider {
     });
   }
   private async inspect(file:string,cwd:string,context:OperationContext){
-    const output=await this.run(this.ffprobe,['-v','error','-threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-show_entries','format=duration:stream=codec_type,codec_name,width,height,pix_fmt','-of','json',file],cwd,context,30_000);
+    const output=await this.run(this.ffprobe,['-v','error','-threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-show_entries','format=duration:stream=codec_type,codec_name,width,height,pix_fmt,duration,avg_frame_rate','-of','json',file],cwd,context,30_000);
     let decoded:unknown;try{decoded=JSON.parse(output);}catch{throw new DomainError('INVALID_MEDIA',422);}
     const parsed=probeSchema.safeParse(decoded);if(!parsed.success)throw new DomainError('INVALID_MEDIA',422);
     const video=parsed.data.streams.filter(stream=>stream.codec_type==='video'),audio=parsed.data.streams.filter(stream=>stream.codec_type==='audio');
     if(video.length!==1||audio.length!==1||!video[0]!.width||!video[0]!.height||video[0]!.width*video[0]!.height>16_000_000||video[0]!.width>8192||video[0]!.height>8192)throw new DomainError('INVALID_MEDIA',422);
-    return {duration:parsed.data.format.duration,video:video[0]!,audio:audio[0]!};
+    const [numerator,denominator]=(video[0]!.avg_frame_rate??'30/1').split('/').map(Number);
+    const rate=numerator&&denominator?numerator/denominator:30;
+    // Container duration may include an AAC tail after the last video frame.
+    const videoDuration=video[0]!.duration??parsed.data.format.duration;
+    const lastFrameSeconds=Math.max(0,videoDuration-1/(rate>0&&rate<=240?rate:30)-.001);
+    return {lastFrameSeconds,duration:parsed.data.format.duration,video:video[0]!,audio:audio[0]!};
+  }
+  private async renderCoverFile(directory:string,width:number,height:number,duration:number,lastFrameSeconds:number,design:VideoProcessingOptions['cover'],context:OperationContext){
+    let filter='scale=480:-2';
+    if(design){const composition=coverComposition(design,width,height);await writeFile(join(directory,'cover.ass'),composition.ass,{mode:0o600});filter=composition.filter;}
+    const frameSeconds=design?Math.max(0,Math.min(design.frameSeconds??duration*.01*design.framePercent,lastFrameSeconds)):0;
+    await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-filter_threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-ss',String(frameSeconds),'-f','mov','-i','final.mp4','-map','0:v:0','-an','-map_metadata','-1','-frames:v','1','-vf',filter,'-q:v','3','-update','1','cover.jpg'],directory,context,30_000);
+  }
+  async renderCover(input:Parameters<CoverRenderingProvider['renderCover']>[0],context:OperationContext){
+    context.signal.throwIfAborted();
+    if(input.bytes.byteLength<12||input.bytes.byteLength>maxBytes||Buffer.from(input.bytes.subarray(4,8)).toString('ascii')!=='ftyp')throw new DomainError('INVALID_MEDIA',422);
+    const directory=await mkdtemp(join(tmpdir(),'contentos-cover-'));
+    try{
+      await writeFile(join(directory,'final.mp4'),input.bytes,{mode:0o600});const source=await this.inspect('final.mp4',directory,context);
+      const width=source.video.width!,height=source.video.height!;
+      if(width>1920||height>1920)throw new DomainError('INVALID_MEDIA',422);
+      await this.renderCoverFile(directory,width,height,source.duration,source.lastFrameSeconds,input.design,context);
+      const size=await stat(join(directory,'cover.jpg'));if(!size.size||size.size>3*1024*1024)throw new DomainError('INVALID_MEDIA',422);
+      const bytes=await readFile(join(directory,'cover.jpg'));if(bytes[0]!==255||bytes[1]!==216||bytes[2]!==255)throw new DomainError('INVALID_MEDIA',422);
+      return {bytes,width,height};
+    }finally{await rm(directory,{recursive:true,force:true});}
   }
   async process(input:Parameters<VideoProcessingProvider['process']>[0],context:OperationContext){
     const options=videoProcessingSchema.parse(input.options);context.signal.throwIfAborted();
@@ -56,13 +90,14 @@ export class FFmpegVideoProcessor implements VideoProcessingProvider {
       const scale=options.fit==='crop'?`scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`:`scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
       await input.onStage?.('CAPTIONS_GENERATING',{mode:options.captions.length?'provided-segments':'disabled'});
       if(options.captions.length)await writeFile(join(directory,'captions.ass'),captionAss(options,width,height),{mode:0o600});
+      if(options.watermark)await writeFile(join(directory,'watermark.ass'),watermarkAss(options.watermark,width,height),{mode:0o600});
       await input.onStage?.('BROLL_PROCESSING',{mode:'disabled'});
-      const videoFilter=`${scale},setsar=1,fps=30${options.captions.length?',ass=filename=captions.ass':''}`;
+      const videoFilter=`${scale},setsar=1,fps=30${options.captions.length?',ass=filename=captions.ass':''}${options.watermark?',ass=filename=watermark.ass':''}`;
       await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-filter_threads','1','-max_alloc','268435456','-protocol_whitelist','file,pipe','-enable_drefs','0','-use_absolute_path','0','-f','mov','-i','source.mp4','-map','0:v:0','-map','0:a:0','-map_metadata','-1','-map_chapters','-1','-vf',videoFilter,'-af','loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000','-c:v','libx264','-preset','fast','-crf','22','-pix_fmt','yuv420p','-threads','2','-c:a','aac','-b:a','128k','-ac','2','-t',String(maxDuration),'-fs',String(maxBytes),'-movflags','+faststart','-f','mp4','final.mp4'],directory,context);
-      await input.onStage?.('COVER_GENERATING',{mode:'first-frame'});
-      await this.run(this.ffmpeg,['-nostdin','-hide_banner','-v','error','-y','-threads','1','-protocol_whitelist','file,pipe','-f','mov','-i','final.mp4','-frames:v','1','-vf','scale=480:-2','-q:v','3','-update','1','cover.jpg'],directory,context,30_000);
-      await input.onStage?.('QC',{});
       const final=await this.inspect('final.mp4',directory,context);
+      await input.onStage?.('COVER_GENERATING',{mode:options.cover?'designed-frame':'first-frame'});
+      await this.renderCoverFile(directory,width,height,final.duration,final.lastFrameSeconds,options.cover,context);
+      await input.onStage?.('QC',{});
       if(final.video.width!==width||final.video.height!==height||final.video.codec_name!=='h264'||final.audio.codec_name!=='aac'||final.video.pix_fmt!=='yuv420p'||Math.abs(final.duration-source.duration)>.3)throw new DomainError('INVALID_MEDIA',422);
       const [videoStat,coverStat]=await Promise.all([stat(join(directory,'final.mp4')),stat(join(directory,'cover.jpg'))]);
       if(!videoStat.size||videoStat.size>=maxBytes||!coverStat.size||coverStat.size>3*1024*1024)throw new DomainError('INVALID_MEDIA',422);

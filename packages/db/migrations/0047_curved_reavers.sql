@@ -1,0 +1,3 @@
+ALTER TABLE "generated_images" DROP CONSTRAINT "image_ready_valid";--> statement-breakpoint
+ALTER TABLE "generated_images" ADD CONSTRAINT "image_approval_valid" CHECK (("generated_images"."approved_at" is null and "generated_images"."approved_by" is null) or ("generated_images"."approved_at" is not null and "generated_images"."approved_by" is not null and "generated_images"."status"='READY'));--> statement-breakpoint
+ALTER TABLE "generated_images" ADD CONSTRAINT "image_ready_valid" CHECK ("generated_images"."status"<>'READY' or ("generated_images"."bytes" is not null and "generated_images"."sha256" is not null and "generated_images"."sha256" ~ '^[a-f0-9]{64}$' and "generated_images"."submitted_at" is not null));

@@ -16,6 +16,7 @@
     "@contentos/config": "workspace:*",
     "@contentos/types": "workspace:*",
     "bullmq": "^5.0.0",
-    "ioredis": "^5.0.0"
+    "ioredis": "^5.0.0",
+    "tsx": "^4.23.15"
   }
 }

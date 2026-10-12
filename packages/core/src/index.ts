@@ -16,3 +16,27 @@ export * from './publishing';
 export * from './analytics';
 export * from './channel-analytics';
 export * from './performance';
+export * from './payment-methods';
+export * from './payment-processor';
+export * from './payment-webhooks';
+export * from './billing';
+export * from './notifications';
+
+export * from './email';
+
+export * from './team';
+
+export * from './agency';
+
+export * from './admin';
+
+export * from './privacy';
+
+export * from './utm';
+
+export * from './funnels';
+
+export * from './covers';
+
+export * from './error-reporting';
+export * from './images';

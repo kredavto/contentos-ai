@@ -1,6 +1,10 @@
 # Implementation status
 
-Updated 2026-10-04. This is an implementation inventory, not a claim that the full specification is complete.
+Updated 2026-10-11.
+
+Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
+
+This is an implementation inventory, not a claim that the full specification is complete.
 
 ## Verified working slice
 
@@ -9,11 +13,11 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Email/password registration, real SMTP adapter, email verification, reset links, login/logout and revoke-all-sessions API. scrypt N=131072/r=8/p=1; random tokens hashed at rest; HttpOnly/SameSite/Secure-in-production cookies.
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
-- Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and read-only completed summary. Existing completed Brand Brain editor is still to be added.
-- Database schema: 57 tables with twenty-one SQL migrations (0000–0020). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and completed summary. A profile/voice editor is implemented with transactional role checks and optimistic revisions; all 13 structured collections now have an editor with stable IDs and archiving. See [profile editing](brand-profile.md).
+- Database schema: 81 tables with thirty-nine SQL migrations (0000–0038). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
 - Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for commit 97f41ba (run 37195435512).
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for UTM commit 484783e (run 38087186098). Newer funnel changes are locally verified and awaiting remote CI.
 
 ## Generation slice implemented
 
@@ -55,7 +59,7 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Local paths/filter arguments are generated internally; shell/network inputs are disallowed, MOV external references disabled, subprocess environment excludes credentials, timeouts/cancellation and temporary cleanup are enforced. Final codecs/dimensions/duration are checked.
 - Six real media tests passed with FFmpeg/FFprobe 9.0.2; CI now installs FFmpeg before tests. See [processing boundaries](video-processing.md). This is now connected to durable video projects and the Video Studio workflow.
 
-## Verification evidence
+## Historical verification evidence (initial generation/consent slice)
 
 - Typecheck for all 9 workspace packages and test sources passed.
 - ESLint passed.
@@ -67,17 +71,16 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 
 ## Full objective still outstanding
 
-- Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
-- Extend the implemented text/avatar/video/publishing job engine to additional platforms and webhooks, including operator reconciliation and provider pricing configuration.
-- Remaining image/media, YooKassa, YouTube/TikTok/Meta/VK and platform analytics adapters; production configuration and live verification of HeyGen/S3/Telegram remain pending.
-- Remaining AI workflows beyond strategy/ideas/scripts; downstream publishing transitions from the implemented editorial calendar.
-- Private voice cloning/import, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
-- OAuth flows and refresh for additional social platforms, autopilot, verified/idempotent webhooks, additional delivery-status adapters and normalized/raw analytics.
-- AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
-- Admin/support/audit UI, notifications, privacy export/deletion workflows, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
-- Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
-- Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
-- Vercel deployment and verification. No deployment has happened; scaffold/partial functionality is not represented as the finished product.
+- Production SMTP/domain setup and live mail verification; OAuth authentication flows.
+- Additional AI workflows beyond the implemented strategy/ideas/scripts/performance recommendations, including image generation, trend discovery and external evidence-backed fact-checking interfaces. Advisory Brand Guardian and standalone Post Writer are now implemented.
+- Private voice cloning/import, B-roll/music/intro/outro, general video/audio media library and operator investigation of unknown external submissions.
+- YouTube/TikTok/Meta/VK publishing and analytics adapters with official OAuth/refresh flows; production verification of HeyGen/S3/Telegram and YooKassa. Autopilot requires its own opt-in/feature gate and safety review.
+- Comment inbox/reply safety modes, automatic click-to-lead attribution beyond UTM links and manual funnel reports, complete financial/provider-cost dashboards, operator job-reconciliation workflows, extended quota policies and provider/model configuration. Versioned tariff prices and AI/video limits now have an ADMIN editor.
+- Complete account-data export/deletion, remaining media/voice privacy flows, platform-wide feature-flag wiring, live monitoring setup and expanded provider readiness views.
+- Complete development seed and final platform-wide security/architecture reviews. The full MVP browser chain is verified with fixture transports; real configured-provider end-to-end verification remains pending.
+- Fresh AMD64 release images, GLOBAL/RU infrastructure placement, backups/restore drills, production credentials and complete Vercel/runtime deployment. The NL capacity upgrade and SMTP sender domain are still pending.
+
+Implemented billing/renewal, durable encrypted email, notifications, team management, structured Brand Brain editing and the agency portfolio are documented below; their presence does not establish completion of the remaining specification.
 
 ## Source and hosting
 
@@ -85,7 +88,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with normalized analytics/Performance Analyst, Cover Studio and operator resolution for uncertain submissions. Additional social providers, payments and all other original requirements remain in scope. Research official APIs first.
+Continue with image generation, private voice workflows, additional official social adapters and operator resolution for uncertain submissions. Advisory reviews, Post Writer, normalized analytics/Performance Analyst and billing are implemented as described below; remaining original requirements stay in scope. Research official APIs before implementing new external integrations.
 
 ## Local environment notes
 
@@ -216,3 +219,359 @@ Local browser attempts stopped before reaching the new feature because resource 
 Isolated CI reached the generated performance report and exposed an accessible-name issue in the report selector: the option text was included in its implicit name. Explicit labels now identify both analysis selects. The report was generated through the queue successfully; acceptance/rejection and visual verification are being rerun after the fix. CI now retains browser screenshots on successful runs as well as failures. Final local typecheck, lint and production build also passed.
 
 Final verification supersedes the pending checks above: [CI run 37216727705](https://github.com/kredavto/contentos-ai/actions/runs/37216727705) passed for exact head 00700b4, including typecheck, lint, 162 tests, production build and both Playwright scenarios in 4.2 minutes. Browser coverage confirmed report generation, explicit acceptance creating strategy version 2, rejection, persisted decision history after reload, unchanged Brand Brain and no mobile horizontal overflow. Final desktop/mobile screenshots were reviewed. [PR #1](https://github.com/kredavto/contentos-ai/pull/1) was merged into main as 8c13c2a. Full MVP implementation and Vercel/worker production deployment remain outstanding.
+
+## Subscription billing foundation (in progress)
+
+The payment slice now has a documented consistency design in [payments.md](payments.md) and strict settlement identity/money schemas. A settlement predicate requires a paid successful observation matching provider, external/internal order IDs, merchant, test/live mode, exact amount and currency. Exact RUB decimal conversion rejects rounding and malformed values. Monthly boundaries preserve the original UTC anchor day across short months. Six focused tests passed. These helpers are not yet wired to a provider or ledger: checkout, durable payment tasks, webhook verification, subscriptions, renewal consent and UI remain under implementation. No charge or production payment connection has been made.
+
+Foundation verification: all 168 tests across 31 files passed with PostgreSQL and real FFmpeg, plus workspace/test typecheck, lint and whitespace checks. No UI or runtime payment wiring changed, so browser tests were not rerun for this foundation. Work is isolated on codex/subscription-billing until the payment flow is implemented and verified.
+
+## YooKassa provider adapter (billing integration in progress)
+
+The real server-side YooKassa v3 adapter now supports redirect checkout, saved-method renewal, payment reads, full/partial refunds and refund reads. It validates returned identity/merchant/mode/money, uses exact RUB amounts, drops raw card information, retains receipt status, restricts return/confirmation URLs, bounds response size/time and never retries internally. Mutations refuse replay after a conservative 23-hour window. Verified rejections and uncertain outcomes are distinct. Configuration defaults off and rejects production test mode. Official provider sources and remaining fiscal scope are documented in payments.md.
+
+All 178 unit/integration/media tests passed with PostgreSQL/FFmpeg; typecheck, lint and production build passed. A final documentation cross-check refined full versus partial refund receipt handling; focused regression and final checks follow. No real external payment request was made. Durable orders/subscriptions, webhook receipts, worker dispatch, atomic ledger settlement and Billing UI still need implementation before this adapter can be enabled for users.
+
+Final adapter verification: all 16 focused payment/adapter regressions passed after the full/partial refund and malformed-URL fixes. Final workspace/test typecheck, lint and production build passed. The broader 178-test suite passed before these final localized refinements. No browser scenario was rerun because no UI, route or worker wiring changed in this adapter-only step.
+
+## Billing persistence foundation (in progress)
+
+Migration 0021 adds five billing tables (62 total): disabled plan catalog, immutable prices, tenant orders, unique external payment mappings and immutable settlements. Verified owners can create idempotent current-price orders through the internal repository. Worker-only settlement validates paid evidence and atomically grants AI credits/video seconds once, with audit and rollback on failure. PostgreSQL guards reject cross-tenant or mismatched identities and history mutation. Ledger balance aggregation now supports totals beyond int32 while rejecting values outside JavaScript safe integer range.
+
+The seven billing integration tests and six existing ledger tests passed against PostgreSQL, including concurrent checkout/settlement, changed intents, stale quotes, wrong merchant/mode/amount, cross-tenant access, duplicate external payment, atomic rollback and large balances. Initial typecheck/lint passed; full final verification is running. No routes or worker tasks enable billing yet. Subscription terms, renewal consent, webhook/task persistence, plan changes and UI remain required; full MVP and deployment are not complete.
+
+Final persistence verification: all 185 tests across 33 files passed, plus workspace/test typecheck, lint, production build and whitespace checks. Migration 0021 was applied successfully to the dedicated PostgreSQL test database. All payment provider tests used explicit HTTP fixtures; no real payment was requested.
+
+## Paid subscription terms
+
+Migration 0022 adds subscription identities and immutable paid monthly periods (64 tables total). Settlement now commits the paid period together with credit grants. Prepaid periods retain the original UTC day across February; an expired subscription restarts from the new payment's processing time. An owner-only overview separates active, upcoming and historical periods without receipt/provider secrets. PostgreSQL verifies paid-order/plan identity, monthly boundaries and non-overlap. Existing settlement replay can restore a missing historical term without regranting resources.
+
+All 188 tests passed, along with workspace/test typecheck, lint and production build. This includes prepaid month boundaries, current/future selection, expiry gaps, historical replay and transaction rollback. An additional direct-insert overlap guard regression is being verified. CI run 37218738525 for the preceding persistence commit reached the browser scenarios; completion has not yet been asserted. Renewal consent/cancellation, payment dispatch/webhooks, plan changes and Billing UI remain outstanding; payments are still disabled.
+
+Final term verification: all 17 focused billing/ledger tests passed after adding the direct PostgreSQL overlap regression, and test TypeScript compilation passed. The preceding full run passed 188 tests; production code was unchanged after that run. Migration 0022 applied successfully to the dedicated test database.
+
+## Renewal permission and cancellation (in progress)
+
+Migration 0023 adds three renewal tables (67 total). Verified owners can preview and accept an exact current-price policy, or cancel future renewal permission through the internal repository. Consent/change history is immutable. Tenant locks and revisions fence competing requests; replaying old enable/disable intents cannot reverse a later choice. Cancellation preserves paid periods and credits. Overview excludes request IP/user-agent evidence.
+
+Initial tests passed five scenarios and exposed a nondeterministic test assumption about which racing request won; the assertion now uses the actual winning request. Full verification is running. Checkout still uses saveMethod=false and no billing worker/route invokes this permission flow. Binding consent to checkout, encrypted saved methods, cancellation of queued charges, automatic scheduling and UI remain required.
+
+Final renewal verification: all 195 tests across 34 files passed, plus workspace/test typecheck, lint, production build and whitespace checks. Six new integration scenarios cover exact policy acceptance, concurrent idempotency, preserving paid access on cancellation, old-intent replay after later choices, revision races, stale quotes, role/tenant isolation and immutable history. Migration 0023 applied to the dedicated test database. No live payment request or automatic charge was made.
+
+## Consent-bound checkout and encrypted payment methods
+
+Migration 0024 binds saving checkout to the exact active renewal consent/revision and adds encrypted saved methods (68 tables total). Worker-only capture requires a matching paid settlement and current verified owner. AES-GCM associated data separates payment references from social credentials and binds tenant/order/provider/merchant/mode. Cancellation and replacement consent erase usable ciphertext atomically; concurrent capture cannot undo revocation. Default checkout does not request method saving.
+
+All 201 tests across 35 files passed with PostgreSQL and FFmpeg, plus workspace/test typecheck, lint, production build and whitespace checks. Migration 0024 applied to the dedicated test database. New coverage includes consent-bound replay, capture before settlement, identity mismatch, encrypted replay, cancellation races, replacement consent, database resurrection rejection and missing-vault/owner checks. No real payment request was made. Queue dispatch, authenticated webhook reconciliation, renewal scheduling, plan changes, Billing UI and production deployment remain outstanding.
+
+## Durable checkout task and worker
+
+Migration 0025 adds payment tasks/outbox (69 tables total) committed with new orders. The worker now dispatches a dedicated BullMQ payment queue. Leases fence duplicate/stale workers; the committed send marker freezes the original timestamp and internal UUID key. Unknown payment replay stops at five sends or 23 hours. Authenticated payment mappings are persisted before settlement, so later processing uses GET. Cancellation/replacement consent cancels unsent tasks atomically and cannot erase an uncertain send. Automatic renewal orders remain disabled pending saved-method binding and scheduling.
+
+All 212 tests across 36 files passed with PostgreSQL/FFmpeg; workspace/test typecheck, lint and production build passed. The new outbox test initially exposed raw SQL timestamp encoding, which was corrected before the passing run. Migration 0025 applied successfully. An additional regression for saved-method write failure after paid settlement is being verified. Real payment transport is mocked in these tests; no charge was requested. Checkout/webhook UI endpoints, webhook reconciliation, renewal scheduling, plan changes and production deployment remain outstanding. Latest remote/browser CI evidence is separate from these local checks.
+
+Final task verification: all 12 focused payment-task regressions passed, including recovery from a method-write failure after settlement using GET with one payment and one set of ledger grants. Test TypeScript compilation and focused lint passed after adding that regression. The preceding full suite passed 212 tests; production code was unchanged after that run. Remote/browser CI for this new worker integration has not yet been asserted.
+
+## Durable payment webhook verification
+
+Migration 0026 adds the webhook receipt journal/outbox (70 tables total), and `/api/webhooks/yookassa` acknowledges only durable acceptance. The worker performs authenticated object lookup, resolves tenant/order from that result, validates the exact payment identity/amount and reconciles lost responses without another POST. Raw notification status, amount, order hints and card fields cannot grant access. Duplicates, stale leases, bounded retries and late redelivery are handled. Pending objects behind a claimed paid event stay retryable.
+
+The real-adapter processor regression exposed missing merchant/mode metadata on status GET; this was fixed and is now covered beyond interface mocks. All 33 focused adapter, route and task/webhook tests passed, together with workspace/test typecheck and lint. Migration 0026 applied successfully. Full regression suite and build are running. No real payment was made. Checkout/status UI routes, recurring scheduling/method binding, plan changes, Billing UI and production deployment remain outstanding.
+
+Final webhook verification: all 224 tests across 37 files passed with PostgreSQL/FFmpeg, and production build passed. Typecheck and lint also passed for this code. Route tests verify acknowledgement ordering, non-acknowledgement of persistence errors, body limits and configuration/rate-limit responses. Remote/browser CI for this commit is not yet asserted.
+
+## Owner billing API and checkout screen
+
+Added verified-OWNER catalog/overview, checkout, safe order status and renewal cancellation endpoints under the organization boundary. Checkout accepts only quote ID and intent key; server configuration supplies fiscal settings/return origin and verified owner data supplies receipt email. Configuration defaults remain closed. The Billing screen resumes orders, preserves retry intent, shows provider confirmation/polling and paid periods/history, and links from the owner workspace. Automatic renewal enablement remains unavailable.
+
+Both new browser scenarios passed locally in headless Chrome: real authenticated disabled-state/tenant/CSRF checks, and explicitly intercepted UI fixtures for retry-key preservation, pending confirmation, paid state and a new purchase intent. Desktop/mobile screenshots were reviewed and no horizontal overflow was found. No real payment was requested. The first local launch found a missing Playwright Chromium version; the installed Chrome channel was used. Browser testing also exposed DomainError class identity across Next hot reload, causing 500 instead of 403. Domain errors now carry a private global-symbol brand, with a reload regression and no broadening of ProviderRequestError recognition. Full type/lint/unit/build checks are running.
+
+Automatic saved-method renewal scheduling, upgrades/downgrades, provider-configured payment end-to-end browser coverage, production configuration and Vercel/worker deployment remain required. The new payment UI fixtures are not evidence of a real charge or a complete production payment setup.
+
+Remote evidence for the preceding webhook commit: CI run 37220937830 completed successfully for exact head 31796af460fa01d4982626d36a2ffe888050bd8b, including its browser stage. This does not substitute for checks of the newer Billing UI changes.
+
+Final Billing verification: all 228 tests across 38 files passed with PostgreSQL and real FFmpeg, workspace/test typecheck and lint passed, and production build passed. Both new Billing browser scenarios passed in local Chrome, with desktop/mobile screenshots reviewed. The broader existing MVP browser scenarios were not rerun locally in this step; the next PR CI run covers all four browser tests. The task-owned development server and browser were stopped. No real payment, deployment or automatic renewal was performed.
+
+## Recurring worker engine and immutable method binding
+
+Added a gated recurring scheduler, one immutable intent per paid term, encrypted-method hydration only at provider submission, and pre-send owner/consent/method/plan/term checks. Consent-frozen prices survive later catalog changes. Cancellation and manual prepayment block unsent stale tasks. Recovery is bounded to 72 hours after the latest term; no catch-up series is generated. A calendar review found that small February processing delays would otherwise reset the monthly anchor; automatic settlement now preserves the original anchor within the recovery window.
+
+Migrations 0027–0028 add renewal intents and plaintext/mode guards (71 tables). The initial generated migration put a foreign key before its required unique constraint; application failed and rolled back. Database inspection confirmed only 27 prior migrations and no new table before correcting the unapplied SQL ordering. Both additive migrations then applied successfully. No previously applied migration was edited.
+
+The initial 24 focused payment/task/webhook tests passed with four new recurring scenarios. Additional direct database guard and January-31 boundary regressions are being verified along with the final type/lint/full-suite/build checks. PAYMENT_RENEWALS_ENABLED remains false by default. Opt-in/saving-checkout UI, method readiness/recovery messaging, plan changes and deployment remain required; no real charge was made.
+
+Remote evidence for the preceding Billing UI commit: CI run 37222525012 succeeded for exact head 380be8af6ce711f40374c58e1270cae05965d056, including all four browser scenarios. This is distinct from verification of the newer recurring engine.
+
+Final recurring-engine verification: all 234 tests across 38 files passed with PostgreSQL and real FFmpeg, including 26 payment-task/webhook scenarios. Workspace/test typecheck and lint passed; production build succeeded (the final invocation reused the matching Turbo build cache). The additional regressions verify PostgreSQL rejection of plaintext/unbound recurring orders and preservation of a January-31 anchor through a late February renewal. Whitespace checks passed. External payment responses were fixtures; no live charge, new browser run or deployment was performed in this step. The feature remains off by default and new opt-in remains unavailable in the UI.
+
+## Explicit renewal opt-in and method readiness
+
+Connected owner policy preview/acceptance routes and consent-bound saving checkout to Billing. The checkbox starts unchecked, ordinary purchase remains separate, and retries retain consent and checkout intent keys. Overview exposes only merchant-scoped method readiness and the next paid-term boundary, without credentials. Added integration coverage for exact acceptance, stale/canceled consent, configuration/role denial and method readiness after capture/cancellation.
+
+Local browser testing initially found a test selector matching both the application error and Next's route announcer; the selector now targets the expected message. The focused opt-in scenario passed, including simulated consent and checkout response failures. Final browser/type/lint/full-suite/build checks are in progress. External payment responses remain explicit fixtures; no real charge or deployment was performed.
+
+All three local Billing browser scenarios passed in Chrome after the selector correction; desktop/mobile consent screenshots were reviewed with no horizontal overflow. The task-owned dev server was stopped. CI run 37224184669 also completed successfully for the preceding recurring-engine commit 9e3d371a9fe4a627d979fe000aad37df460bcafb. That remote evidence is separate from the newer opt-in changes.
+
+Verification resumed on 2026-10-09 after temporary logs/binaries had disappeared. Docker PostgreSQL retained all 29 migrations. Typecheck/lint passed again and all 29 focused payment scenarios passed. FFmpeg/FFprobe 9.0.2 were restored from the macOS distributor linked by ffmpeg.org. The initial full run had two existing media-processing timeouts under parallel load; a serial run passed both but exposed an immediate-cleanup test's dependence on application/database clock alignment. The fixture now explicitly makes its queued deletion due on the database clock before claiming it, as it already did for the retry. Production deletion timing is unchanged. Final serial verification is running.
+
+Final opt-in verification: all 237 tests across 38 files passed serially with PostgreSQL and real FFmpeg; production build passed. Workspace/test typecheck and lint passed, with the subsequent test-only clock fix checked separately. Three Billing browser scenarios passed in local Chrome earlier for this UI, including unchecked opt-in and stable keys across both simulated failure stages. No real payment or deployment was made. Upgrade/downgrade flows, configured-provider end-to-end coverage, recovery notifications, production configuration and deployment remain outstanding.
+
+## Confirmed monthly plan changes
+
+Added owner purchase preview and explicit next-period upgrade/downgrade confirmation. Orders bind the displayed last paid term; PostgreSQL verifies direction, target quote/resources and tenant ownership. Stale previews are rejected, stale unsent changes canceled, and already-submitted payments remain reconcilable without overwriting paid history. Current/upcoming plan names and consent/plan mismatch are visible in Billing. The product policy preserves prepaid periods; immediate prorated upgrades are not implemented.
+
+Migration 0029 applied to the test database (30 migrations, 71 tables). The new cyclic financial foreign key needed an explicit Drizzle extra-config return type to retain strict inference. Five focused integration tests passed in an isolated per-suite database; an initial cross-tenant assertion was corrected to expect the existing NOT_FOUND non-disclosure response. Browser and full checks are running. No live payment was made.
+
+Final monthly-change verification: 242 tests across 39 files passed serially with PostgreSQL/FFmpeg; workspace/test typecheck, lint and production build passed. Four Billing browser scenarios passed in Chrome, and the added downgrade scenario was rerun for reviewed desktop/mobile screenshots with no overflow. The dev server was stopped. The new test database is created/migrated/dropped per suite and does not modify other suites' global plan catalogs. No real charge, refund or deployment occurred.
+
+## Durable in-app notifications
+
+Migration 0030 adds notification receipts and recipient inboxes (73 tables, 31 migrations). The worker projects durable audit/payment/term facts every five seconds. Receipt insertion and recipient creation are atomic; concurrent retries cannot duplicate a delivery. Static text avoids copying private audit/provider payloads. Current membership and audience permissions are rechecked on every read and acknowledgement; former owners lose financial visibility. Keyset pagination preserves PostgreSQL timestamp precision.
+
+The notification page includes unread counts, read acknowledgement, pagination, refresh/error/empty states and links to the corresponding brand studio tab or billing page. Six dedicated integration regressions and existing publishing/social workflow assertions passed (20 focused tests total). The real-database Chrome scenario passed, including CSRF, foreign-tenant denial, persisted read state and role changes. Desktop/mobile screenshots were reviewed without horizontal overflow. Full workspace checks are in progress. This slice delivers in-app notifications; asynchronous email delivery is the next outstanding reliability task. No live external message or deployment was performed.
+
+Final notification verification: all 248 tests across 40 files passed serially with PostgreSQL and real FFmpeg. Workspace/test typecheck, lint and production build passed. The dedicated notification browser scenario passed in Chrome; its desktop/mobile screenshots were reviewed. Task-owned browser/dev processes were stopped. Production deployment and remaining product modules are still outstanding.
+
+## Encrypted authentication email outbox
+
+Migration 0031 adds `email_outbox` (74 tables, 32 migrations) and a composite auth-token reference. Registration/token replacement commits encrypted email and hashed bearer token together. The HTTP path no longer depends on an SMTP response; the persistent worker delivers with leases, bounded exponential retry and stable Message-ID. It cancels superseded/expired/disabled-account links and erases message payloads on terminal states. SMTP recovery is at-least-once: uncertain acknowledgements can repeat the same link, never create a new token. Identity and terminal delivery are guarded in PostgreSQL; encryption AAD binds each message to its user and ID.
+
+Eleven identity/outbox integration tests passed. The first new fixture run exposed incorrect direct-SQL JSON parameter encoding in two test mutations; encoding was corrected and both regressions passed. Workspace/test typecheck and lint passed. Full browser and regression validation are in progress. Web and worker now require matching encryption keys plus SMTP readiness for registration/reset. A local setup script generates a private key in ignored `.env` without exposing or replacing it.
+
+Vercel infrastructure inspection found no existing CONTENTOS project. Created project `contentos-ai` (`prj_KMzoSu8fmoWhhWqTFWFG4lc0hpEB`) under authorized team digagency, linked to the authorized GitHub repository with root `apps/web` and Node 24. No deployment was triggered. Production database/Redis/S3/SMTP and the persistent worker host are still unconfigured; the user was asked whether existing infrastructure is available while implementation continues.
+
+Remote verification: CI run 37850214258 succeeded for notification commit `0d4817f9a6b04e1b0ec2d22b1b1bdf1eb9d61f38`, including its browser stage. This does not substitute for validation of the newer email changes.
+
+Final email verification: all 253 tests across 41 files passed with PostgreSQL and real FFmpeg; workspace/test typecheck, lint and production build passed. All seven Playwright scenarios passed in installed Chrome, including the full registration → queued SMTP verification → onboarding → strategy/ideas/script → avatar/video/captions → approval/scheduled publication → analytics/recommendations chain, plus Billing and notifications. SMTP/storage/provider transports were local fixtures, not real external sends or charges. The lint pass required explicit Node imports in the new local-key setup script; that was corrected before the final passing run. Browser/web/worker fixture processes were stopped by Playwright and the separate inspection browser was closed.
+
+First Vercel staging deployment reached READY for email commit `e3f3c043386c9ab9f28d4fce7b7fe0a55690f130`: https://contentos-54l7vlhlu-digagency.vercel.app (`dpl_BNU3bMVcorBgwyPDFrPS8XvRRERk`). Chrome showed the real home page; health returned 200, registration HTML 200, and account API returned the expected safe CONFIGURATION_REQUIRED 503. No runtime credentials or database were fabricated. Initial automatic production deployment was canceled; the UI confirms `main` production tracking. Production worker/data/provider setup and remaining modules are still required.
+
+## Deployable container profiles (verification in progress)
+
+Added pinned Node 24 multi-stage worker/web images, production-only worker dependencies with frozen lockfile, an explicit tsx runtime dependency, FFmpeg/FFprobe/fonts, non-root execution, context secret exclusions and GLOBAL/self-hosted release compose settings. An initial legacy pnpm deployment stage was replaced because it re-resolved dependency ranges; the final worker uses the committed dependency graph directly.
+
+Worker image built successfully. Its offline, read-only, non-root smoke check passed actual video normalization, Cyrillic captions, JPEG cover and PCM extraction, and verified no `.env` or development test runner was included. The image applied all 32 migrations to a newly created isolated test database, then started with an isolated Redis in production mode; health returned 200 and logs contained no error. Web image and graceful shutdown checks are still in progress. No production data service or worker host has been provisioned.
+
+Remote CI run 37851537944 succeeded for email commit `e3f3c043386c9ab9f28d4fce7b7fe0a55690f130`, independently of these newer packaging changes.
+
+Container follow-up: worker SIGTERM shutdown returned exit code 0. Frozen workspace installation, workspace/test typecheck and lint passed after promoting tsx to a worker runtime dependency; the lockfile changed only that importer reference, without package upgrades. Web dependency download took about six minutes on the local connection; production build is now running.
+
+Final container verification: the Linux ARM64 web image built successfully, including Next TypeScript checks and static generation. A production-mode, non-root, read-only container with the compose-equivalent init process passed home/registration rendering, all nine referenced CSS/JavaScript assets, health, anonymous rejection and a database lookup for a well-formed unknown session. SIGTERM stopped it with code 143 without forced kill; the smoke runner initially expected only code 0, then corrected that expectation and repeated the check with init enabled. Worker shutdown had returned 0. Isolated PostgreSQL database, Redis container/network and temporary environment file were removed; existing development services were preserved. The new web smoke script passed lint. No production backend was deployed.
+
+The user authorized their existing NL server for backend infrastructure. SSH host/user details are pending; no configured SSH alias was found locally. Inspect existing services and capacity before deployment. NL is the GLOBAL placement, not RU_DATA_RESIDENCY. Team/invitation management and the other outstanding product modules remain unfinished.
+
+## Team membership and invitations
+
+Added verified owner/admin management, restricted role assignment/removal, explicit ownership transfer and email-bound seven-day invitations. Tenant locks serialize mutations. UUID membership revisions prevent stale actions after role changes and after removal/rejoining. Invitation links carry the bearer in the fragment; database stores its hash and a tenant/invitation-bound encrypted envelope for idempotent replay. Acceptance rechecks the recipient and issuer's current authority and never overwrites an existing role. Accepted/revoked envelopes are erased; identity and terminal states are immutable in PostgreSQL.
+
+Migration 0032 adds team invitations (75 tables, 33 migrations). The initial unapplied draft used integer revisions; it was regenerated before any application with UUID revisions to prevent old requests matching a newly recreated membership. The final migration applied to the isolated integration database and main test database. Initial six team plus four credential tests passed. Added expiry/disabled-user coverage, team/join UI, Origin-protected API routes and a browser workflow; full validation is running. A dashboard link now selects the invited organization after acceptance, including users with existing organizations. No external invitations were sent.
+
+Infrastructure: container commit b79de657d87f5afd52d958c30f479192c37d62c2 was pushed; GitHub CI 37854326989 succeeded. Its Vercel preview dpl_5jmJx55RC9fKAbX4oQRr9rtxRkjV reached READY at https://contentos-637b1dl11-digagency.vercel.app. HTTP home/health returned 200; account API still honestly returns CONFIGURATION_REQUIRED. SSH to the user's NL server succeeded with the existing matching key. Read-only inventory found Ubuntu 24.04, 2 CPUs/4 GB RAM, many existing applications, ~700 MB available RAM, ~3.2 GB swap used and 8.3 GB disk free. No server services were changed. The owner chose to increase resources; deployment waits for sufficient measured capacity.
+
+Final team verification: all 263 tests in 42 files passed, including ten team integration scenarios and concurrent ownership transfers. Removing/demoting an issuer permanently revokes invitations outside their remaining authority, preventing old links from reviving after rejoining. Workspace/test typecheck, lint and production build passed. All eight Playwright scenarios passed in installed Chrome (8.7 minutes), including the full MVP chain and the new two-account team workflow. Final desktop/mobile team screenshots were inspected with no horizontal overflow. Playwright stopped its web/worker/fixture servers. Production backend and mail remain unconfigured; the operator selected a server resource upgrade and has no SMTP provider yet. A compatible Resend setup was documented; domain/DNS details are pending. No external invitation, SMTP message or paid provider request was made.
+
+## Completed Brand Brain profile editor
+
+A completed brand now has a profile/voice editor for OWNER, ADMIN and MANAGER members. The new strict API checks current account verification, membership, tenant scope, completion and revision under database locks. Concurrent stale writes fail with CONFLICT. Product/audience/pillar identities are preserved, voice is updated in place and new AI requests read the updated normalized context. Existing queued snapshots and strategy/script versions remain intact. Audit metadata contains revision numbers, not profile text. Editing all structured entity lists remains outstanding.
+
+Verification: 266 tests across 43 files passed with PostgreSQL and real FFmpeg; workspace/test typecheck and lint passed. The new Chrome scenario passed after fixing textarea label markup, covering reload persistence, stale-save rejection and mobile overflow. Desktop/mobile screenshots were inspected. Production build passed. Existing eight browser scenarios were verified on the preceding team commit; the added profile scenario is the ninth. No paid AI or live SMTP request was made. NL resources were rechecked and remain 4 GB RAM / 2 CPU / 8.2 GB free disk, so deployment of the new stack is still awaiting the operator's upgrade.
+
+
+## Structured Brand Brain collections
+
+All required normalized collections can now be read and explicitly edited after onboarding: products, audiences, pains, desires, objections, competitors, positioning, pillars, offers, lead magnets, CTAs, rules and references. Writes share the brand revision and tenant lock, require a currently verified OWNER/ADMIN/MANAGER, reject foreign/archived/duplicate IDs and preserve mandatory lists. Removed entries receive archived_at instead of being deleted; downstream references remain valid. New AI snapshots filter archives and include the additional collections. Old queued snapshots and draft onboarding retain compatible schemas. Migration 0033 adds archival timestamps and is applied to local development/test databases.
+
+Verification: 269 tests in 43 files passed with PostgreSQL and FFmpeg, including collection mutations, archival retention, permissions, concurrency and actual provider prompt context. Final workspace/test typecheck and lint passed. The full MVP browser chain and CSRF scenario passed (5.1 minutes including the initial profile-test locator failure); the corrected profile/collection scenario then passed independently in Chrome (24 seconds). The locator was narrowed to distinguish the profile success message from the collection loading status. Mobile collection rendering was inspected with no horizontal overflow. Production build passed. No live paid provider calls occurred.
+
+
+## Agency client portfolio
+
+A gated Clients page supports explicit owner opt-in, atomic/idempotent client-organization creation, linking organizations owned by the actor, and revision-safe portfolio archiving/restoration. Clients remain separate tenants with independent membership, ledgers, subscriptions, brands and provider connections. Portfolio queries join current direct client membership; agency membership alone grants no client data access. Existing organizations remain usable after portfolio mode is disabled. The deployment gate defaults off. Migration 0034 adds tenant feature flags and immutable-identity client relationships, applied locally. See [agency workflow](agency.md).
+
+All 275 tests in 44 files passed with PostgreSQL and FFmpeg, including six focused agency integration scenarios. Workspace/test typecheck and lint passed. Agency and team Chrome scenarios passed; the agency browser test was then strengthened to wait for the client brand list before cleanup. The strengthened agency scenario passed in Chrome (47 seconds), including a successful client-data fetch after mode was disabled. Final desktop/mobile screenshots were inspected with no horizontal overflow. Production build passed. Local development PostgreSQL confirms 35 applied migrations and 77 public tables. No external email, account invitation or paid provider operation was performed.
+
+
+## Platform operator console foundation
+
+A separately provisioned platform operator can access 15 allowlisted operational views: users, organizations, jobs/failures, subscription terms, plan versions, ledger, webhooks, social status, AI call costs/models, tenant flags, audit headers, mail delivery, payment tasks and support actions. Output projections exclude credentials, hashes, payloads, job inputs/outputs and arbitrary audit metadata. Successful reads are audited. Unknown costs remain null; configuration presence is not presented as measured provider health.
+
+The deployment gate defaults off; an enabled verified user also needs an unrevoked SUPPORT/ADMIN operator record. Tenant ownership never grants platform access. Host-only provisioning is audited and uses explicit UUID/role/ticket arguments. The console can revoke ordinary-user sessions with actor-bound idempotency, a reason/ticket, current role checks and atomic result/audit persistence. Retries do not revoke later logins. Operator accounts are excluded from this support action. Migration 0035 adds operator/action records and update-protects action results. Real users were not granted operator access. See [admin scope and provisioning](platform-admin.md).
+
+Verification: 281 tests in 45 files passed with PostgreSQL and FFmpeg, including explicit CLI provisioning, denied tenant owners, bounded projections/pagination, unknown costs, concurrent/replayed support requests and current account/role checks. The initial isolated test fixture's timestamp encoding was corrected before the passing run. Final workspace/test typecheck, lint and production build passed. The Chrome operator scenario passed (43 seconds), covering denied tenant-owner access, guarded navigation, safe user filtering, CSRF denial, actual session invalidation and action history. Desktop/mobile screenshots were inspected; wide tables scroll within their panel without page overflow. A final six-test regression also passed after linking audit metadata to the immutable action ID. Development PostgreSQL confirms 36 migrations and 79 tables. No paid provider requests or external messages were sent.
+
+
+## Platform tariff publishing
+
+- Added ADMIN-only price/resource/availability publication with strict validation, optimistic version checks, plan-row checkout fencing, actor-bound idempotency and atomic audit. SUPPORT remains read-only.
+- Every edit creates an immutable version; existing orders, paid periods and renewal consents retain their price and resource snapshots. Disabling also prevents scheduling new automatic renewals, but preserves already-created payment intents.
+- Added a Russian operator form with units, explicit review, retry-safe intent, reload and conflict handling. Prices in test databases are synthetic; no real paid catalog or provider transaction was configured.
+- Migration 0036 adds immutable operator pricing evidence. Production infrastructure/SMTP/provider credentials and the broader remaining modules are still outstanding. See [operator details](platform-admin.md).
+
+Validation for tariff publishing: 287 tests across 46 files passed with real PostgreSQL/Redis/FFmpeg; workspace/test typecheck, lint and production build passed; both admin Chrome scenarios passed, including tariff publication and session support. External payment providers were not called.
+Final pricing-only Chrome rerun passed after making its fixture name unique across repeated runs; desktop/mobile form screenshots were inspected without page overflow.
+
+
+## Financial evidence reporting
+
+- Added operator-only receipts and recorded AI-cost aggregates, tenant and UTC-period filters, separate live/test payment views, currency-separated exact decimal sums, user/brand/provider attribution and captured resource totals.
+- Reports retain unknown cost counts, expose missing monetary evidence including video jobs and cap group rows without truncating totals. Gross margin remains unknown: full expense/fee/refund/FX capture and per-video economics remain outstanding, not replaced by an incomplete calculation.
+- Explicitly requested reports are audited, rate-limited and use a repeatable-read snapshot with bounded statement time. See [financial reporting definitions](financial-reporting.md).
+
+Financial reporting validation: 293 tests / 47 files passed; the six financial integration tests passed again after the report time limit and migration 0037 period indexes. Both local databases have the additive migration.
+Workspace/test typecheck, lint and production build passed. Both admin Chrome scenarios passed with the financial report; the mobile finance screenshot was inspected without page overflow.
+
+
+## Privacy Center and deletion request intake
+
+- Added an authenticated Privacy Center for session revocation and navigation to the existing brand consent/social/avatar/video/photo controls; existing service authorization and cleanup workflows remain authoritative.
+- Added durable, password-confirmed account-deletion requests with explicit acknowledgement, email verification, user-lock/password-change fencing, idempotency, one-active-request enforcement, revision-checked cancellation and content-free audit events. Operator queue projection is gated separately from organization roles.
+- This is request intake, not account erasure. The UI explicitly preserves that distinction. Basic account JSON export is now implemented; extended account export and the actual multi-resource account deletion workflow remain outstanding. See [privacy scope](privacy-center.md).
+
+Privacy validation: 299 tests across 48 files passed with PostgreSQL/Redis/real FFmpeg; workspace/test typecheck and lint passed. Schema generation reports no drift after migration 0038. No real account deletion was requested or performed.
+Privacy browser verification passed after narrowing the wrong-password alert selector to exclude Next.js’s route announcer. The two existing admin scenarios also passed. Six privacy integration cases passed again after switching cancellation timestamps to the database clock. The mobile screenshot was inspected without page overflow.
+Final workspace/test typecheck, lint and production build passed for Privacy Center. NL read-only recheck still shows 2 CPUs / 4 GB RAM and about 8.2 GB free disk; no existing server services were modified.
+
+Account export validation: eight privacy integration tests passed, including fresh-password/verification checks, cross-user isolation, explicit credential exclusion, empty audit payload and oversized-archive rejection. Workspace/test typecheck and lint passed. Chrome verified the actual JSON download and existing deletion/session controls; mobile layout was inspected. The first browser run exceeded its 30-second navigation expectation while Next compiled the page for 32 seconds under concurrent typecheck load; the isolated rerun passed without changing application or test behavior.
+
+Account export production build passed. This change adds no database migration and does not configure live infrastructure or provider credentials.
+
+## Extended personal evidence export
+
+Format v2 adds retained authentication lifecycle and mail-delivery metadata, own consent acceptance evidence and separate revocation records, historical renewal terms and own audit action/date metadata. Actor-based queries intentionally work without current organization membership while omitting subject names, other actors, operational payloads, mail envelopes and credentials. A revoker cannot obtain the original acceptor's IP/user agent. Existing row/byte caps reject oversized archives instead of truncating them. Payment transactions and organization material export, large asynchronous archives and account erasure remain unfinished.
+
+Validation: all 304 tests across 49 files passed; workspace/test typecheck and lint passed. Eleven focused privacy tests include synthetic cross-user records, absent tenant membership, disabled accounts, stale proof and activity-history overflow. Chrome downloaded and inspected JSON v2 and verified existing deletion/session controls; mobile screenshot inspected. Migration 0039 applied locally to development/test databases; schema generator reports no drift. Previous commit 2ccc6c4 passed remote CI 38041653755. No real customer export or deletion was performed.
+
+NL read-only capacity check: 2 CPUs, 3915 MiB RAM (867 MiB available), swap 3364/4095 MiB, root 8.0 GiB free. The promised resource increase is not yet visible; existing remote services were not modified.
+
+Extended-export production build passed. Local schema contains 40 applied migrations and 81 public tables.
+
+## Brand UTM link builder
+
+Added a brand-scoped UTM library with encoded URL preview, persistent save, explicit clipboard/manual copy, archive/restore and bounded cursor pagination. Required source/medium/campaign and optional term/content replace pre-existing UTM tags while preserving other query parameters and fragments. HTTP(S)-only URL validation excludes credentials and ambiguous whitespace/control input. Server construction is authoritative; no destination is fetched or automatically published.
+
+Verified content-writing roles may create/archive links; current tenant members may read. Tenant locks, membership rechecks, actor-bound idempotency and optimistic archive revisions protect retries and concurrent changes. Composite foreign keys fence brand ownership. Audits omit URLs and campaign text. Migration 0040 adds one table. This completes the standalone UTM builder, not click/lead measurement or the full funnel module; see [UTM scope](utm-links.md).
+
+UTM validation: 317 tests in 51 files passed, including 13 URL/security/tenant/idempotency/archive/pagination checks. Final workspace/test typecheck, lint and production build passed. Chrome verified preview, actual clipboard contents, persistence after reload, archive/restore, CSRF denial and revoked write access after role change. Initial browser runs caught accessible-name problems caused by nested textarea/select labels; explicit label associations fixed them and the complete scenario passed. Mobile screenshot inspected without overflow. Migration 0040 applied to local development/test databases: 41 migrations and 82 public tables. No external publication, URL fetch, customer click/lead collection or remote infrastructure change was performed.
+
+## Content-to-CTA funnels and manual result history
+
+Added brand-scoped immutable bindings between content, CTA, destination category and saved UTM link, with searchable paginated selectors. Composite foreign keys prevent cross-brand references. Archived UTM links cannot be attached to new targets, while historical bindings retain their address. Creating a binding neither publishes content nor changes a caption.
+
+Verified managers/administrators/owners can record manual click/lead aggregates for explicit UTC periods, with source description and append-only corrections. Null metrics remain unknown; no aggregate conversion or overlapping-period total is fabricated. Optimistic period versions, tenant serialization, actor-bound idempotency and membership rechecks protect concurrent saves/retries. Current and replaced versions remain distinguishable in the UI. Database triggers prohibit overwriting history. Automated tracking, lead forms, CRM ingestion and external evidence verification remain outstanding; see [funnel scope](funnels.md).
+
+Funnel validation: all 322 tests in 52 files passed; workspace/test typecheck, lint and production build passed. Five integration scenarios exercise concurrent retries/corrections, foreign/sibling brand rejection including direct DB constraints, role and membership fencing, archived-link behavior, unknown versus zero, immutable history and payload-free audits. Chrome verified actual binding creation, manual reporting, persisted corrections/replaced versions, CSRF rejection and read-only behavior after role downgrade; mobile screenshot inspected without overflow. Migration 0041 applied locally: 42 migrations, 84 public tables; schema generation reports no drift. No external tracking, real lead collection or remote infrastructure changes were performed.
+
+## Local development seed
+
+Added the explicit `pnpm db:seed` command for a fictional verified local owner, organization/workspace, completed structured brand, 30-day strategy, three ideas and an unapproved editable script. Synthetic job evidence is marked mock; fixture resource entries use the existing reserve/settle ledger logic. No provider, mail, publishing or dispatch task is created. No shared password is embedded or printed.
+
+The CLI checks development/test mode, explicit opt-in, loopback database/name and private password before connecting. Atomic insertion and an advisory lock protect concurrent runs; email/ID conflicts roll back, and repeated runs preserve account credentials, disabled status, edits and credits. Full media/video/publication analytics seed coverage remains outstanding; see [development seed scope](development-seed.md).
+
+Five new unit/integration checks passed, including conflict rollback, concurrent runs, schema-valid content, ledger consistency and preserved account state. The actual CLI was exercised against a fresh disposable database: initial creation, non-mutating rerun and production refusal passed without password output; the owned database was then removed. No demo account was created in the regular development database or remotely.
+
+Read-only NL recheck still shows 2 CPUs, 3915 MiB RAM (905 MiB available), 3394 MiB used swap and 8.0 GiB free root disk. Existing server services were not changed. Previous funnel commit c60a371 passed remote CI run 38088588556.
+
+Final seed validation: 327 tests across 54 files passed with PostgreSQL and real FFmpeg. Workspace/CLI/test typecheck, lint and production build passed. No schema migration or UI change was required.
+
+## Brand Guardian script review
+
+Added a saved-version review workflow using the existing asynchronous job/outbox, LLM abstraction, bounded repair, cached responses and reserve/capture/release accounting. Strict findings reference actual quoted script text and, for brand-rule findings, an existing rule in the saved context. Semantic checks run at generation, cache reuse and repository completion. The worker rechecks permissions before persistence.
+
+The script editor requests a review, opens the completed report, shows exact quotes and rule snapshots, labels demo responses and warns when script or brand revisions change. Reviews never mutate scripts, approvals or Brand Brain. FACT_CHECK findings only identify statements for human verification; no external source checking or claim of factual certification is implemented. The latest 50 brand reviews are exposed in this initial UI, with older records retained. See [Brand Guardian scope](brand-guardian.md).
+
+Migration 0042 adds immutable reports, script-version referential integrity and a configurable usage policy. Six focused unit/integration checks passed for evidence validation/repair, concurrent idempotency, version snapshots, permissions, stale content, immutable history and credit settlement. Local development/test migrations are applied. Browser and full-regression verification are in progress; no paid provider request was made.
+
+Chrome verification passed through the actual worker: request/credit capture, report persistence, stale-version warning, unsaved-draft guard, read-only role and CSRF denial. The mobile screenshot was inspected without horizontal overflow. Initial browser attempts exposed fixture JSON serialization and an existing nested-label accessible-name issue in the script selector; both were fixed before the passing run.
+
+Final workspace/test typecheck and lint passed. Full regression: 332 of 333 tests passed; the password hashing test alone exceeded its 30-second limit during substantial local slowdown. Its isolated rerun (120-second invocation limit, no source/cryptography changes) passed both password tests in 13.44 seconds. The six new review tests passed in the full run, including replacement of a forged caller snapshot with the saved database version. Production build and schema drift check are in progress.
+
+Production build passed; schema generation reports no drift. Development PostgreSQL confirms 43 applied migrations and 85 public tables. Previous seed commit 3087d88 passed remote CI 38089510804. Broader product completion and configured production infrastructure remain outstanding.
+
+
+## Standalone Post Writer and versioned editor
+
+Added GENERATE_POST using the existing metered asynchronous generation pipeline, a strict title/body/hashtags/fact-check-note output and explicit demo fixture. Persistent posts and immutable content_versions distinguish editable text from video scripts. Verified content writers may generate/edit; approvers authorize only a saved current version. Edits append history and clear prior approval; concurrent edits reject stale revisions. Reads and writes retain tenant/brand isolation and worker permission rechecks.
+
+The Posts tab supports generation, editing, history, approval and plain-text copying. An approved post prefills an independent editable calendar draft; no publication is queued until the existing explicit publishing workflow is used. Platform limits are checked at delivery, and other social adapters remain pending. See [post workflow and limits](posts.md).
+
+Migration 0043 adds posts/content_versions and the usage policy; local development/test databases are migrated. Five focused schema/integration tests passed, including concurrent retry/editing, ledger settlement, immutable history, writer/approver roles and account disable fencing. Typecheck and lint passed; browser and full regression are being verified. Previous f285a6a passed full remote CI 38091267130.
+
+Post Writer browser verification passed in Chrome (40.3 seconds): actual worker generation and credit capture, versioned editing/approval, persisted history, separate editable calendar copy without publishing tasks, CSRF/role denial and mobile overflow. Screenshot inspected. Durable approval notifications now route post recipients to the Posts tab; integration coverage checks deduplication. Read-only NL check on October 12 still shows 2 CPUs, 3915 MiB RAM (867 MiB available), 3419 MiB used swap and 7.8 GiB free disk; remote services were not changed.
+
+Final Post Writer validation: all 338 tests across 58 files passed on the first full run, including existing notification/Brand Guardian regressions. Workspace/test typecheck, lint and production build passed. Schema generation reports no drift; local databases now have 44 migrations and 87 tables. No real AI call, social publication or remote infrastructure mutation was performed.
+
+
+## Designed covers for new videos
+
+Video creation now accepts an optional saved cover design: relative frame, editable headline, frame/solid background, three font presets, three layouts and explicit colors. FFmpeg renders a full-resolution private JPEG in the existing video worker; old requests preserve the first-frame thumbnail. Request idempotency includes the design, caption confirmation retains it, and video deletion scrubs it. No migration or new provider credential is needed. See [scope and remaining Cover Studio work](video-covers.md).
+
+Focused validation initially passed 24 tests for schema injection rejection, literal Unicode rendering, presets, persistence, permissions, idempotency and cleanup. A changing-frame fixture and browser coverage have been added; final regression checks are in progress. Independent editing/versioning of covers on already generated videos remains outstanding; this slice does not complete the full Cover Studio requirement.
+
+Final cover checks: all 344 tests across 59 files passed with PostgreSQL and real FFmpeg. A subsequent small adjustment bases seeking on measured final duration; all 13 renderer/schema checks passed again. Workspace/test typecheck and lint passed. Chrome passed both full-chain/CSRF scenarios in 4.9 minutes, including actual cover JPEG dimensions, retained design after caption editing, approval, mock publication and cleanup. The mobile screenshot was inspected. Previous Post Writer commit 96d95b9 passed remote CI 38175681324. Production build passed in 16 seconds; no external paid render or NL infrastructure change was performed.
+
+
+## Versioned Cover Studio for ready videos
+
+Migration 0044 adds durable cover tasks/versions, video selection revisions, immutable identity/design guards and a metered GENERATE_COVER policy. The separate worker queue renders from the existing private final MP4 without HeyGen submission. It rechecks actor/tenant/script/consent, uses bounded leases and retries, captures once on success and releases final failures. The editor browses the actual video, saves a selected timestamp, previews versions and explicitly selects a READY result. Selection clears video approval and is denied during pending/uncertain publishing. Version 0 remains available.
+
+Video deletion now fences cover jobs, refunds held cover reserves, waits through active leases, removes all version objects and scrubs their designs. Cover history is capped at 50 additional versions per video. Current social adapters do not upload custom cover thumbnails; AI headline suggestions and uploaded-image backgrounds remain optional enhancements. See [Cover Studio behavior and limits](video-covers.md).
+
+Focused renderer/repository tests passed. Full regression passed all 346 tests across 59 files, including disabled-actor enforcement, scheduled-publication blocking, immutable history, retries, stale-lease recovery and deletion fencing. The disabled-actor test initially expected NOT_AUTHORIZED; it was corrected to the existing membership layer's intentional NOT_FOUND response after verifying behavior. Typecheck/lint passed before the final UI timestamp/deletion batching adjustment; final checks and Chrome are in progress.
+
+Chrome passed both full-chain and CSRF scenarios in 4.7 minutes after adding the versioned-cover object path to the loopback S3 fixture. The first attempt correctly exhausted retries/refunded when that fixture rejected the new path. The passing run exercised real FFmpeg through the separate worker queue, actual-frame selection, saved versions, preview, approval reset/reapproval and mock publishing. Mobile screenshot inspected without overflow. All 26 focused renderer/repository checks passed again after the final deletion batching, dispatch cooldown grouping and timestamp changes. Local development/test databases have 45 migrations and 88 tables. Previous 22cba7f passed remote CI 38177037220.
+
+Final review also bound video approval to the current cover revision. A stale browser now receives CONFLICT instead of approving a cover changed by another editor; approval audits include the selected version/revision. All 13 video integration tests passed with this guard. The final Chrome rerun explicitly checks stale-approval HTTP 409 before approving the current revision.
+
+Final delivery checks passed: workspace/test typecheck, lint and production build (15.8 seconds). Schema generation reports no changes. Final Chrome rerun passed both scenarios in 4.6 minutes, explicitly rejecting stale cover approval with HTTP 409 before successful current-version approval and mock publication. No paid avatar render, real social send or remote infrastructure mutation was made.
+
+## Carousel Studio
+
+Implemented structured 2–10-slide generation, immutable versions, separate writer/approver permissions, optimistic editing, approval reset and durable approval notifications. Design presets render real square/portrait PNGs locally in the browser. Approved captions can prefill a separate CAROUSEL calendar draft. No automatic album publication or persistent slide media is claimed; see [scope and limits](carousels.md).
+
+Focused unit and PostgreSQL integration checks passed (5 tests), covering idempotency, one credit capture, concurrent edits, immutable history, roles, scope, notifications and revoked actors. Final browser/regression verification is in progress.
+
+Chrome passed the complete carousel scenario (1.6 minutes), including real worker/ledger, slide reordering, version approval/history, an actual 1080×1350 PNG download, independent calendar draft, CSRF/role checks and a mobile screenshot with no overflow. PNG and screenshot inspected. Full regression passed 351 tests across 61 files; the subsequent FFmpeg regression file passed all 12 checks. Local development schema has 46 migrations / 90 tables and schema generation reports no drift.
+
+Previous commit cdfbd17 failed Linux CI 38179179726 on a late-frame cover test: the container duration included an audio tail beyond the last video frame, yielding no JPEG. Frame clamping now uses video-stream duration/rate, with a specific longer-audio regression. Local rendering passes; Linux confirmation will come from the next CI run. Seeking semantics were checked against the [official FFmpeg documentation](https://ffmpeg.org/ffmpeg.html#Main-options).
+
+Final workspace/test typecheck, lint and production build passed (build 18.9 seconds). No real provider generation, social posting or remote infrastructure change was performed in this slice.
+
+## Server error monitoring
+
+Implemented the provider-independent ErrorReporter with an isolated official Sentry Node SDK client. API 5xx and Next Node rendering errors, worker queues/operational loops and domain processor failures are wired. Events carry only allowlisted codes, validated correlation/job UUIDs and service/release metadata; original errors, user content and credentials are excluded. Reporting is bounded and best-effort, with disabled/configuration-required operator status until configured. See [coverage and limitations](error-monitoring.md).
+
+Ten focused SDK/SMTP integration checks passed, including rejected transport, sensitive payload exclusion, invalid identifiers, burst bounds and durable email retries despite a throwing reporter. Workspace typecheck passed. Full regression and production build are in progress. Previous carousel/FFmpeg commit 37982d6 passed Linux CI unit tests and build; remote browser checks are still running, confirming the late-frame fix no longer fails the Linux renderer tests.
+
+Remote CI 38180174930 for 37982d6 completed successfully, including Linux FFmpeg and the full browser suite.
+
+Final monitoring verification: workspace/test typecheck and lint passed; production build passed after separating the monitoring import and externalizing the Node SDK (1m23.6s). The final full run had 358 passed / 1 timeout across 359 tests in 63 files. The unchanged privacy-export file then passed all three tests in isolation in 14.3 seconds with the original 30-second limit. The earlier full run passed all 357 then-existing tests, and the two added API checks passed separately.
+
+Two dev-server browser attempts exceeded the existing 120-second startup deadline on the loaded local host. No deadline was increased. Added an explicit PLAYWRIGHT_WEB_MODE=production option and verified the built app instead: Chrome operator scenario passed in 1.3 minutes, including the monitoring readiness row, ordinary-user denial, CSRF protection, session revocation/audit and mobile overflow. Screenshot inspected. Next emits its existing standalone/next-start warning in this test mode; deployment still uses the configured standalone output/Vercel integration. Browser fixtures explicitly disable outbound error reporting.
+
+No monitoring account was provisioned, no live event was sent, and no NL infrastructure was changed. Live endpoint verification and alert configuration require the selected monitoring service's DSN.
+
+## Image adapter boundary and browser CI correction
+
+Added provider-neutral image inputs/metering, a real bounded OpenAI Images adapter, a development-only raster fixture and full raster normalization before future storage. Three explicit sizes, one medium-quality output, no automatic retry, unknown usage retained as null, and ambiguous post-dispatch results marked RECONCILIATION_REQUIRED. Configuration defaults to disabled. No live generation or charge was made. This is the adapter boundary only: durable image tasks, ledger settlement, private storage lifecycle and Image Studio remain to be implemented; see [next integration requirements](image-generation.md).
+
+Verification passed: 17 focused image/photo/config checks; all 371 tests across 64 files (477.26 seconds); workspace and test typecheck; lint; production build (2m3.85s). No database migration or runtime provider enablement was required.
+
+Previous monitoring commit 908384d passed all Linux unit/integration checks and build, but CI 38182622027 failed one of 18 browser scenarios. Brand-profile stale-save behavior worked; its generic alert locator matched both the real error and Next's route announcer. The assertion now selects the specific conflict message, preserving the database check that stale content was not saved. The other 17 browser scenarios passed. The corrected Chrome scenario passed against the production build (1.2 minutes), including an actual HTTP 409, unchanged persisted content, structured-list updates and mobile overflow checks. Mobile screenshot inspected. Task-owned browser servers stopped after verification. New remote CI verification follows the push.
+
+
+## Image Studio: durable generation and private media lifecycle
+
+Image Studio now connects the UI and tenant-scoped API to a separate durable worker queue, the existing credit ledger, normalized private JPEG storage, approval, signed downloads and asynchronous deletion. Three image sizes, explicit provider/model configuration, actor-bound idempotency, bounded concurrency and current permission checks protect generation. Submission is persisted before the remote call; ambiguous outcomes are never automatically resubmitted. Customer reserves are released for unavailable results while possible vendor expense remains unknown. Migrations 0046–0048 add immutable image history, state/output/approval guards, currency snapshots, indexes and the GENERATE_IMAGE policy. Schema generation reports no drift (49 migrations / 91 tables).
+
+Deletion fences completion and immediately blocks new signed URLs, retries object cleanup, scrubs prompts and sweeps late writes. Existing captures remain charged. Durable approval/failure notifications link to Image Studio, and operator finance includes known/unknown image submission cost in the original currency, even after deletion. Automatic calendar attachments, social image publishing, image editing and reuse as avatar/cover inputs remain outstanding; see [image behavior and limits](image-generation.md).
+
+Workspace/test typecheck, lint and production build passed. Chrome passed the complete Image Studio scenario against the built app (22.8 seconds), including actual portrait JPEG dimensions, approval and role/CSRF enforcement, one ledger capture, private storage deletion and prompt scrubbing. Mobile screenshot inspected without horizontal overflow. Full regression passed all 382 tests across 65 files in 156.35 seconds, including image uncertainty, orphan cleanup, permission revocation, notification deduplication, currency snapshots and finance coverage. Prior adapter commit 00b0ee2 passed remote CI 38184249310, including all browser scenarios.
+
+No live OpenAI generation or paid request was made. Runtime database/Redis/private storage, worker deployment, live provider credentials and SMTP/domain configuration remain production dependencies; no NL infrastructure was changed.
+
+
+## Optional video watermark
+
+Added an opt-in text watermark to Video Studio with four corner positions and 20–100% opacity. The validated setting is part of the request identity, persists through caption review and is rendered into the final MP4 through FFmpeg/libass. Existing requests remain unmarked by default; original provider bytes remain separate. Deletion scrubs the setting. See [behavior and limitations](video-watermarks.md). No new migration, paid provider call or NL configuration is required.
+
+Real FFmpeg frame checks passed for all four positions, and video repository integration checks passed for retained options, idempotency conflicts, caption confirmation and deletion. Workspace/test typecheck, lint and production build passed (1m45.7s); full regression passed all 387 tests across 65 files in 193.37 seconds. Chrome passed both full-chain and CSRF scenarios in 6.1 minutes, including watermark opt-in/default-off controls, persisted options through subtitle review, final video/cover processing, approval, mock publishing and cleanup. Mobile screenshot inspected without overflow. Previous Image Studio commit 2cd5fc1 passed remote CI 38186185228, including the complete Linux browser suite. NL was rechecked read-only: 2 CPUs, 3915 MiB RAM with 887 MiB available, 3422 MiB swap used and 7.9 GB disk free. B-roll, music, intro/outro, private voices and the remaining original requirements stay in scope.

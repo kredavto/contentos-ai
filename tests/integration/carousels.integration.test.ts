@@ -1,0 +1,63 @@
+import { randomUUID } from 'node:crypto';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { NotificationRepository, BrandRepository, ContentRepository, JobRepository, LedgerRepository } from '../../packages/db/src/index';
+import { NotificationService } from '../../packages/core/src/notifications';
+import { GenerationService } from '../../packages/core/src/generation';
+import { GenerationOrchestrator } from '../../packages/ai/src/index';
+import { MockLLMProvider } from '../../packages/providers/src/index';
+import { generationInputSchema, carouselSchema } from '../../packages/types/src/index';
+import { seedDevelopment, demoIds } from '../../packages/db/src/development-seed';
+import { isolatedTestDatabase } from '../helpers/isolated-database';
+const url=process.env.TEST_DATABASE_URL;
+describe.skipIf(!url)('versioned carousel creation and approval',()=>{
+  const database=isolatedTestDatabase(url),jobs=new JobRepository(database.db),content=new ContentRepository(database.db),ledger=new LedgerRepository(database.db),service=new GenerationService(jobs,new BrandRepository(database.db),ledger,content,{provider:'mock',model:'mock-v1',ready:true});
+  const {user,tenant,brand}=demoIds,correlation=randomUUID();let carouselId='';
+  const input={type:'GENERATE_CAROUSEL',options:{topic:'Fictional course',platform:'TELEGRAM'},idempotencyKey:randomUUID()};
+  beforeAll(async()=>{await seedDevelopment(database.db,`scrypt:v1:${'0'.repeat(32)}:${'0'.repeat(128)}`);});
+  it('creates one carousel/immutable version and captures once for concurrent retry',async()=>{
+    const saved=await Promise.all([service.enqueue(user,tenant,brand,input,correlation),service.enqueue(user,tenant,brand,input,correlation)]);expect(saved[0]?.id).toBe(saved[1]?.id);
+    await expect(service.enqueue(user,tenant,brand,{...input,options:{...input.options,topic:'Changed'}},correlation)).rejects.toThrow('CONFLICT');
+    const job=await jobs.claim(tenant,saved[0]!.id);expect(job?.leaseToken).toBeTruthy();
+    const output=await new GenerationOrchestrator([{provider:new MockLLMProvider('test'),model:'mock-v1'}]).run('GENERATE_CAROUSEL',generationInputSchema.parse(job!.input),{tenantId:tenant,internalId:job!.id,idempotencyKey:job!.idempotencyKey,correlationId:correlation,signal:AbortSignal.timeout(10000)},{async started(){},async succeeded(){},async failed(){}});
+    const result=await jobs.complete(tenant,job!.id,job!.leaseToken!,output);carouselId=result.internalId;
+    expect(carouselSchema.safeParse(output).success).toBe(true);
+    const overview=await content.overview(user,tenant,brand);expect(overview.carousels).toHaveLength(1);expect(overview.carousels[0]?.approvedVersion).toBeNull();
+    expect((await ledger.overview(user,tenant)).balances.AI_CREDITS).toEqual({available:95,reserved:0});
+    const notices=new NotificationRepository(database.db);await notices.projectBatch(tenant);await notices.projectBatch(tenant);
+    const inbox=await new NotificationService(notices).list(user,tenant,{});expect(inbox.items.filter(item=>item.type==='CONTENT_APPROVAL_REQUIRED')).toHaveLength(1);expect(inbox.items.find(item=>item.type==='CONTENT_APPROVAL_REQUIRED')?.href).toContain('&tab=carousels');
+    await expect(jobs.complete(tenant,job!.id,job!.leaseToken!,output)).rejects.toThrow('CONFLICT');
+  });
+  it('appends concurrent-safe edits and clears previous approval without changing history',async()=>{
+    await service.editCarousel(user,tenant,brand,carouselId,{revision:1,content:null},correlation);
+    const original=(await content.carouselHistory(user,tenant,brand,carouselId))[0]!.content;
+    const results=await Promise.allSettled(['first','second'].map(caption=>service.editCarousel(user,tenant,brand,carouselId,{revision:1,content:{...original,caption}},correlation)));
+    expect(results.filter(result=>result.status==='fulfilled')).toHaveLength(1);
+    const history=await service.carouselHistory(user,tenant,brand,carouselId);expect(history).toHaveLength(2);expect(history[1]!.content).toEqual(original);
+    expect((await content.overview(user,tenant,brand)).carousels[0]?.approvedVersion).toBeNull();
+    await expect(database.client`update carousel_versions set version=10 where carousel_id=${carouselId}`).rejects.toThrow();
+    await expect(database.client`delete from carousel_versions where carousel_id=${carouselId}`).rejects.toThrow();
+    await expect(service.editCarousel(user,tenant,brand,carouselId,{revision:1,content:null},correlation)).rejects.toThrow('CONFLICT');
+  });
+  it('enforces scope and distinct writer/approver roles with idempotent approval',async()=>{
+    await expect(service.carouselHistory(user,tenant,randomUUID(),carouselId)).rejects.toThrow('NOT_FOUND');
+    const current=(await service.carouselHistory(user,tenant,brand,carouselId))[0]!.content;
+    await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
+    await expect(service.editCarousel(user,tenant,brand,carouselId,{revision:2,content:null},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await database.client`update organization_members set role='CLIENT_APPROVER' where tenant_id=${tenant} and user_id=${user}`;
+    await expect(service.editCarousel(user,tenant,brand,carouselId,{revision:2,content:current},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await service.editCarousel(user,tenant,brand,carouselId,{revision:2,content:null},correlation);await service.editCarousel(user,tenant,brand,carouselId,{revision:2,content:null},correlation);
+    expect(await database.client`select id from audit_logs where action='CAROUSEL_APPROVED' and resource_id=${carouselId}`).toHaveLength(2);
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
+    expect((await service.carouselHistory(user,tenant,brand,carouselId))).toHaveLength(2);
+    await expect(service.enqueue(user,tenant,brand,{...input,idempotencyKey:randomUUID()},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
+  });
+  it('rejects invalid script-oriented requests and rechecks disabled accounts before completion',async()=>{
+    await expect(service.enqueue(user,tenant,brand,{...input,options:{...input.options,revision:1}},correlation)).rejects.toThrow('INVALID_INPUT');
+    const saved=await service.enqueue(user,tenant,brand,{...input,idempotencyKey:randomUUID()},correlation),job=await jobs.claim(tenant,saved.id);
+    await database.client`update users set disabled_at=now() where id=${user}`;
+    await expect(jobs.complete(tenant,job!.id,job!.leaseToken!,{title:'Carousel',slides:[{heading:'One',body:'Text'},{heading:'Two',body:'Text'}],caption:'Caption',hashtags:[],factCheckNotes:[],design:{format:'SQUARE',font:'SANS',backgroundColor:'#ffffff',textColor:'#000000',accentColor:'#112233'}})).rejects.toThrow();
+    await jobs.fail(tenant,job!.id,job!.leaseToken!,'NOT_AUTHORIZED',false);
+    expect((await database.client`select status from usage_reservations where id=${job!.reservationId}`)[0]?.status).toBe('RELEASED');
+  });
+});

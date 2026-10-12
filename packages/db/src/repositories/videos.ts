@@ -2,10 +2,11 @@ import {randomUUID,createHash} from 'node:crypto';
 import {and,eq,desc,sql} from 'drizzle-orm';
 import {DomainError,avatarJobInputSchema,videoJobInputSchema,videoProcessingSchema,videoStages,videoReservationSeconds,captionSegmentsSchema,type CaptionEdit,type CaptionSegment,type VideoRequest,type VideoStage,type ProviderReference} from '@contentos/types';
 import type {Database} from '../index';
-import {videoProjects,videoTransitions,jobs,outbox,scripts,scriptVersions,avatars,avatarLooks,voiceProfiles,usagePolicies,auditLogs,aiCalls,captions} from '../schema';
+import {videoProjects,videoTransitions,jobs,outbox,scripts,scriptVersions,avatars,avatarLooks,voiceProfiles,usagePolicies,auditLogs,aiCalls,captions,covers} from '../schema';
 import {lockTenant,assertMembership,reserveInTransaction,settleInTransaction,type Transaction} from './ledger';
 import {ownedJob,type StoredJob} from './jobs';
 import {requireConsent} from './consent';
+import {cancelVideoCovers} from './covers';
 import type {ConsentPolicy} from './avatars';
 export type StoredVideo=typeof videoProjects.$inferSelect;
 const projectWhere=(tenantId:string,id:string)=>and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.id,id));
@@ -66,13 +67,13 @@ export class VideoRepository {
       const [job]=await tx.insert(jobs).values({id:jobId,tenantId,brandId,requestedBy:userId,type:'GENERATE_VIDEO',input:{projectId},inputHash,idempotencyKey:input.idempotencyKey,reservationId:reservation.id,provider,model:'avatar-video',correlationId}).returning();
       const text=[version.content.hook,version.content.context,version.content.core,version.content.proof,version.content.cta].join('\n\n');
       if(text.length>20000)throw new DomainError('INVALID_INPUT');
-      await tx.insert(videoProjects).values({id:projectId,tenantId,brandId,jobId,scriptId:script.id,scriptVersion:input.scriptVersion,lookId:owned.look.id,voiceId:voice.id,captionMode:input.captionMode,captionLanguage:input.captionLanguage,captionProvider:captionConfig?.provider,captionModel:captionConfig?.model,captionReservationId,scriptText:text,title:version.content.hook.slice(0,200),platform:script.platform,plannedDuration:script.duration,avatarReference:owned.look.reference,voiceReference:voice.reference,consent:{subjectId:consent.subjectId,requirements:consent.requirements},options:videoProcessingSchema.parse({orientation:input.orientation,resolution:input.resolution,fit:input.fit}),maxDurationSeconds:budget,provider,originalKey:`${prefix}/original.mp4`,finalKey:`${prefix}/final.mp4`,coverKey:`${prefix}/cover.jpg`});
+      await tx.insert(videoProjects).values({id:projectId,tenantId,brandId,jobId,scriptId:script.id,scriptVersion:input.scriptVersion,lookId:owned.look.id,voiceId:voice.id,captionMode:input.captionMode,captionLanguage:input.captionLanguage,captionProvider:captionConfig?.provider,captionModel:captionConfig?.model,captionReservationId,scriptText:text,title:version.content.hook.slice(0,200),platform:script.platform,plannedDuration:script.duration,avatarReference:owned.look.reference,voiceReference:voice.reference,consent:{subjectId:consent.subjectId,requirements:consent.requirements},options:videoProcessingSchema.parse({orientation:input.orientation,resolution:input.resolution,fit:input.fit,...(input.watermark?{watermark:input.watermark}:{}),...(input.cover?{cover:input.cover}:{})}),maxDurationSeconds:budget,provider,originalKey:`${prefix}/original.mp4`,finalKey:`${prefix}/final.mp4`,coverKey:`${prefix}/cover.jpg`});
       await tx.insert(videoTransitions).values({tenantId,projectId,revision:0,toStage:'VIDEO_REQUESTED',correlationId});await tx.insert(outbox).values({tenantId,jobId});
       await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_QUEUED',resourceId:projectId,correlationId,metadata:{jobId,scriptVersion:input.scriptVersion,maxVideoSeconds:budget}});return {id:job!.id,status:job!.status};
     });
   }
   async list(userId:string,tenantId:string,brandId:string){
-    return this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);return tx.select({id:videoProjects.id,jobId:videoProjects.jobId,title:videoProjects.title,scriptId:videoProjects.scriptId,scriptVersion:videoProjects.scriptVersion,lookId:videoProjects.lookId,voiceId:videoProjects.voiceId,stage:videoProjects.stage,captionMode:videoProjects.captionMode,captionMutationState:videoProjects.captionMutationState,lifecycle:videoProjects.lifecycle,deleteError:videoProjects.deleteError,options:videoProjects.options,provider:videoProjects.provider,durationMs:videoProjects.durationMs,approvedAt:videoProjects.approvedAt,createdAt:videoProjects.createdAt,jobStatus:jobs.status,errorCode:jobs.errorCode}).from(videoProjects).innerJoin(jobs,and(eq(jobs.tenantId,videoProjects.tenantId),eq(jobs.id,videoProjects.jobId))).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.brandId,brandId),sql`${videoProjects.lifecycle} <> 'DELETED'`)).orderBy(desc(videoProjects.createdAt)).limit(50);});
+    return this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);return tx.select({id:videoProjects.id,jobId:videoProjects.jobId,title:videoProjects.title,scriptId:videoProjects.scriptId,scriptVersion:videoProjects.scriptVersion,lookId:videoProjects.lookId,voiceId:videoProjects.voiceId,stage:videoProjects.stage,captionMode:videoProjects.captionMode,captionMutationState:videoProjects.captionMutationState,lifecycle:videoProjects.lifecycle,deleteError:videoProjects.deleteError,coverVersion:videoProjects.coverVersion,coverRevision:videoProjects.coverRevision,options:videoProjects.options,provider:videoProjects.provider,durationMs:videoProjects.durationMs,approvedAt:videoProjects.approvedAt,createdAt:videoProjects.createdAt,jobStatus:jobs.status,errorCode:jobs.errorCode}).from(videoProjects).innerJoin(jobs,and(eq(jobs.tenantId,videoProjects.tenantId),eq(jobs.id,videoProjects.jobId))).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.brandId,brandId),sql`${videoProjects.lifecycle} <> 'DELETED'`)).orderBy(desc(videoProjects.createdAt)).limit(50);});
   }
   async claim(tenantId:string,id:string){
     return this.db.transaction(async tx=>{
@@ -193,9 +194,10 @@ export class VideoRepository {
       await tx.insert(auditLogs).values({tenantId:job.tenantId,action:reconcile?'VIDEO_RECONCILIATION_REQUIRED':retry?'VIDEO_RETRY':'VIDEO_FAILED',resourceId:project.id,correlationId:job.correlationId,metadata:{code}});
     });
   }
-  async ready(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[],approve=false,correlationId:string=randomUUID()){
+  async ready(userId:string,tenantId:string,brandId:string,id:string,policies:ConsentPolicy[],approve=false,correlationId:string=randomUUID(),expectedCoverRevision=0){
     return this.db.transaction(async tx=>{await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,approve?'approve':'read');const [project]=await tx.select().from(videoProjects).where(and(projectWhere(tenantId,id),eq(videoProjects.brandId,brandId),eq(videoProjects.stage,'READY'),eq(videoProjects.lifecycle,'ACTIVE')));if(!project)throw new DomainError('NOT_FOUND',404);await validateVideo(tx,project,policies);
-      if(approve&&!project.approvedAt){await tx.update(videoProjects).set({approvedBy:userId,approvedAt:new Date()}).where(projectWhere(tenantId,id));await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_APPROVED',resourceId:id,correlationId,metadata:{scriptVersion:project.scriptVersion}});}return project;
+      if(approve&&project.coverRevision!==expectedCoverRevision)throw new DomainError('CONFLICT',409);
+      if(approve&&!project.approvedAt){await tx.update(videoProjects).set({approvedBy:userId,approvedAt:new Date()}).where(projectWhere(tenantId,id));await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_APPROVED',resourceId:id,correlationId,metadata:{scriptVersion:project.scriptVersion,coverVersion:project.coverVersion,coverRevision:project.coverRevision}});}return project;
     });
   }
   async history(userId:string,tenantId:string,brandId:string,id:string){
@@ -230,12 +232,14 @@ export class VideoRepository {
       }
       // Fence active worker writes before removing objects. The worker has bounded
       // requests, a 30s heartbeat and a 5m lease; retain one extra request timeout.
+      const coverAfter=await cancelVideoCovers(tx,tenantId,id,correlationId);
       const after=running?Math.max(Date.now()+120_000,(job.leaseExpiresAt?.getTime()??Date.now())+60_000):Date.now();
       const unknown=!project.reference&&['STARTED','UNKNOWN'].includes(project.mutationState);
-      await tx.update(videoProjects).set({lifecycle:'DELETE_PENDING',deleteAfter:new Date(after),deleteCorrelationId:correlationId,deleteError:unknown?'RECONCILIATION_REQUIRED':null,approvedAt:null,approvedBy:null}).where(projectWhere(tenantId,id));
+      await tx.update(videoProjects).set({lifecycle:'DELETE_PENDING',deleteAfter:new Date(Math.max(after,coverAfter)),deleteCorrelationId:correlationId,deleteError:unknown?'RECONCILIATION_REQUIRED':null,approvedAt:null,approvedBy:null}).where(projectWhere(tenantId,id));
       await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_DELETION_REQUESTED',resourceId:id,correlationId});return {status:'DELETE_PENDING' as const};
     });
   }
+  async coverKeys(tenantId:string,id:string){return this.db.select({key:covers.storageKey}).from(covers).where(and(eq(covers.tenantId,tenantId),eq(covers.projectId,id))).limit(50);}
   async claimDeletion(provider:string){
     return this.db.transaction(async tx=>{
       const [project]=await tx.select().from(videoProjects).where(and(eq(videoProjects.provider,provider),eq(videoProjects.lifecycle,'DELETE_PENDING'),sql`${videoProjects.deleteAfter} <= now()`,sql`(${videoProjects.deleteLeaseExpiresAt} is null or ${videoProjects.deleteLeaseExpiresAt} < now())`,sql`(${videoProjects.reference} is not null or ${videoProjects.mutationState} in ('NONE','REJECTED'))`)).orderBy(videoProjects.deleteAfter).limit(1).for('update',{skipLocked:true});
@@ -251,7 +255,8 @@ export class VideoRepository {
       const lease={deleteLeaseToken:null,deleteLeaseExpiresAt:null};
       if(!succeeded){await tx.update(videoProjects).set({...lease,deleteError:'PROVIDER_UNAVAILABLE',deleteAfter:new Date(Date.now()+Math.min(3600_000,5000*2**Math.min(active.deleteAttempts,10)))}).where(projectWhere(project.tenantId,project.id));return;}
       const tombstone={provider:project.provider,externalId:'deleted',internalId:project.id,metadata:{}};
-      await tx.update(videoProjects).set({...lease,lifecycle:'DELETED',deletedAt:new Date(),deleteError:null,scriptText:'',title:'Удалённое видео',reference:null,avatarReference:tombstone,voiceReference:tombstone,options:{...active.options,captions:[]}}).where(projectWhere(project.tenantId,project.id));
+      await tx.update(videoProjects).set({...lease,lifecycle:'DELETED',deletedAt:new Date(),deleteError:null,scriptText:'',title:'Удалённое видео',reference:null,avatarReference:tombstone,voiceReference:tombstone,options:videoProcessingSchema.parse({orientation:active.options.orientation,resolution:active.options.resolution,fit:active.options.fit})}).where(projectWhere(project.tenantId,project.id));
+      await tx.update(covers).set({status:'DELETED',design:null,leaseToken:null,leaseExpiresAt:null}).where(and(eq(covers.tenantId,project.tenantId),eq(covers.projectId,project.id)));
       await tx.update(captions).set({segments:[]}).where(and(eq(captions.tenantId,project.tenantId),eq(captions.projectId,project.id)));
       await tx.update(aiCalls).set({output:null}).where(and(eq(aiCalls.tenantId,project.tenantId),eq(aiCalls.jobId,project.jobId)));
       await tx.insert(auditLogs).values({tenantId:project.tenantId,action:'VIDEO_DELETED',resourceId:project.id,correlationId:project.deleteCorrelationId!,metadata:{attempts:active.deleteAttempts}});

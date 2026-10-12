@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 const config: NextConfig = {
   output: 'standalone',
+  serverExternalPackages: ['@sentry/node'],
   poweredByHeader: false,
   transpilePackages: ['@contentos/core', '@contentos/db', '@contentos/config', '@contentos/types', '@contentos/ui', '@contentos/providers', '@contentos/ai'],
   async headers() {

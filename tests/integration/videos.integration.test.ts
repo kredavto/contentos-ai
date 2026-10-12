@@ -1,10 +1,11 @@
 import {randomUUID,randomBytes} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {CalendarService} from '../../packages/core/src/calendar';
+import {CoverService,CoverProcessor} from '../../packages/core/src/covers';
 import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
 import {MediaService} from '../../packages/core/src/media';
@@ -30,7 +31,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await database.client`insert into content_items(id,tenant_id,brand_id,title,type,status) values(${contentId},${tenantId},${brandId},'Fixture','SHORT_VIDEO','APPROVED_SCRIPT')`;
     await database.client`insert into scripts(id,tenant_id,brand_id,content_item_id,current_version,approved_version,approved_by,platform,duration) values(${scriptId},${tenantId},${brandId},${contentId},1,1,${userId},'YOUTUBE',30)`;
     await database.client`insert into script_versions(tenant_id,script_id,version,content,created_by) values(${tenantId},${scriptId},1,${JSON.stringify({hook:'Hook',context:'Context',core:'Core',proof:'Proof',cta:'CTA',factCheckNotes:[]})}::jsonb,${userId})`;
-    return {scriptId,scriptVersion:1,lookId,orientation:'9:16' as const,resolution:'720p' as const,fit:'crop' as const,idempotencyKey:randomUUID()};
+    return {scriptId,scriptVersion:1,lookId,orientation:'9:16' as const,resolution:'720p' as const,fit:'crop' as const,watermark:{text:'Мой бренд',position:'TOP_RIGHT' as const,opacity:60},cover:{framePercent:50,headline:'Обложка проекта',background:'FRAME' as const,font:'BOLD' as const,layout:'BOTTOM' as const,textColor:'#ffffff',backgroundColor:'#182338'},idempotencyKey:randomUUID()};
   }
   beforeAll(async()=>{
     await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${userId},${`video-${userId}@example.test`},'unusable','Owner',now()),(${viewerId},${`video-${viewerId}@example.test`},'unusable','Viewer',now())`;
@@ -70,6 +71,9 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect((await row(job.id)).status).toBe('SUCCEEDED');
     expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual({available:before-12,reserved:0});
     const project=(await service.overview(userId,tenantId,brandId)).projects[0]!;
+    expect(project.options.cover).toEqual(input.cover);expect(project.options.watermark).toEqual(input.watermark);
+    await expect(service.create(userId,tenantId,brandId,{...input,watermark:{...input.watermark,text:'Другой бренд'}},correlationId)).rejects.toThrow('CONFLICT');
+    await expect(service.create(userId,tenantId,brandId,{...input,cover:{...input.cover,headline:'Другой заголовок'}},correlationId)).rejects.toThrow('CONFLICT');
     expect(project.durationMs).toBe(11200);expect(JSON.stringify(project)).not.toContain('externalId');
     const history=await service.history(userId,tenantId,brandId,project.id);expect(history.map(item=>item.to)).toEqual(videoStages.slice(0,-1));
     expect(Buffer.from(objects.get(`${tenantId}/videos/${project.id}/original.mp4`)!).toString()).toBe('original-fixture');
@@ -143,6 +147,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect(deleted?.script_text).toBe('');expect(deleted?.title).toBe('Удалённое видео');expect(deleted?.reference).toBeNull();expect(deleted?.deleted_at).not.toBeNull();
     expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(balance);
     expect((await service.delete(userId,tenantId,brandId,project.id,correlationId)).status).toBe('DELETED');
+    expect((await database.client`select options from video_projects where id=${project.id}`)[0]!.options.cover).toBeUndefined();expect((await database.client`select options from video_projects where id=${project.id}`)[0]!.options.watermark).toBeUndefined();
     expect(await database.client`select id from audit_logs where resource_id=${project.id} and action='VIDEO_DELETED'`).toHaveLength(1);
   });
   it('fences a canceled worker and waits for a late provider reference before deletion',async()=>{
@@ -174,7 +179,7 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await expect(service.editCaptions(userId,tenantId,brandId,project.id,{...input,revision:1},correlationId)).rejects.toThrow('CONFLICT');
     let options:unknown;
     const finishing=new VideoProcessor(database.db,{name:providerName,provider:{...provider,status:async()=>{throw new Error('Must reuse stored source');},download:async()=>{throw new Error('Must reuse stored source');}}},storage,{...processing,process:async(input,context)=>{options=input.options;return processing.process(input,context);}},true);
-    await due(job.id);await finishing.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(options).toMatchObject({captions:input.segments,captionStyle:'bold'});expect(submissions-before).toBe(1);
+    await due(job.id);await finishing.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(options).toMatchObject({captions:input.segments,captionStyle:'bold',watermark:{text:'Мой бренд',position:'TOP_RIGHT',opacity:60},cover:{headline:'Обложка проекта'}});expect(submissions-before).toBe(1);
   });
   it('reserves and captures automatic caption credits only after reviewed final rendering',async()=>{
     let transcriptions=0;const caption={name:'fixture-caption',model:'fixture',provider:{transcribe:async()=>{transcriptions++;return [{start:0,end:1,text:'Распознано'}];}}};
@@ -204,6 +209,74 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await auto.confirmCaptions(userId,tenantId,brandId,project.id,{revision:0},correlationId);await due(job.id);await runner.run(tenantId,job.id);
     expect((await row(job.id)).status).toBe('SUCCEEDED');expect(transcriptions).toBe(1);
   });
+  it('renders immutable cover versions once, selects optimistically, clears approval and deletes every object',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId);
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    await service.approve(userId,tenantId,brandId,project.id,correlationId);
+    const covers=new CoverRepository(database.db),studio=new CoverService(covers,storage),priorSubmissions=submissions;let renders=0;
+    const renderer={renderCover:async()=>{renders++;return {bytes:Buffer.from('new-cover'),width:720,height:1280};}};
+    const runner=new CoverProcessor(covers,storage,renderer);
+    const input={design:{...project.options.cover!,headline:'Новая обложка'},idempotencyKey:randomUUID()};
+    await expect(studio.request(viewerId,tenantId,brandId,project.id,input,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(studio.request(userId,tenantId,randomUUID(),project.id,input,correlationId)).rejects.toThrow('NOT_FOUND');
+    const before=(await ledger.overview(userId,tenantId)).balances.AI_CREDITS.available;
+    const [first,again]=await Promise.all([studio.request(userId,tenantId,brandId,project.id,input,correlationId),studio.request(userId,tenantId,brandId,project.id,input,correlationId)]);expect(first.id).toBe(again.id);
+    await expect(studio.request(userId,tenantId,brandId,project.id,{...input,design:{...input.design,headline:'Conflict'}},correlationId)).rejects.toThrow('CONFLICT');
+    await expect(studio.request(userId,tenantId,brandId,project.id,{...input,idempotencyKey:randomUUID()},correlationId)).rejects.toThrow('CONFLICT');
+    await expect(studio.download(userId,tenantId,brandId,project.id,'1',correlationId)).rejects.toThrow('NOT_FOUND');
+    await Promise.all([runner.run(tenantId,first.id),runner.run(tenantId,first.id)]);expect(renders).toBe(1);expect(submissions).toBe(priorSubmissions);
+    const overview=await studio.overview(userId,tenantId,brandId,project.id);expect(overview.versions[0]).toMatchObject({version:1,status:'READY',design:input.design});expect(overview.selectedVersion).toBe(0);
+    expect((await ledger.overview(userId,tenantId)).balances.AI_CREDITS).toEqual({available:before-1,reserved:0});
+    await expect(database.client`update covers set design='{}' where id=${first.id}`).rejects.toThrow('immutable');
+    await expect(database.client`update covers set version=7 where id=${first.id}`).rejects.toThrow('immutable');
+    await expect(studio.select(viewerId,tenantId,brandId,project.id,{version:1,revision:0},correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    expect(await studio.select(userId,tenantId,brandId,project.id,{version:1,revision:0},correlationId)).toEqual({revision:1});
+    await expect(studio.select(userId,tenantId,brandId,project.id,{version:0,revision:0},correlationId)).rejects.toThrow('CONFLICT');
+    expect((await service.overview(userId,tenantId,brandId)).projects.find(item=>item.id===project.id)!.approvedAt).toBeNull();
+    expect((await service.download(userId,tenantId,brandId,project.id,correlationId)).coverUrl).toContain(`/covers/${first.id}.jpg`);
+    await expect(service.approve(userId,tenantId,brandId,project.id,correlationId,{coverRevision:0})).rejects.toThrow('CONFLICT');
+    await service.approve(userId,tenantId,brandId,project.id,correlationId,{coverRevision:1});
+    expect(await studio.select(userId,tenantId,brandId,project.id,{version:1,revision:1},correlationId)).toEqual({revision:1});
+    expect((await service.overview(userId,tenantId,brandId)).projects.find(item=>item.id===project.id)!.approvedAt).not.toBeNull();
+    expect((await studio.download(viewerId,tenantId,brandId,project.id,'0',correlationId)).url).toContain(`/videos/${project.id}/cover.jpg`);
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+    await expect(studio.download(userId,tenantId,brandId,project.id,'1',correlationId)).rejects.toThrow('NOT_FOUND');
+    await database.client`update video_projects set delete_after=now()-interval '1 second' where id=${project.id}`;
+    for(let n=0;n<10&&objects.has(`${tenantId}/videos/${project.id}/covers/${first.id}.jpg`);n++)await service.cleanupOne();
+    expect(objects.has(`${tenantId}/videos/${project.id}/covers/${first.id}.jpg`)).toBe(false);
+    expect(objects.has(`${tenantId}/videos/${project.id}/cover.jpg`)).toBe(false);
+    expect((await database.client`select status,design from covers where id=${first.id}`)[0]).toMatchObject({status:'DELETED',design:null});
+  });
+  it('releases failed cover reserves, recovers expired leases and fences deletion during rendering',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId);
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    const covers=new CoverRepository(database.db),studio=new CoverService(covers,storage),before=(await ledger.overview(userId,tenantId)).balances.AI_CREDITS.available;
+    const input={design:project.options.cover!,idempotencyKey:randomUUID()};
+    const failed=await studio.request(userId,tenantId,brandId,project.id,input,correlationId);
+    const broken=new CoverProcessor(covers,storage,{renderCover:async()=>{throw new DomainError('PROVIDER_UNAVAILABLE');}});
+    for(let n=0;n<3;n++){await database.client`update covers set next_attempt_at=now()-interval '1 second' where id=${failed.id}`;await broken.run(tenantId,failed.id);}
+    expect((await studio.overview(userId,tenantId,brandId,project.id)).versions[0]!.status).toBe('FAILED');expect((await ledger.overview(userId,tenantId)).balances.AI_CREDITS.available).toBe(before);
+    const stale=await studio.request(userId,tenantId,brandId,project.id,{...input,idempotencyKey:randomUUID()},correlationId);
+    const abandoned=await covers.claim(tenantId,stale.id);expect(abandoned).toBeTruthy();
+    await database.client`update covers set lease_expires_at=now()-interval '1 second',dispatch_after=now()+interval '1 minute' where id=${stale.id}`;
+    expect((await covers.due()).some(item=>item.id===stale.id)).toBe(false);
+    await database.client`update covers set dispatch_after=now()-interval '1 second' where id=${stale.id}`;
+    expect((await covers.due()).some(item=>item.id===stale.id)).toBe(true);
+    let rendered=0;const healthy=new CoverProcessor(covers,storage,{renderCover:async()=>{rendered++;return {bytes:Buffer.from('recovered'),width:720,height:1280};}});
+    await healthy.run(tenantId,stale.id);expect(rendered).toBe(1);await expect(covers.complete(abandoned!,avatarConsentPolicies())).rejects.toThrow('CONFLICT');
+    const denied=await studio.request(userId,tenantId,brandId,project.id,{...input,idempotencyKey:randomUUID()},correlationId);
+    await database.client`update users set disabled_at=now() where id=${userId}`;
+    try{await healthy.run(tenantId,denied.id);}finally{await database.client`update users set disabled_at=null where id=${userId}`;}
+    expect((await database.client`select status,error_code from covers where id=${denied.id}`)[0]).toMatchObject({status:'FAILED',error_code:'NOT_FOUND'});
+    const cancelled=await studio.request(userId,tenantId,brandId,project.id,{...input,idempotencyKey:randomUUID()},correlationId);
+    const cancelRunner=new CoverProcessor(covers,storage,{renderCover:async()=>{await service.delete(userId,tenantId,brandId,project.id,correlationId);return {bytes:Buffer.from('late'),width:720,height:1280};}});
+    await cancelRunner.run(tenantId,cancelled.id);
+    expect(objects.has(`${tenantId}/videos/${project.id}/covers/${cancelled.id}.jpg`)).toBe(false);
+    const [state]=await database.client`select c.status,v.delete_after from covers c join video_projects v on c.project_id=v.id where c.id=${cancelled.id}`;expect(state!.status).toBe('CANCELLED');expect(new Date(state!.delete_after).getTime()).toBeGreaterThan(Date.now()+240000);
+    expect((await ledger.overview(userId,tenantId)).balances.AI_CREDITS.available).toBe(before-1);
+  });
   it('blocks stale approved scripts and revoked consent before remote submission',async()=>{
     const input=await request(),stale=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;
     await database.client`update scripts set approved_version=null where id=${input.scriptId}`;
@@ -216,9 +289,14 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await new SocialRepository(database.db).create(userId,tenantId,brandId,socialId,randomUUID(),'fixture','telegram',{name:'Fixture channel',username:null,canPublish:true,reference:{provider:'telegram',internalId:socialId,externalId:'-1001234567890',metadata:{public:true,hasLinkedDiscussion:false}}},vault.encrypt('fixture',{tenantId,brandId,connectionId:socialId,provider:'telegram'}),correlationId);
     const plan=await new CalendarService(new CalendarRepository(database.db)).create(userId,tenantId,brandId,{title:'Consent-bound publication',type:'SHORT_VIDEO',videoProjectId:ready.id,platform:'TELEGRAM',commentsEnabled:false,localDateTime:'2030-01-01T00:10',timeZone:'UTC',idempotencyKey:randomUUID()},correlationId);
     let clock=new Date('2030-01-01T00:00:00Z');const publishing=new PublishingRepository(database.db,()=>clock);
+    const coverRepo=new CoverRepository(database.db),coverService=new CoverService(coverRepo,storage);
+    const coverJob=await coverService.request(userId,tenantId,brandId,ready.id,{design:ready.options.cover!,idempotencyKey:randomUUID()},correlationId);
+    await new CoverProcessor(coverRepo,storage,{renderCover:async()=>({bytes:Buffer.from('fixture-cover'),width:720,height:1280})}).run(tenantId,coverJob.id);
     const publication=await publishing.approve(userId,tenantId,brandId,{calendarId:plan.id,revision:0,connectionId:socialId,idempotencyKey:randomUUID()},'telegram',avatarConsentPolicies(),correlationId);
+    await expect(coverService.select(userId,tenantId,brandId,ready.id,{version:1,revision:0},correlationId)).rejects.toThrow('CONFLICT');
     clock=new Date('2030-01-01T00:11:00Z');const publishingJob=(await publishing.claim(tenantId,publication.id))!;await publishing.prepare(publishingJob,avatarConsentPolicies());
     await consent.revoke(userId,tenantId,brandId,consentId,correlationId);
+    await expect(coverService.download(userId,tenantId,brandId,ready.id,'1',correlationId)).rejects.toThrow('CONSENT_REQUIRED');
     await expect(publishing.begin(publishingJob,avatarConsentPolicies())).rejects.toThrow('CONSENT_REQUIRED');
     await expect(service.confirmCaptions(userId,tenantId,brandId,waitingProject.id,{revision:0},correlationId)).rejects.toThrow('CONSENT_REQUIRED');
     await service.delete(userId,tenantId,brandId,waitingProject.id,correlationId);

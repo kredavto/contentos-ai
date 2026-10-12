@@ -2,6 +2,8 @@
 
 Contracts: LLMProvider, ImageProvider, AvatarProvider, VoiceProvider, VideoProvider, CaptionProvider, TrendProvider, PublishingProvider, AnalyticsProvider, PaymentProvider, StorageProvider; additionally EmailProvider and ErrorReporter.
 
+ImageProvider now has a real OpenAI Images implementation plus a production-forbidden local fixture. It preserves unknown metering, bounds output and marks uncertain mutations for reconciliation without retry. Image Studio now calls it only through a fenced durable worker; credit settlement and private-file lifecycle remain in the domain layer. See [image integration status and required lifecycle](docs/image-generation.md).
+
 All return validated normalized results and provider/external_id/internal_id/metadata mappings. Calls carry correlation ID, operation idempotency key and abort signal. Adapters own endpoint/API versions, credential access, official schemas, timeouts, retries and safe request metrics. UI only sees internal IDs and safe capability/status descriptions.
 
 First avatar adapter: HeyGen. First payments adapter: YooKassa; Stripe-ready contract. LLM/image/captions may use OpenAI behind contracts. Publishing targets YouTube, TikTok, Instagram, VK and Telegram via official APIs; implement enabled capabilities honestly and report unsupported capabilities. OAuth includes state, PKCE where applicable, encrypted tokens, refresh and revocation.
@@ -37,3 +39,9 @@ The provider SDK has retries disabled. A durable STARTED checkpoint precedes sub
 ## Telegram publication
 
 `PublishingProvider` now accepts server-supplied bytes and a normalized channel reference rather than a public media URL. The real Telegram adapter sends plain POST or MP4 SHORT_VIDEO once, validates the returned Message and records its acknowledgement. The interface does not require an invented remote status endpoint: delivery status is persisted by the publishing service. A durable SUBMITTING checkpoint plus RECONCILIATION on unknown outcomes prevents automatic duplicate sends. Configuration, capabilities, tested limits and remaining work: [publishing](docs/publishing.md).
+
+## Local cover rendering
+
+`CoverRenderingProvider.renderCover` consumes private final-video bytes and a validated design, returning bounded JPEG bytes/dimensions. `FFmpegVideoProcessor` implements it without an external image/avatar API call or video re-encoding. The worker reuses the same literal-text ASS composition used by initial video covers; relative positions or an absolute timestamp select the decoded frame. Storage and consent checks remain outside this adapter. The separate `contentos-covers` queue handles versioned jobs, retries and credit settlement. See [Cover Studio](docs/video-covers.md).
+
+ErrorReporter is implemented by an isolated official Sentry Node client. Only safe code/correlation/job metadata is sent; automatic integrations and raw exception payloads are excluded. It is disabled by default and has bounded flush/burst behavior. See [coverage, configuration and limitations](docs/error-monitoring.md).

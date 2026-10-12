@@ -1,6 +1,8 @@
+import type {ErrorReporter} from '@contentos/types';
+import {reportError} from './error-reporting';
 import {z} from 'zod';
 import {VideoRepository,JobRepository,AICallRepository,type Database} from '@contentos/db';
-import {DomainError,ProviderRequestError,videoRequestSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
+import {DomainError,ProviderRequestError,videoRequestSchema,videoApprovalSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
 import {avatarConsentPolicies} from './avatars';
 export type VideoConnection={provider:VideoProvider;name:string}|null;
 export type CaptionConnection={provider:CaptionProvider;name:string;model:string}|null;
@@ -28,7 +30,7 @@ export class VideoService {
   editCaptions(userId:string,tenantId:string,brandId:string,id:string,input:unknown,correlationId:string){return this.repository.editCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),captionEditSchema.parse(input),correlationId);}
   confirmCaptions(userId:string,tenantId:string,brandId:string,id:string,input:unknown,correlationId:string){return this.repository.editCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),{...captionConfirmSchema.parse(input),segments:[],style:'clean'},correlationId,true);}
   manualCaptions(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.manualCaptions(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
-  async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),true,correlationId);return {approved:true};}
+  async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId:string,raw:unknown={coverRevision:0}){const input=videoApprovalSchema.parse(raw);await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),true,correlationId,input.coverRevision);return {approved:true};}
   delete(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.delete(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),correlationId);}
   resume(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.resume(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
   async cleanupOne(){
@@ -38,7 +40,11 @@ export class VideoService {
     let succeeded=false;
     try{
       if(project.reference)await this.connection.provider.delete(project.reference,context);
-      for(const key of [project.originalKey,project.finalKey,project.coverKey])await this.storage.delete(key,context);
+      // At most 50 cover versions plus original media: bounded parallel deletes
+      // keep the whole cleanup within its lease even on a slow object store.
+      const keys=new Set([project.originalKey,project.finalKey,project.coverKey,`${project.tenantId}/videos/${project.id}/cover.jpg`,...(await this.repository.coverKeys(project.tenantId,project.id)).map(row=>row.key)]);
+      const deleted=await Promise.allSettled([...keys].map(key=>this.storage!.delete(key,context)));
+      if(deleted.some(result=>result.status==='rejected'))throw new DomainError('PROVIDER_UNAVAILABLE',503);
       succeeded=true;
     }catch{/* Durable retry retains deletion state and keeps downloads blocked. */}
     await this.repository.finishDeletion(project,succeeded);return true;
@@ -48,7 +54,7 @@ export class VideoService {
 export class VideoProcessor {
   private readonly repository:VideoRepository;
   private readonly jobs:JobRepository;
-  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
+  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null,private readonly errors?:ErrorReporter){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job?.leaseToken)return;
     const abort=new AbortController(),context:OperationContext={tenantId,internalId:id,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:abort.signal};
@@ -73,7 +79,7 @@ export class VideoProcessor {
       else{
         polling=true;
         const result=await this.connection.provider.status(project.reference,context);polling=false;
-        if(result.status==='FAILED'){await this.repository.fail(job,'PROVIDER_REJECTED');return;}
+        if(result.status==='FAILED'){reportError(this.errors,new DomainError('PROVIDER_REJECTED'),{correlationId:job.correlationId,jobId:id});await this.repository.fail(job,'PROVIDER_REJECTED');return;}
         if(result.status==='PROCESSING'){await this.repository.wait(job);return;}
         if(!result.downloadUrl)throw new DomainError('RECONCILIATION_REQUIRED',409);
         await this.repository.prepare(job,avatarConsentPolicies());
@@ -107,6 +113,7 @@ export class VideoProcessor {
       await this.repository.complete(job,avatarConsentPolicies(),final.durationSeconds,final.bytes.byteLength);
     }catch(error){
       const code=polling&&error instanceof DomainError&&error.code==='PROVIDER_REJECTED'?'RECONCILIATION_REQUIRED':error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE';
+      reportError(this.errors,error,{correlationId:job.correlationId,jobId:id,code});
       try{await this.repository.fail(job,code,error instanceof ProviderRequestError&&error.definitiveRejection);}
       catch(failure){if(!(failure instanceof DomainError&&failure.code==='CONFLICT'))throw failure;}
       console.log(JSON.stringify({event:'video_job_error',jobId:id,correlationId:job.correlationId,code}));

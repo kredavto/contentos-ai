@@ -1,3 +1,4 @@
+import {errorReporter} from './error-reporting';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { DomainError, maxPhotoUploadBytes, mediaUploadSchema } from '@contentos/types';
@@ -10,6 +11,8 @@ const messages: Record<string, string> = {
   RECONCILIATION_REQUIRED: 'Результат запроса пока не подтверждён. Не создавайте дубликат; требуется проверка задачи.',
   INSUFFICIENT_CREDITS: 'Недостаточно кредитов для этой операции.',
   CONSENT_REQUIRED: 'Для этой операции требуется действующее согласие.',
+  PORTFOLIO_LIMIT_REACHED: 'Достигнут лимит клиентских организаций в портфеле. Обратитесь к администратору.',
+  EXPORT_TOO_LARGE: 'Объём данных превышает лимит быстрой выгрузки. Файл не создан. Расширенная выгрузка пока недоступна.',
   PLAN_LIMIT_REACHED: 'Достигнут лимит хранилища. Удалите ненужные файлы.',
 };
 export async function readPhotoUpload(request: Request) {
@@ -64,6 +67,7 @@ export async function apiResponse(action: (correlationId: string) => Promise<Res
     const code = error instanceof DomainError ? error.code : error instanceof ZodError ? 'INVALID_INPUT' : 'INTERNAL_ERROR';
     const status = error instanceof DomainError ? error.status : error instanceof ZodError ? 400 : 500;
     console.error(JSON.stringify({ event: 'api_error', correlationId, code, status, durationMs: Math.round(performance.now() - started) }));
+    if(status>=500){const errors=errorReporter();errors.capture(error instanceof Error?error:new Error(code),{correlationId,code});await errors.flush?.(1000);}
     return Response.json({ error: { code, message: messages[code] ?? 'Не удалось выполнить действие. Попробуйте позже.', correlationId } }, { status, headers: { 'Cache-Control': 'no-store', 'X-Request-Id': correlationId, ...(status === 429 ? { 'Retry-After': '900' } : {}) } });
   }
 }

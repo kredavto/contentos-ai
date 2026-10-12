@@ -1,22 +1,27 @@
 # CONTENTOS AI
 
-AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script generation, script approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Avatar/voice selection and basic video generation, FFmpeg processing, storage and approval are implemented. Rich video editing, subscriptions and publishing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
+AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script and standalone post generation, content approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Avatar/voice selection and basic video generation, FFmpeg processing, [versioned Cover Studio](docs/video-covers.md), storage and approval are implemented. Approval-based Telegram publishing, analytics/recommendations, monthly billing and in-app notifications are implemented. Additional providers and richer editing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
 
-Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web deployment target: Vercel team digagency. Long-running media/queue work requires a separate worker service. No production deployment yet.
+Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web deployment target: Vercel team digagency. Long-running media/queue work requires a separate worker service. No production deployment yet. [Staging web preview](https://contentos-54l7vlhlu-digagency.vercel.app) is available; account operations require the still-unconfigured production data/worker services.
 
 ## Local development
 
-Requires Node.js 22+ (24 used in CI), pnpm 10.30.3 and Docker.
+Requires Node.js 22.12+ (24 recommended and used in CI), pnpm 10.30.3 and Docker.
 
 ```sh
 cp .env.example .env
+node scripts/configure-local-key.mjs
 pnpm install
 docker compose up -d
 pnpm db:migrate
 pnpm dev
 ```
 
+The local setup command generates a private encryption key in ignored `.env` without printing or replacing it. Keep the key backed up: pending email links and connected-provider credentials depend on it.
+
 Open http://localhost:3100. Register with a fictional address and read its confirmation email in [local Mailpit](http://localhost:8025). Passwords require 12–128 characters. After confirmation, sign in, create an organization/brand and complete onboarding. Each step can be saved and resumed. Brand Brain is stored as structured PostgreSQL rows. Set `AI_PROVIDER=mock` in your local `.env` for an explicitly marked demo walkthrough, then restart `pnpm dev`. Open the completed brand, claim starter credits, create a strategy, ideas and a script, edit it and approve a version. Web and the actual worker run together. For real text generation, configure `AI_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL` server-side on both services; no live provider test has been performed.
+
+Optional: populate a fictional brand, strategy, ideas and script with `pnpm db:seed`. See [local demo setup and safeguards](docs/development-seed.md) for the required opt-in and private password.
 
 ## Checks
 
@@ -47,3 +52,17 @@ The integration suite runs when TEST_DATABASE_URL is present; otherwise it is ex
 ## Private photo library
 
 The brand content studio includes a Media tab for private photo uploads, short-lived previews and durable deletion. Configure the same private S3 bucket on web and worker using `.env.example`. Details and limits: [media storage](docs/media-storage.md). Without storage credentials the UI reports that configuration is required. Avatar/video jobs use the same storage and durable worker. See ENVIRONMENT.md for video configuration.
+
+## Brand Guardian
+
+Saved scripts can be reviewed asynchronously against their versioned brand context. Reports quote the source text, identify possible rule/tone issues and flag claims for human verification; they never auto-approve or rewrite content. See [review behavior and limits](docs/brand-guardian.md).
+
+The [Post Writer](docs/posts.md) creates versioned plain-text posts and lets an approved post prefill a separately reviewed calendar draft.
+
+The [Carousel Studio](docs/carousels.md) generates editable, versioned slides with approval and browser PNG export. Album publishing is not yet connected.
+
+Optional [server error monitoring](docs/error-monitoring.md) sends only safe operational metadata and is disabled until configured.
+
+The [Image Studio](docs/image-generation.md) queues metered image generation, stores private normalized JPEGs and supports review, approval and durable deletion. OpenAI/S3 configuration is required for real output; local fixtures are clearly marked as demo.
+
+Optional video watermark settings and behavior: [video watermarks](docs/video-watermarks.md).

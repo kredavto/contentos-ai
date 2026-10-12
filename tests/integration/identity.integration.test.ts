@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { createDatabase, AuthRepository, BrandRepository } from '../../packages/db/src/index';
+import { createDatabase, EmailRepository, AuthRepository, BrandRepository } from '../../packages/db/src/index';
+import { CredentialVault } from '../../packages/core/src/credential-vault';
+import { EmailProcessor } from '../../packages/core/src/email';
 import { AuthService } from '../../packages/core/src/auth';
 import { BrandService } from '../../packages/core/src/brands';
 import { hashToken } from '../../packages/core/src/password';
@@ -13,7 +15,10 @@ suite('persisted identity, isolation and onboarding', () => {
   const emails: Array<{ recipient: string; text: string }> = [];
   const emailProvider: EmailProvider = { async send(input, context: OperationContext) { emails.push(input); return { provider: 'test', externalId: randomUUID(), internalId: context.internalId, metadata: {} }; } };
   const authRepository = new AuthRepository(database.db);
-  const auth = new AuthService(authRepository, emailProvider, 'http://localhost:3000', 'Test');
+  const vault=new CredentialVault(JSON.stringify({test:Buffer.alloc(32,9).toString('base64')}),'test');
+  const auth = new AuthService(authRepository, vault, 'http://localhost:3000', 'Test');
+  const mailProcessor=new EmailProcessor(new EmailRepository(database.db),emailProvider,vault);
+  async function deliver(userId:string){const pending=await database.client`select id from email_outbox where user_id=${userId} and status='PENDING'`;for(const row of pending)await mailProcessor.runOnce(row.id as string);}
   const brands = new BrandService(new BrandRepository(database.db));
   const run = randomUUID();
   const email = `owner-${run}@example.test`;
@@ -31,6 +36,7 @@ suite('persisted identity, isolation and onboarding', () => {
     await auth.register({ email: otherEmail, name: 'Demo outsider', password: 'correct-test-password' }, run, correlationId);
     userId = (await authRepository.findUser(email))!.id;
     otherUserId = (await authRepository.findUser(otherEmail))!.id;
+    await deliver(userId);await deliver(otherUserId);
   });
   afterAll(async () => {
     if (tenantId) await database.client`delete from organizations where id = ${tenantId}`;
@@ -84,7 +90,7 @@ suite('persisted identity, isolation and onboarding', () => {
   });
   it('password reset revokes all sessions and prevents reuse or stale login issuance', async () => {
     const oldHash = (await authRepository.findUser(email))!.passwordHash;
-    await auth.requestToken({ email }, 'RESET_PASSWORD', run, correlationId);
+    await auth.requestToken({ email }, 'RESET_PASSWORD', run, correlationId);await deliver(userId);
     const resetToken = lastToken(email);
     await auth.reset({ token: resetToken, password: 'replacement-test-password' }, run, correlationId);
     expect(await auth.session(token)).toBeUndefined();

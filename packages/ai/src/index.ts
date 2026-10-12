@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DomainError, workflowSchemas, generationInputSchema, type GenerationInput, type GenerationOutput, type WorkflowType, type LLMProvider, type OperationContext, type Usage, performanceEvidenceSchema, performanceOutputSchema, validatePerformanceOutput, strategySchema, type PerformanceEvidence, type PerformanceOutput, type StrategyOutput } from '@contentos/types';
+import { DomainError, validateBrandReview, brandReviewSchema, workflowSchemas, generationInputSchema, type GenerationInput, type GenerationOutput, type WorkflowType, type LLMProvider, type OperationContext, type Usage, performanceEvidenceSchema, performanceOutputSchema, validatePerformanceOutput, strategySchema, type PerformanceEvidence, type PerformanceOutput, type StrategyOutput } from '@contentos/types';
 
 export interface ModelRoute { provider: LLMProvider; model: string }
 export interface CallRecorder {
@@ -8,6 +8,9 @@ export interface CallRecorder {
   failed(call: number, code: string, durationMs: number): Promise<void>;
 }
 const instructions: Record<WorkflowType, string> = {
+  GENERATE_CAROUSEL: 'Create an original 2–10 slide social carousel. Start with a useful hook, explain one concrete idea per slide, and end with a clear CTA. Each slide has a short heading and readable concise body. Do not repeat the same point across slides. Include a separate publication caption, hashtags without hash characters, and factCheckNotes for unverifiable claims. Never invent statistics or testimonials. Use a coherent high-contrast design with hex colors, SQUARE or PORTRAIT format and SANS or SERIF font. Respect the brand tone and rules. Do not describe images that are not actually generated.',
+  GENERATE_POST: 'Write a standalone social media post for the selected platform and goal, with a useful opening, substantive body and a clear CTA. Title is an internal editorial label and must not be repeated automatically in body. Respect brand rules and tone. Return plain text, hashtags without the hash character and factCheckNotes for claims requiring human verification. Do not fabricate statistics, testimonials, proof, research or guarantees. Fit the target platform conservatively; the publishing adapter will enforce its actual limits.',
+  REVIEW_SCRIPT: 'Review the saved script against the supplied brand voice and rules. Return advisory findings only. Quote an exact substring of the selected script field for every finding. BRAND_RULE must cite the zero-based index in brain.rules; TONE and FACT_CHECK must use ruleIndex:null. FACT_CHECK identifies claims for human verification, never declares a claim true or false. Do not invent evidence, citations, sources, brand rules or a compliance score. No findings does not mean approval or factual accuracy. Do not rewrite the script or change brand data.',
   OPTIMIZE_STRATEGY: 'Analyze immutable performance evidence.',
   GENERATE_STRATEGY: 'Build a practical marketing strategy with exactly 30 distinct numbered days. Distinguish assumptions from known brand facts. Do not imply market research was performed.',
   GENERATE_IDEAS: 'Generate 5 distinct actionable content ideas. Scores are subjective editorial estimates, never guaranteed predictions; state that in caveat. Use the selected platform and brand context.',
@@ -20,6 +23,10 @@ export class GenerationOrchestrator {
     if(type==='OPTIMIZE_STRATEGY'){
       if(!input.performance)throw new DomainError('INVALID_INPUT');
       return this.analyzePerformance(input.performance.evidence,input.performance.strategy,context,recorder);
+    }
+    if (type === 'REVIEW_SCRIPT') {
+      if (!input.previousScript) throw new DomainError('INVALID_INPUT');
+      return this.generate(instructions[type], { workflow: type, sourceData: input }, brandReviewSchema, value => validateBrandReview(value, input), context, recorder);
     }
     const schema = workflowSchemas[type];
     return this.generate<GenerationOutput>(instructions[type],{ workflow:type,sourceData:input },schema,value=>schema.safeParse(value),context,recorder);
