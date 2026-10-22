@@ -1,7 +1,7 @@
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {ApprovalRepository,LibraryMediaRepository,CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {NotificationRepository,ApprovalRepository,LibraryMediaRepository,CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {CalendarService} from '../../packages/core/src/calendar';
@@ -582,6 +582,10 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     const input=await request(),stale=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;
     await database.client`update scripts set approved_version=null where id=${input.scriptId}`;
     await due(stale.id);await processor.run(tenantId,stale.id);expect((await row(stale.id)).status).toBe('FAILED');
+    const notices=new NotificationRepository(database.db);for(let page=0;page<100&&await notices.projectBatch(tenantId);page++){/* Drain bounded durable batches. */}
+    const [failedProject]=await database.client`select id from video_projects where job_id=${stale.id}`;
+    expect(await database.client`select id from notifications where tenant_id=${tenantId} and user_id=${userId} and resource_id=${failedProject!.id} and type='VIDEO_FAILED'`).toHaveLength(1);
+    expect(await database.client`select id from notifications where tenant_id=${tenantId} and user_id=${viewerId} and resource_id=${failedProject!.id} and type='VIDEO_FAILED'`).toHaveLength(0);
     const revoked=await service.create(userId,tenantId,brandId,await request(),correlationId);
     const waiting=await service.create(userId,tenantId,brandId,{...await request(),captionMode:'MANUAL'},correlationId);await due(waiting.id);await processor.run(tenantId,waiting.id);await due(waiting.id);await processor.run(tenantId,waiting.id);
     const waitingProject=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===waiting.id)!;

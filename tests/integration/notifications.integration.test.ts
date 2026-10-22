@@ -109,6 +109,24 @@ describe.skipIf(!url)('durable role-scoped notifications',()=>{
     await projector.projectBatch(f.tenantId);await projector.projectBatch(f.tenantId);expect((await service.list(f.owner,f.tenantId,{})).items.filter(item=>item.type==='SUBSCRIPTION_EXPIRING')).toHaveLength(1);
     const g=await fixture();await g.pay();await g.pay();await projector.projectBatch(g.tenantId);expect((await service.list(g.owner,g.tenantId,{})).items.some(item=>item.type==='SUBSCRIPTION_EXPIRING')).toBe(false);
   });
+  it('warns owners once per latest resource grant, counts reservations and does not invent unfunded budgets',async()=>{
+    const f=await fixture();await repository.projectBatch(f.tenantId);
+    expect((await service.list(f.owner,f.tenantId,{})).items).toHaveLength(0);
+    const grant=async(unit:string,amount:number)=>{const id=randomUUID();await database.client`insert into usage_ledger(id,tenant_id,unit,type,amount,available_delta,reserved_delta,idempotency_key,correlation_id) values(${id},${f.tenantId},${unit},'GRANT',${amount},${amount},0,${id},${randomUUID()})`;return id;};
+    const spend=async(unit:string,amount:number)=>{const id=randomUUID();await database.client`insert into usage_ledger(tenant_id,unit,type,amount,available_delta,reserved_delta,idempotency_key,correlation_id) values(${f.tenantId},${unit},'ADJUSTMENT',${-amount},${-amount},0,${id},${randomUUID()})`;};
+    const first=await grant('AI_CREDITS',100);await spend('AI_CREDITS',89);await repository.projectBatch(f.tenantId);
+    expect((await service.list(f.owner,f.tenantId,{})).items).toHaveLength(0);
+    await spend('AI_CREDITS',1);await Promise.all([repository.projectBatch(f.tenantId),repository.projectBatch(f.tenantId)]);
+    let items=(await service.list(f.owner,f.tenantId,{})).items;expect(items.map(item=>item.resourceId)).toEqual([first]);expect(items[0]!.type).toBe('LIMIT_WARNING');expect(items[0]!.href).toBe(`/billing?organization=${f.tenantId}`);
+    expect((await service.list(f.editor,f.tenantId,{})).items).toHaveLength(0);
+    const second=await grant('AI_CREDITS',100);await repository.projectBatch(f.tenantId);expect((await service.list(f.owner,f.tenantId,{})).items).toHaveLength(1);
+    await spend('AI_CREDITS',100);await repository.projectBatch(f.tenantId);await repository.projectBatch(f.tenantId);
+    items=(await service.list(f.owner,f.tenantId,{})).items;expect(new Set(items.map(item=>item.resourceId))).toEqual(new Set([first,second]));
+    const video=await grant('VIDEO_SECONDS',100),reservation=randomUUID();
+    await database.client`insert into usage_reservations(id,tenant_id,key,unit,amount) values(${reservation},${f.tenantId},${randomUUID()},'VIDEO_SECONDS',90)`;
+    await database.client`insert into usage_ledger(tenant_id,unit,type,amount,available_delta,reserved_delta,reservation_id,idempotency_key,correlation_id) values(${f.tenantId},'VIDEO_SECONDS','RESERVE',90,-90,90,${reservation},${randomUUID()},${randomUUID()})`;
+    await repository.projectBatch(f.tenantId);expect((await service.list(f.owner,f.tenantId,{})).items.map(item=>item.resourceId)).toContain(video);
+  });
   it('routes script approval to approvers and failures to editors without copying audit payloads',async()=>{
     const f=await fixture();
     for(const action of ['JOB_SUCCEEDED','JOB_FAILED']){
@@ -117,6 +135,6 @@ describe.skipIf(!url)('durable role-scoped notifications',()=>{
       await database.client`insert into audit_logs(tenant_id,action,resource_id,correlation_id,metadata) values(${f.tenantId},${action},${jobId},${randomUUID()},'{"private":"must-not-leak"}')`;
     }
     await repository.projectBatch(f.tenantId);const approval=await service.list(f.approver,f.tenantId,{}),editor=await service.list(f.editor,f.tenantId,{});
-    expect(approval.items.map(item=>item.type)).toEqual(['CONTENT_APPROVAL_REQUIRED']);expect(approval.items[0]!.href).toContain('&tab=scripts');expect(editor.items.map(item=>item.type)).toEqual(['JOB_FAILED']);expect((await service.list(f.viewer,f.tenantId,{})).items).toHaveLength(0);expect(JSON.stringify(editor)).not.toContain('must-not-leak');
+    expect(approval.items.map(item=>item.type)).toEqual(['CONTENT_APPROVAL_REQUIRED']);expect(approval.items[0]!.href).toContain('&tab=scripts');expect(editor.items.map(item=>item.type).sort()).toEqual(['JOB_FAILED','SCRIPT_READY']);expect(editor.items.find(item=>item.type==='SCRIPT_READY')!.href).toContain('&tab=scripts');expect((await service.list(f.viewer,f.tenantId,{})).items).toHaveLength(0);expect(JSON.stringify(editor)).not.toContain('must-not-leak');
   });
 });

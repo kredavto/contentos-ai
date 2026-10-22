@@ -505,6 +505,13 @@
       "when": 1792699748210,
       "tag": "0071_sticky_brood",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792700124016,
+      "tag": "0072_real_mandroid",
+      "breakpoints": true
     }
   ]
 }

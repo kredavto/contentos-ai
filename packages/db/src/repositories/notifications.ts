@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { DomainError, type NotificationType, type NotificationAudience, type NotificationStatus, type Role } from '@contentos/types';
 import type { Database } from '../index';
-import { approvalRequests, generatedImages, notifications, notificationReceipts, organizationMembers, users, auditLogs, videoProjects, jobs, publishingJobs, socialConnections, channelAnalyticsJobs, paymentSettlements, paymentTasks, subscriptionTerms } from '../schema';
+import { usageLedger, approvalRequests, generatedImages, notifications, notificationReceipts, organizationMembers, users, auditLogs, videoProjects, jobs, publishingJobs, socialConnections, channelAnalyticsJobs, paymentSettlements, paymentTasks, subscriptionTerms } from '../schema';
 import { assertMembership, type Transaction } from './ledger';
 const roles:Record<NotificationAudience,Role[]>={ALL:['OWNER','ADMIN','MANAGER','EDITOR','CLIENT_APPROVER','VIEWER'],OWNERS:['OWNER'],EDITORS:['OWNER','ADMIN','MANAGER','EDITOR'],APPROVERS:['OWNER','ADMIN','MANAGER','CLIENT_APPROVER'],MANAGERS:['OWNER','ADMIN','MANAGER']};
 const audiences=(role:Role)=>(Object.keys(roles) as NotificationAudience[]).filter(key=>roles[key].includes(role));
@@ -32,7 +32,7 @@ export class NotificationRepository {
     if(event.action.startsWith('VIDEO_')){
       const [video]=await tx.select({brandId:videoProjects.brandId}).from(videoProjects).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.id,id)));
       if(!video)return [];
-      return event.action==='VIDEO_READY'?[{type:'VIDEO_READY',audience:'ALL',resourceId:id,brandId:video.brandId}]:[{type:'JOB_FAILED',audience:'EDITORS',resourceId:id,brandId:video.brandId}];
+      return event.action==='VIDEO_READY'?[{type:'VIDEO_READY',audience:'ALL',resourceId:id,brandId:video.brandId}]:[{type:'VIDEO_FAILED',audience:'EDITORS',resourceId:id,brandId:video.brandId}];
     }
     if(event.action.startsWith('PUBLICATION_')){
       const [job]=await tx.select({brandId:publishingJobs.brandId}).from(publishingJobs).where(and(eq(publishingJobs.tenantId,tenantId),eq(publishingJobs.id,id)));
@@ -51,6 +51,7 @@ export class NotificationRepository {
     if(typeof jobId!=='string'||!z.uuid().safeParse(jobId).success)return [];
     const [job]=await tx.select({brandId:jobs.brandId,type:jobs.type}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.id,jobId)));
     if(!job||(event.action==='JOB_SUCCEEDED'&&!['GENERATE_SCRIPT','GENERATE_POST','GENERATE_CAROUSEL'].includes(job.type)))return [];
+    if(event.action==='JOB_SUCCEEDED'&&job.type==='GENERATE_SCRIPT')return [{type:'SCRIPT_READY',audience:'EDITORS',resourceId:jobId,brandId:job.brandId},{type:'CONTENT_APPROVAL_REQUIRED',audience:'APPROVERS',resourceId:jobId,brandId:job.brandId}];
     return [{type:event.action==='JOB_SUCCEEDED'?'CONTENT_APPROVAL_REQUIRED':'JOB_FAILED',audience:event.action==='JOB_SUCCEEDED'?'APPROVERS':'EDITORS',resourceId:jobId,brandId:job.brandId}];
   }
   async projectBatch(tenantId?:string){
@@ -62,7 +63,17 @@ export class NotificationRepository {
       const now=this.now(),end=new Date(now.getTime()+3*86400000);
       const expiring=await tx.select({id:subscriptionTerms.id,tenantId:subscriptionTerms.tenantId}).from(subscriptionTerms).where(and(tenantId?eq(subscriptionTerms.tenantId,tenantId):undefined,sql`${subscriptionTerms.endsAt} > ${now.toISOString()} and ${subscriptionTerms.endsAt} <= ${end.toISOString()}`,sql`not exists (select 1 from subscription_terms newer where newer.tenant_id=${subscriptionTerms.tenantId} and newer.ends_at>${subscriptionTerms.endsAt})`,sql`not exists (select 1 from notification_receipts r where r.source_key='expiry:' || ${subscriptionTerms.id}::text)`)).limit(25).for('update',{skipLocked:true});
       for(const term of expiring)await this.emit(tx,term.tenantId,`expiry:${term.id}`,[{type:'SUBSCRIPTION_EXPIRING',audience:'OWNERS',resourceId:term.id}]);
-      return events.length+failed.length+expiring.length;
+      // One warning per resource's latest grant/purchase; the immutable ledger is authoritative.
+      // No grant means no established budget, not an inferred zero balance.
+      const low=await tx.select({id:usageLedger.id,tenantId:usageLedger.tenantId}).from(usageLedger).where(and(
+        tenantId?eq(usageLedger.tenantId,tenantId):undefined,
+        inArray(usageLedger.type,['GRANT','PURCHASE']),
+        sql`not exists (select 1 from usage_ledger newer where newer.tenant_id=${usageLedger.tenantId} and newer.unit=${usageLedger.unit} and newer.type in ('GRANT','PURCHASE') and (newer.created_at,newer.id)>(${usageLedger.createdAt},${usageLedger.id}))`,
+        sql`(select sum(l.available_delta)::bigint from usage_ledger l where l.tenant_id=${usageLedger.tenantId} and l.unit=${usageLedger.unit})*10 <= ${usageLedger.amount}::bigint`,
+        sql`not exists (select 1 from notification_receipts r where r.source_key='limit:' || ${usageLedger.id}::text)`
+      )).orderBy(usageLedger.createdAt,usageLedger.id).limit(25).for('update',{skipLocked:true});
+      for(const grant of low)await this.emit(tx,grant.tenantId,`limit:${grant.id}`,[{type:'LIMIT_WARNING',audience:'OWNERS',resourceId:grant.id}]);
+      return events.length+failed.length+expiring.length+low.length;
     });
   }
   async list(userId:string,tenantId:string,cursor?:string,status:NotificationStatus='ALL'){

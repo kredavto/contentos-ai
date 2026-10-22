@@ -77,3 +77,21 @@ test('notifications persist read state and enforce recipient, role and CSRF boun
   await page.reload();await expect(page.getByRole('heading',{name:'Пока нет уведомлений'})).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('generation and low-resource notices show specific copy and destinations on mobile',async({page,context,baseURL})=>{
+  const user=randomUUID(),tenant=randomUUID(),workspace=randomUUID(),brand=randomUUID(),token=randomBytes(32).toString('base64url');
+  await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${user},${`notice-types-${user}@example.test`},'unusable','Notice types',now())`;
+  await database.client`insert into organizations(id,name) values(${tenant},'Notice types')`;
+  await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenant},${user},'OWNER')`;
+  await database.client`insert into workspaces(id,tenant_id,name) values(${workspace},${tenant},'Fixture')`;
+  await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${brand},${tenant},${workspace},'Fixture')`;
+  await database.client`insert into sessions(user_id,token_hash,expires_at) values(${user},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+  for(const type of ['SCRIPT_READY','VIDEO_FAILED','LIMIT_WARNING'])await database.client`insert into notifications(tenant_id,user_id,source_key,type,audience,resource_id,brand_id) values(${tenant},${user},${randomUUID()},${type},'OWNERS',${randomUUID()},${type==='LIMIT_WARNING'?null:brand})`;
+  await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
+  await page.setViewportSize({width:390,height:844});await page.goto(`/notifications?organization=${tenant}`);
+  for(const [title,href] of [['Сценарий готов',`/brands/${brand}/content?organization=${tenant}&tab=scripts`],['Видео требует внимания',`/brands/${brand}/content?organization=${tenant}&tab=videos`],['Ресурсы заканчиваются',`/billing?organization=${tenant}`]]){
+    const card=page.locator('article').filter({has:page.getByRole('heading',{name:title!,exact:true})});await expect(card).toBeVisible();await expect(card.getByRole('link',{name:'Открыть',exact:true})).toHaveAttribute('href',href!);
+  }
+  await expect(page.getByText('Непрочитано: 3',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+});

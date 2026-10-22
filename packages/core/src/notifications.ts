@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { NotificationRepository } from '@contentos/db';
 import { notificationReadSchema, notificationBatchReadSchema, notificationListSchema, type NotificationType } from '@contentos/types';
 const copy:Record<NotificationType,{title:string;body:string;tab?:string}>={
+  SCRIPT_READY:{title:'Сценарий готов',body:'Новая версия сценария доступна для просмотра и редактирования.',tab:'scripts'},
+  VIDEO_FAILED:{title:'Видео требует внимания',body:'Проверьте ошибку или неопределённый результат создания видео перед повторным запуском.',tab:'videos'},
+  LIMIT_WARNING:{title:'Ресурсы заканчиваются',body:'На момент проверки доступный остаток одного из ресурсов составлял не больше 10% последнего пополнения. Проверьте актуальный баланс в биллинге.'},
   VIDEO_READY:{title:'Видео готово',body:'Готовый ролик доступен в видеостудии.',tab:'videos'},
   CONTENT_APPROVAL_REQUIRED:{title:'Материал ожидает одобрения',body:'Проверьте сценарий перед дальнейшей работой.',tab:'scripts'},
   PUBLICATION_SUCCESS:{title:'Публикация выполнена',body:'Проверьте результат и статус публикации.',tab:'publishing'},
