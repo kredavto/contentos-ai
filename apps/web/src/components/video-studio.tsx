@@ -58,18 +58,21 @@ export function VideoStudio({base,scripts,canWrite,canApprove,canManage,maximum,
   const validMusic=!musicId||!!musicFadeIn.trim()&&!!musicFadeOut.trim()&&backgroundMusicSchema.safeParse(musicSettings).success&&musicFadesFit(musicSettings,(budget??180)*1000-bookendMs)&&musicAssets.some(asset=>asset.id===musicId);
   const brollClips=selectedBrollClips(brollDrafts,brollAssets,(budget??180)*1000-bookendMs);
   const look=looks.find(item=>item.id===lookId);
+  const connectionReady=look?.connection?!!data?.configuration.byokReady&&!!avatars?.configuration.connections.some(item=>item.id===look.connection?.id&&item.revision===look.connection.revision):!!data?.configuration.ready;
   return <section><h2>Видеостудия</h2><p className="muted">Одобренный сценарий, выбранный аватар и голос превращаются в готовый ролик. Исходный рендер и финальное видео сохраняются отдельно.</p>
     {error?<p className="notice error" role="alert">{error}</p>:null}{notice?<p className="notice success" role="status">{notice}</p>:null}
     {!data?<p role="status">Загружаем видеопроекты…</p>:null}
     {data?.configuration.provider==='mock-avatar'?<p className="notice warning">ДЕМО: используется тестовый ролик. Это не видео с вашим аватаром.</p>:null}
-    {data&&!data.configuration.ready?<p className="notice warning">Генерация видео ещё не подключена. Требуется настройка видеопровайдера, хранилища и фонового обработчика.</p>:null}
-    {canWrite?<form className="panel stack" onSubmit={event=>{event.preventDefault();if(!script||!look||!validBookends||!validMusic||!brollClips)return;void perform(async()=>{
+    {data&&!data.configuration.ready&&!data.configuration.byokReady?<p className="notice warning">Генерация видео ещё не подключена. Требуется настройка видеопровайдера, хранилища и фонового обработчика.</p>:null}
+    {canWrite?<form className="panel stack" onSubmit={event=>{event.preventDefault();if(!connectionReady||!script||!look||!validBookends||!validMusic||!brollClips)return;void perform(async()=>{
       const payload=JSON.stringify({scriptId:script.id,scriptVersion:script.currentVersion,lookId:look.id,orientation,resolution,fit,captionMode,captionLanguage:'ru',...(introSelection||outroSelection?{bookends:{...(introSelection?{intro:introSelection}:{}),...(outroSelection?{outro:outroSelection}:{})}}:{}),...(brollClips?.length?{brollClips}:{}),...(musicId?{backgroundMusic:musicSettings}:{}),...(watermarkEnabled?{watermark}:{}),...(customCover?{cover}:{})});
       if(intent.current?.payload!==payload)intent.current={payload,key:crypto.randomUUID()};
       await api(`${base}/videos`,'POST',{...JSON.parse(payload),idempotencyKey:intent.current.key});intent.current=null;setNotice('Видео добавлено в очередь');
     });}}>
       <label>Одобренный сценарий<select aria-label="Одобренный сценарий" required value={scriptId} onChange={event=>setScriptId(event.target.value)}><option value="">Выберите сценарий</option>{approved.map(item=><option value={item.id} key={item.id}>{item.content.hook.slice(0,70)} · v{item.currentVersion}</option>)}</select></label>
       <label>Образ аватара<select aria-label="Образ аватара" required value={lookId} onChange={event=>setLookId(event.target.value)}><option value="">Выберите образ с голосом</option>{looks.map(item=><option value={item.id} key={item.id}>{item.avatarName} · {item.name}</option>)}</select></label>
+      {look?<p className="muted">{look.connection?'Видео использует ключ HeyGen бренда, закреплённый за аватаром. Оплата генерации — в этом аккаунте HeyGen.':'Видео использует подключение платформы.'}</p>:null}
+      {look?.connection&&!connectionReady?<p role="alert">Подключение аватара недоступно. Ключ мог быть заменён или отозван; автоматического переключения на другой аккаунт не будет.</p>:null}
       {!approved.length?<p className="notice warning">Сначала одобрите сценарий в разделе «Сценарии».</p>:null}
       {!looks.length?<p className="notice warning">В разделе «Аватары» создайте образ и выберите для него голос.</p>:null}
       <div className="studio-form"><label>Формат<select aria-label="Формат видео" value={orientation} onChange={event=>setOrientation(event.target.value as typeof orientation)}><option>9:16</option><option>1:1</option><option>16:9</option></select></label><label>Разрешение<select aria-label="Разрешение видео" value={resolution} onChange={event=>setResolution(event.target.value as typeof resolution)}><option>720p</option><option>1080p</option></select></label><label>Кадрирование<select aria-label="Кадрирование" value={fit} onChange={event=>setFit(event.target.value as typeof fit)}><option value="crop">Заполнить кадр</option><option value="contain">Сохранить весь кадр</option></select></label></div>
@@ -101,7 +104,7 @@ export function VideoStudio({base,scripts,canWrite,canApprove,canManage,maximum,
         </>:null}
         <p className="muted">Загрузите MP3 или WAV в разделе «Медиа». Музыка звучит вместе с голосом; короткая дорожка повторяется до конца основной части ролика. Удаление исходного файла остановит незавершённые задачи, но не изменит готовые видео.</p>
       </fieldset>
-      <button className="button primary" disabled={pending||!validBookends||!brollClips||!validMusic||!data?.configuration.ready||!script||!look||!budget||available<budget||(captionMode==='AUTO'&&(!captionCost||aiAvailable<captionCost))}>Создать видео</button>
+      <button className="button primary" disabled={pending||!validBookends||!brollClips||!validMusic||!connectionReady||!script||!look||!budget||available<budget||(captionMode==='AUTO'&&(!captionCost||aiAvailable<captionCost))}>Создать видео</button>
     </form>:null}
     {data&&!data.projects.length?<div className="panel empty">Здесь появятся готовые ролики и задачи генерации.</div>:null}
     <div className="plan-grid">{data?.projects.map(project=><article className="panel stack" key={project.id}>

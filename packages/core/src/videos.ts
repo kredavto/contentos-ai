@@ -18,7 +18,7 @@ function boundConnection(key:{id:string;tenantId:string;brandId:string;provider:
 const uuid=z.uuid();
 export class VideoService {
   constructor(private readonly repository:VideoRepository,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null,private readonly byok?:VideoByok){}
-  async overview(userId:string,tenantId:string,brandId:string){return {projects:await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId)),configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled',captionsReady:!!this.captionConnection}};}
+  async overview(userId:string,tenantId:string,brandId:string){return {projects:await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId)),configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled',byokReady:this.enabled&&!!this.storage&&!!this.byok?.vault,captionsReady:!!this.captionConnection}};}
   create(userId:string,tenantId:string,brandId:string,input:unknown,correlationId:string){
     if(!this.enabled||(!this.connection&&!this.byok?.vault)||!this.storage)throw new DomainError('CONFIGURATION_REQUIRED',503);
     return this.repository.enqueue(userId,uuid.parse(tenantId),uuid.parse(brandId),videoRequestSchema.parse(input),avatarConsentPolicies(),this.connection?.name??null,correlationId,this.captionConnection?{provider:this.captionConnection.name,model:this.captionConnection.model}:null,!!this.byok?.vault);

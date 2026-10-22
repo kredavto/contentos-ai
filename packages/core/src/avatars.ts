@@ -21,7 +21,7 @@ export class AvatarService {
   constructor(private readonly repository:AvatarRepository,private readonly connection:AvatarConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean,private readonly byok?:AvatarByok){}
   async overview(userId:string,tenantId:string,brandId:string){
     const looks=await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId),avatarConsentPolicies());
-    return {looks,configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled'}};
+    return {looks,configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled',byokReady:this.enabled&&!!this.storage&&!!this.byok?.vault,connections:await this.repository.generationReferences(userId,tenantId,brandId)}};
   }
   async create(userId:string,tenantId:string,brandId:string,raw:unknown,correlationId:string){
     const input=avatarRequestSchema.parse(raw);

@@ -22,6 +22,14 @@ export async function resolveProviderKey(tx:Transaction,userId:string,tenantId:s
 /** Metadata is safe for a future management API; credentials are worker-only. */
 export class ProviderKeyRepository {
  constructor(private readonly db:Database){}
+ /** Safe executable references for studio members; never includes masks or encrypted credentials. */
+ async generationReferences(userId:string,tenantId:string,brandId:string){return this.db.transaction(async tx=>{
+  const member=await assertMembership(tx,userId,tenantId);
+  const [brand]=await tx.select({id:brands.id}).from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId)));if(!brand)throw new DomainError('NOT_FOUND',404);
+  if(!member.verifiedAt||!['OWNER','ADMIN','MANAGER','EDITOR'].includes(member.role))return [];
+  try{await entitlement(tx,tenantId);}catch(error){if(error instanceof DomainError&&error.code==='PLAN_LIMIT_REACHED')return [];throw error;}
+  return tx.select({id:providerKeys.id,revision:providerKeys.revision}).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.provider,'heygen'),eq(providerKeys.status,'ACTIVE')));
+ });}
  async verificationInput(userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);return resolveProviderKey(tx,userId,tenantId,brandId,reference);});}
  async allowVerification(tenantId:string){if(!await new AuthRepository(this.db).rateLimit(`provider-key-check:${tenantId}`,10,60))throw new DomainError('RATE_LIMITED',429);}
  async completeVerification(userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference,correlationId:string){return this.db.transaction(async tx=>{

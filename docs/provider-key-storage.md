@@ -46,7 +46,7 @@ The web/worker are wired with the credential vault. A request-scoped HeyGen avat
 
 Deletion keeps the original binding and may execute after plan expiry because deletion was already authorized. It still requires the same active key revision; it never uses a replacement key or the platform account. Revoked/replaced credentials leave remote deletion pending. The current implementation does not offer automatic key rebinding/restoration; provider-side investigation/cleanup is needed when that original credential is unavailable. This operational limitation must be resolved for complete BYOK lifecycle support.
 
-This slice exposes the binding at the API and worker layers, not a new avatar-creation selector in the UI. Video API/worker binding is now implemented as described below; the UI creation selector remains pending. Existing public catalog and owner key management remain unchanged. Deploy migration 0078 and matching workers before enabling BYOK avatar submissions; older workers cannot interpret the new job input. No live generation or account credential was used in acceptance.
+The studio now exposes explicit avatar-creation selection, with video inheritance as described below. Existing public catalog and owner key management remain available. Deploy migration 0078 and matching workers before enabling BYOK avatar submissions; older workers cannot interpret the new job input. No live generation or account credential was used in acceptance.
 
 ## Video job binding (API/worker slice)
 
@@ -56,4 +56,13 @@ The worker resolves/decrypts that key for a request-scoped HeyGen video adapter,
 
 Cleanup uses the original revision independently of paid-term expiry, then removes private stored media only after remote deletion succeeds. Unavailable/replaced credentials leave deletion pending, with no account substitution. Safe rebinding/provider-side reconciliation is still outstanding. Already completed local media keeps the existing consent and authorization checks without requiring HeyGen credentials for a download.
 
-Deploy migration 0079 and matching web/worker versions together before accepting bound video jobs. This is not a live provider acceptance result or a finished UI workflow; the avatar creation selector and complete key-rotation lifecycle remain pending.
+Deploy migration 0079 and matching web/worker versions together before accepting bound video jobs. This is not a live provider acceptance result; the complete key-rotation lifecycle remains pending.
+
+
+## Studio connection selection
+
+The avatar overview exposes only active HeyGen `{id,revision}` references to verified generation-capable members on an active Expert/Agency term. Foreign tenant/brand lookups fail; non-generating readers, unverified users and unavailable entitlements receive no executable references. This discovery result contains neither key suffixes nor ciphertext. Authorization and exact revision are checked again when creating and executing a job; discovery is not authorization to use a stale key.
+
+Avatar creation defaults explicitly to the platform connection. Selecting the brand key shows the external billing notice and submits only its reference. Additional-look choices are restricted to avatars with that exact binding. If polling detects replacement/revocation/entitlement loss, the selected value remains visibly unavailable and submission is disabled instead of reverting to another account. Video creation displays the selected avatar's inherited connection and blocks unavailable references; the server still derives the binding independently from the avatar. Key management remains owner-only, while authorized editors can select a provisioned reference without seeing its secret or masked suffix.
+
+No new migration is required for this UI slice. Migrations 0078/0079 and matching worker code remain prerequisites. Safe key rebinding, private voice cloning and live provider acceptance are not covered.

@@ -18,6 +18,26 @@ describe.skipIf(!url)('tenant/brand BYOK storage foundation',()=>{
   return {tenant,user,editor,brand};
  }
  const secret=()=>`fixture-only-${randomUUID()}`;
+ it('discovers only current executable references without exposing key metadata',async()=>{
+  const f=await fixture(),other=await fixture(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:null},randomUUID());
+  await service.save(f.user,f.tenant,f.brand,{provider:'openai',apiKey:secret(),revision:null},randomUUID());
+  expect(await repository.generationReferences(f.editor,f.tenant,f.brand)).toEqual([{id:saved.id,revision:0}]);
+  expect(await repository.generationReferences(other.user,other.tenant,other.brand)).toEqual([]);
+  await expect(repository.generationReferences(f.user,other.tenant,other.brand)).rejects.toThrow('NOT_FOUND');
+  await expect(repository.generationReferences(f.user,f.tenant,other.brand)).rejects.toThrow('NOT_FOUND');
+  await database.client`update users set email_verified_at=null where id=${f.editor}`;
+  expect(await repository.generationReferences(f.editor,f.tenant,f.brand)).toEqual([]);
+  await database.client`update users set email_verified_at=now() where id=${f.editor}`;
+  await database.client`update organization_members set role='VIEWER' where tenant_id=${f.tenant} and user_id=${f.editor}`;
+  expect(await repository.generationReferences(f.editor,f.tenant,f.brand)).toEqual([]);
+  const replaced=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:0},randomUUID());
+  expect(await repository.generationReferences(f.user,f.tenant,f.brand)).toEqual([{id:saved.id,revision:replaced.revision}]);
+  await service.revoke(f.user,f.tenant,f.brand,saved.id,{revision:replaced.revision},randomUUID());
+  expect(await repository.generationReferences(f.user,f.tenant,f.brand)).toEqual([]);
+ });
+ it.each(['FREE','CREATOR'])('does not advertise generation keys on %s',async(code)=>{
+  const f=await fixture(code);expect(await repository.generationReferences(f.user,f.tenant,f.brand)).toEqual([]);
+ });
  it('stores only authenticated ciphertext and masked metadata, without leaking credentials to audit',async()=>{
   const f=await fixture(),apiKey=secret(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey,revision:null},randomUUID());
   expect(saved.maskedKey).toBe(`••••••••${apiKey.slice(-4)}`);expect(saved).not.toHaveProperty('credential');

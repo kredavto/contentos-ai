@@ -41,8 +41,31 @@ test('owner manages encrypted HeyGen keys with revision, role and CSRF boundarie
  await page.route(`**/brands/${brand.id}/voices`,async route=>{if(route.request().method()!=='POST')return route.continue();expect(route.request().postDataJSON()).toEqual({connection:{id:key.id,revision:key.revision}});await route.fulfill({json:{data:{nextCursor:null}}});});
  await panel.getByRole('button',{name:'Загрузить голоса через свой ключ',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Публичные голоса загружены');
  await page.reload();await expect(field).toBeEnabled();await expect(field).toHaveValue('');
+ const selection=page.getByLabel('Подключение для создания',{exact:true});
+ await expect(selection).toHaveValue('platform');
+ await expect(selection.locator('option',{hasText:'Ключ HeyGen бренда'})).toHaveCount(1);
+ await selection.selectOption(`${key.id}:${key.revision}`);await expect(selection).toHaveValue(`${key.id}:${key.revision}`);
+ await expect(page.getByText('Создание будет оплачено в аккаунте HeyGen владельца ключа.',{exact:false})).toBeVisible();
+
  await page.setViewportSize({width:390,height:844});await expect(panel.getByText(`••••••••${apiKey.slice(-4)}`,{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await panel.screenshot({path:testInfo.outputPath('provider-key-mobile.png')});
  await panel.getByRole('button',{name:'Отозвать ключ HeyGen',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Ключ удалён из хранилища');expect((await database.client`select credential from provider_keys where id=${key.id}`)[0]?.credential).toBeNull();
+ await expect(page.getByRole('alert').filter({hasText:'Ключ заменён, отозван или недоступен по тарифу'})).toBeVisible({timeout:15000});
+ await expect(selection).toHaveValue(`${key.id}:${key.revision}`);
+ await expect(page.getByRole('button',{name:/Создать образ/})).toBeDisabled();
+ await page.screenshot({path:testInfo.outputPath('avatar-stale-key-mobile.png'),fullPage:true});
+ // Presentation-only avatar fixture: no generation endpoint or external provider is called.
+ const lookId=randomUUID();
+ await page.route(`**/brands/${brand.id}/avatars`,async route=>{
+  if(route.request().method()!=='GET')return route.abort();
+  const response=await route.fetch(),body=await response.json();
+  await route.fulfill({json:{...body,data:{...body.data,looks:[{id:lookId,avatarId:randomUUID(),avatarName:'Bound fixture',name:'Bound look',status:'READY',avatarStatus:'ACTIVE',consentValid:true,voiceId:randomUUID(),connection:{id:key.id,revision:key.revision}}]}}});
+ });
+ await page.getByRole('navigation',{name:'Контент',exact:true}).getByRole('button',{name:'Видео',exact:true}).click();
+ await page.getByLabel('Образ аватара',{exact:true}).selectOption(lookId);
+ await expect(page.getByText('Видео использует ключ HeyGen бренда, закреплённый за аватаром.',{exact:false})).toBeVisible();
+ await expect(page.getByRole('alert').filter({hasText:'Подключение аватара недоступно'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+ await page.unroute(`**/brands/${brand.id}/avatars`);
  await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
  expect((await page.request.get(endpoint)).status()).toBe(403);expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:{...input,revision:1}})).status()).toBe(403);
  await page.reload();await expect(page.getByRole('heading',{name:'Студия аватаров',exact:true})).toBeVisible();await expect(panel).toHaveCount(0);

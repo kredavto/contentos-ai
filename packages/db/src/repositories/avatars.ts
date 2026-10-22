@@ -4,7 +4,7 @@ import { DomainError,avatarJobInputSchema,type AvatarRequest,type AvatarJobInput
 import type { Database } from '../index';
 import { avatars,avatarLooks,mediaAssets,consentSubjects,consentRecords,jobs,outbox,usagePolicies,auditLogs,aiCalls,providerKeys } from '../schema';
 import { lockTenant,assertMembership,reserveInTransaction,settleInTransaction,type Transaction } from './ledger';
-import {resolveProviderKey} from './provider-keys';
+import {ProviderKeyRepository,resolveProviderKey} from './provider-keys';
 import { requireConsent } from './consent';
 import { ownedJob,type StoredJob } from './jobs';
 export type ConsentPolicy = {type:ConsentType;version:string;textHash:string};
@@ -60,12 +60,13 @@ export class AvatarRepository {
       return {id:job.id,status:job.status};
     });
   }
+  generationReferences(userId:string,tenantId:string,brandId:string){return new ProviderKeyRepository(this.db).generationReferences(userId,tenantId,brandId);}
   async list(userId:string,tenantId:string,brandId:string,policies:ConsentPolicy[]){
     return this.db.transaction(async tx=>{
       await assertMembership(tx,userId,tenantId);
       const rows=await tx.select({avatar:avatars,look:avatarLooks,input:jobs.input}).from(avatars).innerJoin(avatarLooks,and(eq(avatarLooks.tenantId,avatars.tenantId),eq(avatarLooks.avatarId,avatars.id))).innerJoin(jobs,and(eq(jobs.tenantId,avatarLooks.tenantId),eq(jobs.id,avatarLooks.jobId))).where(and(eq(avatars.tenantId,tenantId),eq(avatars.brandId,brandId),sql`${avatars.status} <> 'DELETED'`)).orderBy(desc(avatars.createdAt),desc(avatarLooks.createdAt)).limit(100);
       const active=await tx.select({id:consentRecords.id}).from(consentRecords).where(and(eq(consentRecords.tenantId,tenantId),isNull(consentRecords.revokedAt)));const ids=new Set(active.map(row=>row.id));
-      return rows.map(({avatar,look,input})=>{const requirements=avatarJobInputSchema.parse(input).requirements;return {id:look.id,avatarId:avatar.id,avatarName:avatar.name,voiceId:avatar.voiceId,name:look.name,subjectId:avatar.subjectId,sourceAssetId:look.sourceAssetId,status:look.status,avatarStatus:avatar.status,jobId:look.jobId,errorCode:look.errorCode??avatar.errorCode,consentValid:requirements.every(requirement=>ids.has(requirement.recordId)&&policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash))};});
+      return rows.map(({avatar,look,input})=>{const requirements=avatarJobInputSchema.parse(input).requirements;return {connection:avatar.providerKeyId?{id:avatar.providerKeyId,revision:avatar.providerKeyRevision!}:null,id:look.id,avatarId:avatar.id,avatarName:avatar.name,voiceId:avatar.voiceId,name:look.name,subjectId:avatar.subjectId,sourceAssetId:look.sourceAssetId,status:look.status,avatarStatus:avatar.status,jobId:look.jobId,errorCode:look.errorCode??avatar.errorCode,consentValid:requirements.every(requirement=>ids.has(requirement.recordId)&&policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash))};});
     });
   }
   async claim(tenantId:string,id:string){
