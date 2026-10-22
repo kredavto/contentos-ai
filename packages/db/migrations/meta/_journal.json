@@ -470,6 +470,13 @@
       "when": 1792650035441,
       "tag": "0066_premium_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1792650886481,
+      "tag": "0067_majestic_random",
+      "breakpoints": true
     }
   ]
 }

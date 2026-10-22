@@ -37,7 +37,7 @@ describe.skipIf(!url)('assigned version-bound script approvals',()=>{
     const input=await fixture(),request=await service.create(editor,tenant,brand,input,correlation);
     await content.editScript(editor,tenant,brand,input.scriptId,1,{...scriptContent,core:'Updated'},correlation);
     await expect(service.decide(approver,tenant,request.id,{status:'APPROVED'},correlation)).rejects.toThrow('CONFLICT');
-    const old=(await service.list(approver,tenant,{})).items.find(row=>row.id===request.id)!;expect(old.content.core).toBe('Core');expect(old.currentVersion).toBe(2);
+    const old=(await service.list(approver,tenant,{})).items.find(row=>row.id===request.id)!;expect(old.entityType==='SCRIPT'&&old.content.core).toBe('Core');expect(old.currentVersion).toBe(2);
     await service.decide(editor,tenant,request.id,{status:'CANCELLED'},correlation);
     const next=await service.create(editor,tenant,brand,{...input,version:2,idempotencyKey:randomUUID()},correlation);expect(next.id).not.toBe(request.id);
   });

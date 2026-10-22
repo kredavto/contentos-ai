@@ -37,18 +37,7 @@ export class ContentRepository {
   }
   async editPost(userId:string,tenantId:string,brandId:string,postId:string,input:{revision:number;content:PostOutput|null},correlationId:string) {
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,input.content?'generate':'approve');
-      const scope=and(eq(posts.tenantId,tenantId),eq(posts.brandId,brandId),eq(posts.id,postId));
-      const [post]=await tx.select().from(posts).where(scope).for('update');
-      if(!post)throw new DomainError('NOT_FOUND',404);
-      if(post.currentVersion!==input.revision)throw new DomainError('CONFLICT',409);
-      if(!input.content&&post.approvedVersion===post.currentVersion)return {version:post.currentVersion};
-      const version=input.content?post.currentVersion+1:post.currentVersion;
-      if(input.content)await tx.insert(postVersions).values({tenantId,postId,version,content:input.content,createdBy:userId});
-      await tx.update(posts).set({currentVersion:version,approvedVersion:input.content?null:version,approvedBy:input.content?null:userId}).where(scope);
-      await tx.update(contentItems).set({...(input.content?{title:input.content.title}:{}),status:input.content?'READY':'APPROVED',revision:sql`${contentItems.revision}+1`}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,post.contentItemId)));
-      await tx.insert(auditLogs).values({tenantId,userId,action:input.content?'POST_EDITED':'POST_APPROVED',resourceId:postId,correlationId,metadata:{version}});
-      return {version};
+      return editPostInTransaction(tx,userId,tenantId,brandId,postId,input,correlationId);
     });
   }
   carouselHistory(userId:string,tenantId:string,brandId:string,carouselId:string) {
@@ -95,18 +84,7 @@ export class ContentRepository {
   }
   async editCarousel(userId:string,tenantId:string,brandId:string,carouselId:string,input:{revision:number;lifecycleRevision?:number;content:CarouselOutput|null},correlationId:string) {
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,input.content?'generate':'approve');
-      const scope=and(eq(carousels.tenantId,tenantId),eq(carousels.brandId,brandId),eq(carousels.id,carouselId));
-      const [carousel]=await tx.select().from(carousels).where(scope).for('update');
-      if(!carousel)throw new DomainError('NOT_FOUND',404);
-      if(carousel.archivedAt||carousel.lifecycleRevision!==(input.lifecycleRevision??0)||carousel.currentVersion!==input.revision)throw new DomainError('CONFLICT',409);
-      if(!input.content&&carousel.approvedVersion===carousel.currentVersion)return {version:carousel.currentVersion};
-      const version=input.content?carousel.currentVersion+1:carousel.currentVersion;
-      if(input.content)await tx.insert(carouselVersions).values({tenantId,carouselId,version,content:input.content,createdBy:userId});
-      await tx.update(carousels).set({currentVersion:version,approvedVersion:input.content?null:version,approvedBy:input.content?null:userId}).where(scope);
-      await tx.update(contentItems).set({...(input.content?{title:input.content.title}:{}),status:input.content?'READY':'APPROVED',revision:sql`${contentItems.revision}+1`}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,carousel.contentItemId)));
-      await tx.insert(auditLogs).values({tenantId,userId,action:input.content?'CAROUSEL_EDITED':'CAROUSEL_APPROVED',resourceId:carouselId,correlationId,metadata:{version}});
-      return {version};
+      return editCarouselInTransaction(tx,userId,tenantId,brandId,carouselId,input,correlationId);
     });
   }
   async history(userId:string,tenantId:string,brandId:string,scriptId:string) {
@@ -136,4 +114,34 @@ export async function editScriptInTransaction(tx:Transaction,userId:string,tenan
       await tx.update(contentItems).set({status:content?'SCRIPT':'APPROVED_SCRIPT',revision:sql`${contentItems.revision}+1`}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,script.contentItemId)));
       await tx.insert(auditLogs).values({tenantId,userId,action:content?'SCRIPT_EDITED':'SCRIPT_APPROVED',resourceId:scriptId,correlationId,metadata:{version:content?revision+1:revision}});
       return {version:content?revision+1:revision};
+}
+
+export async function editPostInTransaction(tx:Transaction,userId:string,tenantId:string,brandId:string,postId:string,input:{revision:number;content:PostOutput|null},correlationId:string){
+      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,input.content?'generate':'approve');
+      const scope=and(eq(posts.tenantId,tenantId),eq(posts.brandId,brandId),eq(posts.id,postId));
+      const [post]=await tx.select().from(posts).where(scope).for('update');
+      if(!post)throw new DomainError('NOT_FOUND',404);
+      if(post.currentVersion!==input.revision)throw new DomainError('CONFLICT',409);
+      if(!input.content&&post.approvedVersion===post.currentVersion)return {version:post.currentVersion};
+      const version=input.content?post.currentVersion+1:post.currentVersion;
+      if(input.content)await tx.insert(postVersions).values({tenantId,postId,version,content:input.content,createdBy:userId});
+      await tx.update(posts).set({currentVersion:version,approvedVersion:input.content?null:version,approvedBy:input.content?null:userId}).where(scope);
+      await tx.update(contentItems).set({...(input.content?{title:input.content.title}:{}),status:input.content?'READY':'APPROVED',revision:sql`${contentItems.revision}+1`}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,post.contentItemId)));
+      await tx.insert(auditLogs).values({tenantId,userId,action:input.content?'POST_EDITED':'POST_APPROVED',resourceId:postId,correlationId,metadata:{version}});
+      return {version};
+}
+
+export async function editCarouselInTransaction(tx:Transaction,userId:string,tenantId:string,brandId:string,carouselId:string,input:{revision:number;lifecycleRevision?:number;content:CarouselOutput|null},correlationId:string){
+      await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,input.content?'generate':'approve');
+      const scope=and(eq(carousels.tenantId,tenantId),eq(carousels.brandId,brandId),eq(carousels.id,carouselId));
+      const [carousel]=await tx.select().from(carousels).where(scope).for('update');
+      if(!carousel)throw new DomainError('NOT_FOUND',404);
+      if(carousel.archivedAt||carousel.lifecycleRevision!==(input.lifecycleRevision??0)||carousel.currentVersion!==input.revision)throw new DomainError('CONFLICT',409);
+      if(!input.content&&carousel.approvedVersion===carousel.currentVersion)return {version:carousel.currentVersion};
+      const version=input.content?carousel.currentVersion+1:carousel.currentVersion;
+      if(input.content)await tx.insert(carouselVersions).values({tenantId,carouselId,version,content:input.content,createdBy:userId});
+      await tx.update(carousels).set({currentVersion:version,approvedVersion:input.content?null:version,approvedBy:input.content?null:userId}).where(scope);
+      await tx.update(contentItems).set({...(input.content?{title:input.content.title}:{}),status:input.content?'READY':'APPROVED',revision:sql`${contentItems.revision}+1`}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,carousel.contentItemId)));
+      await tx.insert(auditLogs).values({tenantId,userId,action:input.content?'CAROUSEL_EDITED':'CAROUSEL_APPROVED',resourceId:carouselId,correlationId,metadata:{version}});
+      return {version};
 }
