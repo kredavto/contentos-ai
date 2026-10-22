@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
-import {approvalRequestSchema,approvalDecisionSchema} from '../packages/types/src/approvals';
+import {approvalCommentSchema,approvalListSchema,approvalRequestSchema,approvalDecisionSchema} from '../packages/types/src/approvals';
 it('requires an immutable version, assignee and bounded comments',()=>{
   const input={scriptId:randomUUID(),version:1,requestedFrom:randomUUID(),idempotencyKey:randomUUID()};expect(approvalRequestSchema.parse(input).comment).toBe('');
   for(const raw of [{...input,version:0},{...input,requestedFrom:'bad'},{...input,comment:'x'.repeat(2001)},{...input,status:'APPROVED'}])expect(approvalRequestSchema.safeParse(raw).success).toBe(false);
@@ -23,4 +23,10 @@ it('binds an image to its sole generated version and rejects mixed targets or cl
 it('requires the ready video revision and cover revision without mixed targets',()=>{
   const input={videoId:randomUUID(),version:8,coverRevision:0,requestedFrom:randomUUID(),idempotencyKey:randomUUID()};expect(approvalRequestSchema.safeParse(input).success).toBe(true);
   for(const raw of [{...input,coverRevision:undefined},{...input,coverRevision:-1},{...input,imageId:randomUUID()},{...input,version:0}])expect(approvalRequestSchema.safeParse(raw).success).toBe(false);
+});
+
+it('validates independent comments and explicit inbox filters',()=>{
+  expect(approvalCommentSchema.parse({body:'  Clarify source  ',idempotencyKey:randomUUID()}).body).toBe('Clarify source');
+  for(const body of ['', ' ', 'x'.repeat(2001)])expect(approvalCommentSchema.safeParse({body,idempotencyKey:randomUUID()}).success).toBe(false);
+  expect(approvalListSchema.parse({}).status).toBe('ALL');expect(approvalListSchema.safeParse({status:'unknown'}).success).toBe(false);
 });

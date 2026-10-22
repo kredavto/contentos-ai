@@ -44,6 +44,35 @@ describe.skipIf(!url)('assigned version-bound script approvals',()=>{
   it('records rejection and requested changes without approving the material',async()=>{
     for(const status of ['REJECTED','CHANGES_REQUESTED']){const input=await fixture(),request=await service.create(editor,tenant,brand,input,correlation);expect(()=>service.decide(approver,tenant,request.id,{status,comment:''},correlation)).toThrow();await service.decide(approver,tenant,request.id,{status,comment:'Please revise the proof'},correlation);expect((await database.client`select approved_version from scripts where id=${input.scriptId}`)[0]!.approved_version).toBeNull();await expect(service.decide(approver,tenant,request.id,{status:'APPROVED'},correlation)).rejects.toThrow('CONFLICT');}
   });
+  it('stores standalone comments once without changing the decision and enforces current access',async()=>{
+    const input=await fixture(),request=await service.create(editor,tenant,brand,input,correlation),comment={body:'Please clarify the source',idempotencyKey:randomUUID()};
+    const [first,retry]=await Promise.all([service.comment(approver,tenant,request.id,comment,correlation),service.comment(approver,tenant,request.id,comment,correlation)]);expect(first).toEqual(retry);
+    expect((await database.client`select status,comment from approval_requests where id=${request.id}`)[0]).toEqual({status:'PENDING',comment:null});
+    await expect(service.comment(approver,tenant,request.id,{...comment,body:'Different'},correlation)).rejects.toThrow('CONFLICT');
+    const list=await service.comments(editor,tenant,request.id,{});expect(list.items).toHaveLength(1);expect(list.items[0]?.body).toBe(comment.body);expect(JSON.stringify(list)).not.toMatch(/idempotencyKey|password|email/);
+    await expect(service.comments(viewer,tenant,request.id,{})).rejects.toThrow('NOT_FOUND');await expect(service.comment(outsider,tenant,request.id,comment,correlation)).rejects.toThrow('NOT_FOUND');
+    await expect(service.comments(approver,randomUUID(),request.id,{})).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${approver}`;
+    await expect(service.comment(approver,tenant,request.id,{...comment,idempotencyKey:randomUUID()},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await database.client`update organization_members set role='CLIENT_APPROVER' where tenant_id=${tenant} and user_id=${approver}`;
+    await expect(database.client`update approval_comments set body='Changed' where id=${first.id}`).rejects.toThrow('immutable');await expect(database.client`delete from approval_comments where id=${first.id}`).rejects.toThrow('immutable');
+    expect(JSON.stringify(await database.client`select metadata from audit_logs where resource_id=${request.id} and action='APPROVAL_COMMENT_ADDED'`)).not.toContain(comment.body);
+  });
+  it('paginates comments with request-scoped cursors and caps discussion size',async()=>{
+    const request=await service.create(editor,tenant,brand,await fixture(),correlation);
+    await database.client`insert into approval_comments(tenant_id,request_id,user_id,body,idempotency_key,created_at) select ${tenant},${request.id},${editor},'Comment '||n,gen_random_uuid(),now() from generate_series(1,200) n`;
+    let cursor:string|undefined;const ids:string[]=[];do{const page=await service.comments(approver,tenant,request.id,{cursor});expect(page.items.some(item=>ids.includes(item.id))).toBe(false);ids.push(...page.items.map(item=>item.id));cursor=page.nextCursor??undefined;}while(cursor);
+    expect(ids).toHaveLength(200);expect(new Set(ids).size).toBe(200);
+    await expect(service.comment(editor,tenant,request.id,{body:'Over limit',idempotencyKey:randomUUID()},correlation)).rejects.toThrow('PLAN_LIMIT_REACHED');
+    const other=await service.create(editor,tenant,brand,await fixture(),correlation);await expect(service.comments(approver,tenant,other.id,{cursor:ids[0]})).rejects.toThrow('NOT_FOUND');
+  });
+  it('filters requests and counts only visible pending work independent of pagination',async()=>{
+    const before=(await service.list(approver,tenant,{})).pendingCount,request=await service.create(editor,tenant,brand,await fixture(),correlation);
+    const pending=await service.list(approver,tenant,{status:'PENDING'});expect(pending.pendingCount).toBe(before+1);expect(pending.items.every(item=>item.status==='PENDING')).toBe(true);
+    expect((await service.list(viewer,tenant,{})).pendingCount).toBe(0);
+    await service.decide(approver,tenant,request.id,{status:'REJECTED',comment:'Needs revision'},correlation);
+    expect((await service.list(approver,tenant,{status:'REJECTED'})).items.some(item=>item.id===request.id)).toBe(true);expect((await service.list(approver,tenant,{})).pendingCount).toBe(before);
+  });
   it('rechecks assignee role and account state before recording a decision',async()=>{
     const input=await fixture(),request=await service.create(editor,tenant,brand,input,correlation);
     await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${approver}`;

@@ -22,12 +22,17 @@ test('requests a specific script version and lets only its assignee approve it',
     const request=(await database.client`select id from approval_requests where script_id=${script}`)[0]!;
     const endpoint=`/api/organizations/${tenant}/approvals/${request.id}`;
     expect((await page.request.post(endpoint,{headers:{origin:baseURL!},data:{status:'APPROVED'}})).status()).toBe(403);
-    await login(reviewerToken);await page.goto(`/approvals?organization=${tenant}`);await expect(page.getByRole('heading',{name:'Browser script · v1'})).toBeVisible();
+    await login(reviewerToken);await page.goto(`/dashboard?organization=${tenant}`);await expect(page.getByRole('heading',{name:'Browser script · v1'})).toBeVisible();
+    await expect(page.getByText('Ждут согласования: 1',{exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Открыть материалы бренда'})).toHaveCount(0);await expect(page.getByRole('link',{name:'Биллинг',exact:true})).toHaveCount(0);await expect(page.getByRole('link',{name:'Команда',exact:true})).toHaveCount(0);
+    await page.getByRole('button',{name:'Открыть обсуждение',exact:true}).click();await page.getByLabel('Новый комментарий',{exact:true}).fill('Уточните источник');await page.getByRole('button',{name:'Сохранить комментарий',exact:true}).click();await expect(page.getByText('Комментарий сохранён. Решение по материалу не изменилось.',{exact:true})).toBeVisible();expect((await database.client`select status from approval_requests where id=${request.id}`)[0]?.status).toBe('PENDING');
     await page.getByText('Сценарий на согласовании',{exact:true}).click();await expect(page.getByText('Exact reviewed text',{exact:false})).toBeVisible();
     expect((await page.request.post(endpoint,{data:{status:'APPROVED'}})).status()).toBe(403);
     await page.getByLabel('Комментарий к решению').fill('Версия проверена');await page.getByRole('button',{name:'Одобрить версию'}).click();await expect(page.getByText('Одобрен',{exact:true})).toBeVisible();
+    await expect(page.getByText('Ждут согласования: 0',{exact:true})).toBeVisible();await page.getByLabel('Статус согласования',{exact:true}).selectOption('PENDING');await expect(page.getByText('Запросов нет.',{exact:true})).toBeVisible();await page.getByLabel('Статус согласования',{exact:true}).selectOption('APPROVED');await expect(page.getByText('Одобрен',{exact:true})).toBeVisible();
+    await page.goto(`/brands/${brand}/content?organization=${tenant}`);await expect(page).toHaveURL(new RegExp(`/approvals\\?organization=${tenant}`));
     const response=await page.request.get(`/api/organizations/${tenant}/approvals`);expect(response.headers()['cache-control']).toBe('no-store');expect(JSON.stringify(await response.json())).not.toMatch(/inputHash|idempotencyKey/);
     expect((await database.client`select approved_version,approved_by from scripts where id=${script}`)[0]).toEqual({approved_version:1,approved_by:reviewer});
+    await expect(page.getByRole('heading',{name:'Browser script · v1',exact:true})).toBeVisible();
     await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('approvals-mobile.png')});
   }finally{await database.client`delete from sessions where user_id in (${owner},${reviewer})`;}
 });

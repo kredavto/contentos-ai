@@ -55,6 +55,7 @@ async function dispatch(request: Request, context: RouteContext) {
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
       if(path[2]==='approvals'){
+        if(path[3]&&path[4]==='comments'&&path.length===5){if(request.method==='GET')return ok(await approvals.comments(user.userId,tenantId,path[3],Object.fromEntries(new URL(request.url).searchParams)));if(request.method==='POST')return ok(await approvals.comment(user.userId,tenantId,path[3],await readBody(request),correlationId),201);}
         if(path[3]&&path[4]==='preview'&&path.length===5&&request.method==='GET')return ok(await approvals.preview(user.userId,tenantId,path[3],correlationId));
         if(path.length===3&&request.method==='GET')return ok(await approvals.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
         if(path[3]==='reviewers'&&path.length===4&&request.method==='GET')return ok(await approvals.reviewers(user.userId,tenantId));

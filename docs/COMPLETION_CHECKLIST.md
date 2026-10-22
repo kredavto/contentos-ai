@@ -74,7 +74,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 56 | SUBTITLES | See TECH_SPEC.md §56; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 57 | B-ROLL | See TECH_SPEC.md §57; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 58 | COVER STUDIO | See TECH_SPEC.md §58; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 59 | APPROVALS | Assigned SCRIPT/POST/CAROUSEL/IMAGE/VIDEO requests, exact-version/checksum/cover review, private media previews, current video consent checks, immutable decisions and atomic approval/notifications verified with 589 tests and five Chrome scenarios including full MVP. Broader client portal, notification delivery and production acceptance remain — docs/approvals.md. | PARTIAL |
+| 59 | APPROVALS | Assigned SCRIPT/POST/CAROUSEL/IMAGE/VIDEO requests, exact-version/checksum/cover review, private media previews, current video consent checks, immutable decisions and atomic approval/notifications verified with 593 tests and five Chrome scenarios including full MVP. Basic client portal and independent comments are verified; notification delivery and production acceptance remain — docs/approvals.md. | PARTIAL |
 | 60 | PUBLISHING MODES | See TECH_SPEC.md §60; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 61 | SOCIAL CONNECTION | Telegram plus YouTube OAuth schema/service/UI; YouTube live grant and publishing acceptance pending — docs/youtube-integration.md | PARTIAL |
 | 62 | SOCIAL PROVIDER INTERFACE | See TECH_SPEC.md §62; current implementation evidence must be inspected | AUDIT_REQUIRED |
@@ -108,7 +108,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 90 | YOOKASSA | See TECH_SPEC.md §90; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 91 | SUBSCRIPTION STATE | See TECH_SPEC.md §91; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 92 | AGENCY MODE | See TECH_SPEC.md §92; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 93 | CLIENT APPROVAL PORTAL | See TECH_SPEC.md §93; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 93 | CLIENT APPROVAL PORTAL | Simplified CLIENT_APPROVER dashboard, scoped pending count, approve/request-changes/reject decisions and independent comments. Technical studio/onboarding navigation redirects to approvals. Current-role/tenant checks, pagination, idempotency and mobile rendering verified locally; production acceptance remains — docs/client-portal.md. | LOCAL_VERIFIED |
 | 94 | NOTIFICATIONS | See TECH_SPEC.md §94; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 95 | ADMIN PANEL | See TECH_SPEC.md §95; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 96 | PROVIDER COSTS | See TECH_SPEC.md §96; current implementation evidence must be inspected | AUDIT_REQUIRED |

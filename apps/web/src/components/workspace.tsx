@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, Building2, Plus, FolderOpen, CheckCircle2, LayoutDashboard, Lightbulb, CalendarDays, Clapperboard, BarChart3, Settings2, LogOut, Sparkles, ArrowRight, LoaderCircle } from 'lucide-react';
+import { ApprovalInbox } from './approval-inbox';
 import { OrganizationSearch } from './organization-search';
 import { NotificationLink } from './notification-center';
 import { api } from '../lib/api-client';
@@ -43,6 +44,8 @@ export function Workspace({ name, verified, initialOrganization, platformOperato
     finally { setPending(false); }
   }
   async function logout() { try { await api('auth/logout', 'POST'); window.location.assign('/login'); } catch { setError('Не удалось завершить сессию'); } }
+  if(loading||tenant&&!overview)return <div className="page-container">{error?<p role="alert">{error}</p>:<p role="status">Загружаем рабочее пространство…</p>}</div>;
+  if(overview?.role==='CLIENT_APPROVER')return <div className="page-container"><label htmlFor="client-organization">Организация</label><select id="client-organization" value={tenant} onChange={event=>setTenant(event.target.value)}>{organizations.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><div className="studio-actions"><Link href="/privacy">Приватность</Link><button className="button secondary" onClick={()=>void logout()}>Выйти</button></div>{error?<p role="alert">{error}</p>:null}<ApprovalInbox key={tenant} tenantId={tenant}/></div>;
   return <div className="workspace">
     <aside className="sidebar">
       <div className="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>

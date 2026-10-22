@@ -10,5 +10,6 @@ export default async function ContentPage({params,searchParams}:{params:Promise<
   const {id} = await params; const {organization,tab} = await searchParams;
   if (!z.uuid().safeParse(id).success || !z.uuid().safeParse(organization).success) redirect('/dashboard');
   const brain = await services().brands.getBrandBrain(user.userId,organization!,id);
+  if(brain.role==='CLIENT_APPROVER')redirect(`/approvals?organization=${organization}`);
   return <ContentStudio initialTab={tab} tenantId={organization!} brandId={id} brandName={brain.brand.name} role={brain.role} verified={!!user.emailVerifiedAt} />;
 }

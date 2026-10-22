@@ -1,3 +1,4 @@
+import {ApprovalCommentRepository} from './approval-comments';
 import {readyVideoInTransaction} from './videos';
 import type {ConsentPolicy} from './avatars';
 import {approveImageInTransaction} from './images';
@@ -10,7 +11,8 @@ import {assertMembership,lockTenant} from './ledger';
 import {editScriptInTransaction,editPostInTransaction,editCarouselInTransaction} from './content';
 import {approvalTarget} from './approval-targets';
 export class ApprovalRepository {
-  constructor(private readonly db:Database){}
+  readonly comments:ApprovalCommentRepository;
+  constructor(private readonly db:Database){this.comments=new ApprovalCommentRepository(db);}
   async create(userId:string,tenantId:string,brandId:string,input:ApprovalRequest,correlationId:string,policies:ConsentPolicy[]=[]){
     const inputHash=createHash('sha256').update(JSON.stringify({brandId,...input})).digest('hex');
     return this.db.transaction(async tx=>{
@@ -54,17 +56,19 @@ export class ApprovalRepository {
       return {id:row.id,status:input.status};
     });
   }
-  async list(userId:string,tenantId:string,cursor?:string){
+  async list(userId:string,tenantId:string,cursor?:string,status='ALL'){
     return this.db.transaction(async tx=>{
       const member=await assertMembership(tx,userId,tenantId);
       const visible=and(eq(approvalRequests.tenantId,tenantId),['OWNER','ADMIN','MANAGER'].includes(member.role)?undefined:or(eq(approvalRequests.requestedBy,userId),eq(approvalRequests.requestedFrom,userId)));
-      const [before]=cursor?await tx.select({id:approvalRequests.id}).from(approvalRequests).where(and(visible,eq(approvalRequests.id,cursor))):[];
+      const [pending]=await tx.select({n:sql<number>`count(*)::int`}).from(approvalRequests).where(and(visible,eq(approvalRequests.status,'PENDING')));
+      const filtered=and(visible,status==='ALL'?undefined:eq(approvalRequests.status,status as typeof approvalRequests.$inferSelect.status));
+      const [before]=cursor?await tx.select({id:approvalRequests.id}).from(approvalRequests).where(and(filtered,eq(approvalRequests.id,cursor))):[];
       if(cursor&&!before)throw new DomainError('NOT_FOUND',404);
       const rows=await tx.select({id:approvalRequests.id,brandId:approvalRequests.brandId,scriptId:approvalRequests.scriptId,postId:approvalRequests.postId,carouselId:approvalRequests.carouselId,imageId:approvalRequests.imageId,videoId:approvalRequests.videoId,requestedCoverRevision:approvalRequests.coverRevision,requestedMediaHash:approvalRequests.mediaHash,version:approvalRequests.version,requestedLifecycleRevision:approvalRequests.lifecycleRevision,requestedBy:approvalRequests.requestedBy,requestedFrom:approvalRequests.requestedFrom,requestComment:approvalRequests.requestComment,status:approvalRequests.status,comment:approvalRequests.comment,createdAt:approvalRequests.createdAt,resolvedAt:approvalRequests.resolvedAt}).from(approvalRequests)
-        .where(and(visible,before?sql`(${approvalRequests.createdAt},${approvalRequests.id}) < (select created_at,id from approval_requests where id=${before.id}::uuid)`:undefined)).orderBy(desc(approvalRequests.createdAt),desc(approvalRequests.id)).limit(21);
+        .where(and(filtered,before?sql`(${approvalRequests.createdAt},${approvalRequests.id}) < (select created_at,id from approval_requests where id=${before.id}::uuid)`:undefined)).orderBy(desc(approvalRequests.createdAt),desc(approvalRequests.id)).limit(21);
       const items=[];
       for(const row of rows.slice(0,20)){const {id:entityId,mediaHash,...target}=await approvalTarget(tx,tenantId,row.brandId,row);const {requestedMediaHash,...publicRow}=row;items.push({...publicRow,...target,entityId,targetChanged:mediaHash!==requestedMediaHash||target.coverRevision!==row.requestedCoverRevision});}
-      return {items,nextCursor:rows.length>20?rows[19]!.id:null,userId,role:member.role};
+      return {items,pendingCount:pending?.n??0,nextCursor:rows.length>20?rows[19]!.id:null,userId,role:member.role};
     });
   }
   async preview(userId:string,tenantId:string,requestId:string,policies:ConsentPolicy[]=[]){return this.db.transaction(async tx=>{

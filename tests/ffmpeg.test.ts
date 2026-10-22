@@ -242,7 +242,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     const tone=(frequency:number)=>{let real=0,imaginary=0;for(let i=28800;i<33600;i++){const sample=decoded.stdout.readFloatLE(i*4),phase=2*Math.PI*frequency*i/48000;real+=sample*Math.cos(phase);imaginary+=sample*Math.sin(phase);}return 2*Math.hypot(real,imaginary)/4800;};
     expect(tone(440)).toBeGreaterThan(.04);expect(tone(880)).toBeGreaterThan(.002);expect(tone(1760)).toBeLessThan(.001);
     for(const fadeMs of [0,99,301,2001])await expect(processor.process({bytes,broll:{...clip,fadeMs},options},context())).rejects.toThrow('INVALID_INPUT');
-  });
+  },90_000); // Includes rendering, five frame decodes, audio analysis and four invalid-input probes through Docker.
   it('returns to the main picture at the shared boundary of adjacent faded inserts',async()=>{
     const clipFile=join(directory,'adjacent-fades.mp4');
     await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=blue:s=320x240:r=30:d=1','-vf',"drawbox=x=0:y=0:w=iw:h=ih:color=yellow:t=fill:enable='gte(t,0.4)'",'-an','-c:v','libx264','-threads','1','-pix_fmt','yuv420p',clipFile]);

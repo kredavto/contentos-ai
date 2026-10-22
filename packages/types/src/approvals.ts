@@ -8,3 +8,6 @@ export const approvalRequestSchema=z.union([scriptApprovalRequestSchema,postAppr
 export const approvalDecisionSchema=z.object({status:z.enum(['APPROVED','REJECTED','CHANGES_REQUESTED','CANCELLED']),comment:z.string().trim().max(2000).default('')}).strict().refine(value=>!['REJECTED','CHANGES_REQUESTED'].includes(value.status)||value.comment.length>0,'Comment required');
 export type ApprovalRequest=z.infer<typeof approvalRequestSchema>;
 export type ApprovalDecision=z.infer<typeof approvalDecisionSchema>;
+
+export const approvalCommentSchema=z.object({body:z.string().trim().min(1).max(2000),idempotencyKey:z.uuid()}).strict();
+export const approvalListSchema=z.object({cursor:z.uuid().optional(),status:z.enum(['ALL','PENDING','APPROVED','REJECTED','CHANGES_REQUESTED','CANCELLED']).default('ALL')}).strict();

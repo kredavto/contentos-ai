@@ -13,7 +13,7 @@ export const approvalRequests=pgTable('approval_requests',{
   requestComment:text('request_comment').notNull(),idempotencyKey:uuid('idempotency_key').notNull(),inputHash:text('input_hash').notNull(),
   status:text('status',{enum:['PENDING','APPROVED','REJECTED','CHANGES_REQUESTED','CANCELLED']}).notNull().default('PENDING'),
   comment:text('comment'),resolvedBy:uuid('resolved_by').references(()=>users.id),resolvedAt:timestamp('resolved_at',{withTimezone:true}),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),
-},t=>[unique('approval_intent_uq').on(t.tenantId,t.requestedBy,t.idempotencyKey),uniqueIndex('approval_pending_script_uq').on(t.tenantId,t.scriptId).where(sql`${t.status}='PENDING'`),
+},t=>[unique('approval_tenant_id_uq').on(t.tenantId,t.id),unique('approval_intent_uq').on(t.tenantId,t.requestedBy,t.idempotencyKey),uniqueIndex('approval_pending_script_uq').on(t.tenantId,t.scriptId).where(sql`${t.status}='PENDING'`),
   uniqueIndex('approval_pending_post_uq').on(t.tenantId,t.postId).where(sql`${t.status}='PENDING'`),
   uniqueIndex('approval_pending_carousel_uq').on(t.tenantId,t.carouselId).where(sql`${t.status}='PENDING'`),
   foreignKey({columns:[t.tenantId,t.postId],foreignColumns:[posts.tenantId,posts.id]}),
@@ -31,3 +31,7 @@ export const approvalRequests=pgTable('approval_requests',{
   foreignKey({columns:[t.tenantId,t.scriptId,t.version],foreignColumns:[scriptVersions.tenantId,scriptVersions.scriptId,scriptVersions.version]}),
   check('approval_valid',sql`${t.version}>0 and length(${t.requestComment})<=2000 and length(coalesce(${t.comment},''))<=2000 and ${t.inputHash} ~ '^[a-f0-9]{64}$' and ${t.status} in ('PENDING','APPROVED','REJECTED','CHANGES_REQUESTED','CANCELLED') and ((${t.status}='PENDING' and ${t.resolvedBy} is null and ${t.resolvedAt} is null and ${t.comment} is null) or (${t.status}<>'PENDING' and ${t.resolvedBy} is not null and ${t.resolvedAt} is not null and ${t.comment} is not null))`),
 ]);
+
+export const approvalComments=pgTable('approval_comments',{
+  id:uuid('id').primaryKey().defaultRandom(),tenantId:uuid('tenant_id').notNull(),requestId:uuid('request_id').notNull(),userId:uuid('user_id').notNull().references(()=>users.id),body:text('body').notNull(),idempotencyKey:uuid('idempotency_key').notNull(),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),
+},t=>[foreignKey({columns:[t.tenantId,t.requestId],foreignColumns:[approvalRequests.tenantId,approvalRequests.id]}),unique('approval_comment_intent_uq').on(t.tenantId,t.requestId,t.userId,t.idempotencyKey),index('approval_comment_request_idx').on(t.tenantId,t.requestId,t.createdAt,t.id),check('approval_comment_body_valid',sql`length(trim(${t.body})) between 1 and 2000`)]);
