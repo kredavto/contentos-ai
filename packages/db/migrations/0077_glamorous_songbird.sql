@@ -1,0 +1,1 @@
+CREATE INDEX "provider_key_creator_history_idx" ON "provider_keys" USING btree ("created_by","created_at","id");

@@ -9,6 +9,7 @@ describe.skipIf(!url)('personal evidence export', () => {
   const database = isolatedTestDatabase(url), repository = new PrivacyRepository(database.db), service = new PrivacyService(repository);
   const user = randomUUID(), other = randomUUID(), tenant = randomUUID(), workspace = randomUUID(), brand = randomUUID(), subject = randomUUID();
   const ownConsent = randomUUID(), revokedConsent = randomUUID(), foreignConsent = randomUUID(), ownRenewal = randomUUID();
+  const ownKey = randomUUID(), foreignKey = randomUUID();
   const password = 'Export evidence fixture 123!';
   let proof = '';
   beforeAll(async () => {
@@ -22,6 +23,9 @@ describe.skipIf(!url)('personal evidence export', () => {
     await database.client`insert into organizations(id,name) values(${tenant},'Secret organization name')`;
     await database.client`insert into workspaces(id,tenant_id,name) values(${workspace},${tenant},'Private workspace')`;
     await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${brand},${tenant},${workspace},'Private brand')`;
+    for (const [id, creator, provider] of [[ownKey,user,'heygen'],[foreignKey,other,'openai']] as const) await database.client`insert into provider_keys(id,tenant_id,brand_id,provider,credential,masked_key,status,created_by) values(${id},${tenant},${brand},${provider},'{"ciphertext":"secret-key-envelope"}','••••••••HIDE','ACTIVE',${creator})`;
+    // A different owner's replacement must not leak current metadata into the original creator's export.
+    await database.client`update provider_keys set credential='{"ciphertext":"secret-replacement"}',masked_key='••••••••NEXT',revision=revision+1 where id=${ownKey}`;
     await database.client`insert into consent_subjects(id,tenant_id,brand_id,name,type) values(${subject},${tenant},${brand},'Secret third-party identity','PERSON')`;
     for (const [id, acceptor, revoker] of [[ownConsent,user,other],[revokedConsent,other,user],[foreignConsent,other,null]] as const) {
       await database.client`insert into consent_records(id,tenant_id,subject_id,subject_type,subject_name,consent_type,consent_version,consent_text_hash,accepted_by_user_id,ip_address,user_agent,revoked_at,revoked_by_user_id,idempotency_key) values(${id},${tenant},${subject},'PERSON','Secret third-party identity','THIRD_PARTY_LIKENESS','v1',${'a'.repeat(64)},${acceptor},${acceptor === user ? '192.0.2.1' : '198.51.100.1'},${acceptor === user ? 'Own browser' : 'Secret foreign browser'},case when ${revoker}::uuid is not null then now() else null end,${revoker},${randomUUID()})`;
@@ -33,6 +37,8 @@ describe.skipIf(!url)('personal evidence export', () => {
   });
   it('exports retained own evidence without requiring former tenant access or disclosing third parties', async () => {
     const archive = await service.exportAccount(user, { password }, randomUUID());
+    expect(archive.scope).toContain('provider_key_creation_evidence');
+    expect(archive.providerKeyHistory).toEqual([{id:ownKey,provider:'heygen',createdAt:expect.any(Date)}]);
     expect(archive.version).toBe(2); expect(archive.memberships).toEqual([]);
     expect(archive.authenticationHistory).toHaveLength(1); expect(archive.authenticationHistory[0]?.type).toBe('RESET_PASSWORD');
     expect(archive.emailHistory).toHaveLength(1); expect(archive.emailHistory[0]?.status).toBe('PENDING');
@@ -44,8 +50,16 @@ describe.skipIf(!url)('personal evidence export', () => {
     expect(archive.renewalConsentHistory[0]?.policyText).toBe('Agreed monthly terms');
     expect(archive.activityHistory).toEqual([{ action: 'OWN_ACTION', createdAt: expect.any(Date) }]);
     const serialized = JSON.stringify(archive);
-    expect(serialized).not.toMatch(/secret|Secret|FOREIGN_ACTION|198\.51\.100\.1|passwordHash|tokenHash|ciphertext|idempotencyKey/);
-    for (const id of [other,tenant,brand,subject,foreignConsent]) expect(serialized).not.toContain(id);
+    expect(serialized).not.toMatch(/secret|Secret|FOREIGN_ACTION|198\.51\.100\.1|passwordHash|tokenHash|ciphertext|idempotencyKey|maskedKey|HIDE|NEXT/);
+    for (const id of [other,tenant,brand,subject,foreignConsent,foreignKey]) expect(serialized).not.toContain(id);
+  });
+  it('keeps only creation evidence after revoke and isolates the other creator', async () => {
+    await database.client`update provider_keys set credential=null,status='REVOKED',revision=revision+1 where id=${ownKey}`;
+    const own = await service.exportAccount(user, { password }, randomUUID());
+    expect(own.providerKeyHistory).toEqual([{id:ownKey,provider:'heygen',createdAt:expect.any(Date)}]);
+    const foreign = await service.exportAccount(other, { password }, randomUUID());
+    expect(foreign.providerKeyHistory).toEqual([{id:foreignKey,provider:'openai',createdAt:expect.any(Date)}]);
+    expect(JSON.stringify(foreign.providerKeyHistory)).not.toContain(ownKey);
   });
   it('rejects disabled accounts and stale proof before reading evidence', async () => {
     await expect(repository.exportAccount(user, 'outdated', randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
@@ -56,6 +70,6 @@ describe.skipIf(!url)('personal evidence export', () => {
   it('rejects oversized evidence instead of truncating activity history', async () => {
     await database.client`insert into audit_logs(user_id,action,correlation_id) select ${user},'LIMIT_FIXTURE',${randomUUID()} from generate_series(1,10001)`;
     await expect(service.exportAccount(user, { password }, randomUUID())).rejects.toThrow('EXPORT_TOO_LARGE');
-    expect(await database.client`select id from audit_logs where user_id=${user} and action='ACCOUNT_DATA_EXPORTED'`).toHaveLength(1);
+    expect(await database.client`select id from audit_logs where user_id=${user} and action='ACCOUNT_DATA_EXPORTED'`).toHaveLength(2);
   });
 });
