@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import type {AvatarService,GenerationService,VideoService,LibraryMediaService} from '@contentos/core';
 import {backgroundMusicSchema,musicFadesFit,videoReservationSeconds,type VideoRequest,type VideoStage} from '@contentos/types';
+import {VideoApprovalRequest} from './script-approval-request';
 import {api} from '../lib/api-client';
 import {CoverStudio} from './cover-studio';
 import {VideoBrollControls,selectedBrollClips,type BrollDraft} from './video-broll-controls';
@@ -104,6 +105,7 @@ export function VideoStudio({base,scripts,canWrite,canApprove,canManage,maximum,
     </form>:null}
     {data&&!data.projects.length?<div className="panel empty">Здесь появятся готовые ролики и задачи генерации.</div>:null}
     <div className="plan-grid">{data?.projects.map(project=><article className="panel stack" key={project.id}>
+      {canWrite&&project.stage==='READY'&&project.lifecycle==='ACTIVE'&&!project.approvedAt?<VideoApprovalRequest key={`${project.id}:${project.stageRevision}:${project.coverRevision}`} tenantId={base.split('/')[1]!} brandId={base.split('/')[3]!} videoId={project.id} version={project.stageRevision} coverRevision={project.coverRevision}/>:null}
       <span className="badge">{project.lifecycle==='DELETE_PENDING'?'Удаляется':project.approvedAt?'Одобрено':project.jobStatus==='WAITING_REVIEW'?'Проверьте субтитры':stages[project.stage]}</span><h3>{project.title}</h3><p className="muted">{project.options.orientation} · {project.options.resolution} · {project.durationMs?`${(project.durationMs/1000).toFixed(1)} сек.`:'Длительность определяется после обработки'}</p>
       {project.jobStatus==='RECONCILIATION'?<p className="notice warning">Результат требует проверки. Резерв сохранён; не создавайте дубликат этой задачи.</p>:null}
       {project.jobStatus==='RETRY'?<p className="muted">Повторная попытка обработки…</p>:null}

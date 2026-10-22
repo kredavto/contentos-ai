@@ -258,7 +258,16 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).videoWidth)).toBe(720);
   await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).duration)).toBeGreaterThan(1.5);
   await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).duration)).toBeLessThan(1.8);
-  await videoCard.getByRole('button',{name:'Одобрить видео',exact:true}).click();
+  const videoStudioUrl=page.url();
+  await videoCard.getByRole('button',{name:'Назначить согласующего видео',exact:true}).click();const reviewForm=videoCard.getByRole('region',{name:'Запрос согласования видео'});
+  await reviewForm.getByLabel('Согласующий',{exact:true}).selectOption({index:1});await reviewForm.getByRole('button',{name:'Отправить на согласование',exact:true}).click();await expect(reviewForm.getByRole('status')).toHaveText('Запрос сохранён.');
+  await reviewForm.getByRole('link',{name:'Открыть согласования',exact:true}).click();await page.getByText('Видео и обложка на согласовании',{exact:true}).click();await page.getByRole('button',{name:'Посмотреть файл на согласовании',exact:true}).click();
+  await expect.poll(()=>page.getByLabel('Видео на согласовании',{exact:true}).evaluate((element:HTMLVideoElement)=>element.videoWidth)).toBe(720);
+  await expect.poll(()=>page.getByRole('img',{name:'Обложка на согласовании',exact:true}).evaluate((element:HTMLImageElement)=>element.naturalWidth)).toBe(720);
+  await page.getByLabel('Видео на согласовании',{exact:true}).evaluate(async(element:HTMLVideoElement)=>{element.muted=true;await element.play();});await expect.poll(()=>page.getByLabel('Видео на согласовании',{exact:true}).evaluate((element:HTMLVideoElement)=>element.currentTime)).toBeGreaterThan(.1);await page.getByLabel('Видео на согласовании',{exact:true}).evaluate((element:HTMLVideoElement)=>element.pause());
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:'test-results/video-approval-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole('button',{name:'Одобрить версию',exact:true}).click();await expect(page.getByText('Одобрен',{exact:true})).toBeVisible();await page.goto(videoStudioUrl);await page.getByRole('button',{name:'Видео',exact:true}).click();
+
   await expect(videoCard.getByText('Одобрено',{exact:true})).toBeVisible();
   await videoCard.getByRole('button',{name:'Редактировать обложку',exact:true}).click();
   const coverEditor=page.getByRole('region',{name:'Редактор обложек',exact:true});

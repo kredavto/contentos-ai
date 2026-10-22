@@ -2,11 +2,11 @@
 import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
 import {api} from '../lib/api-client';
-type ApprovalTarget={imageId:string;version:1}|{scriptId:string;version:number}|{postId:string;version:number}|{carouselId:string;version:number;lifecycleRevision:number};
+type ApprovalTarget={videoId:string;version:number;coverRevision:number}|{imageId:string;version:1}|{scriptId:string;version:number}|{postId:string;version:number}|{carouselId:string;version:number;lifecycleRevision:number};
 export function ScriptApprovalRequest({tenantId,brandId,scriptId,version}:{tenantId:string;brandId:string;scriptId:string;version:number}){return <ContentApprovalRequest tenantId={tenantId} brandId={brandId} target={{scriptId,version}}/>;}
 export function ContentApprovalRequest({tenantId,brandId,target}:{tenantId:string;brandId:string;target:ApprovalTarget}){
-  const entityId='scriptId' in target?target.scriptId:'postId' in target?target.postId:'carouselId' in target?target.carouselId:target.imageId;
-  const noun='scriptId' in target?'сценария':'postId' in target?'поста':'carouselId' in target?'карусели':'изображения';
+  const entityId='scriptId' in target?target.scriptId:'postId' in target?target.postId:'carouselId' in target?target.carouselId:'imageId' in target?target.imageId:target.videoId;
+  const noun='scriptId' in target?'сценария':'postId' in target?'поста':'carouselId' in target?'карусели':'imageId' in target?'изображения':'видео';
   const [reviewers,setReviewers]=useState<Array<{id:string;name:string;role:string}>>([]),[reviewer,setReviewer]=useState(''),[comment,setComment]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false),[sent,setSent]=useState(false);
   const intent=useRef<{payload:string;key:string}|null>(null);
   useEffect(()=>{const controller=new AbortController();api<typeof reviewers>(`organizations/${tenantId}/approvals/reviewers`,'GET',undefined,controller.signal).then(setReviewers).catch(failure=>{if(!controller.signal.aborted)setError(failure.message);});return()=>controller.abort();},[tenantId]);
@@ -17,4 +17,9 @@ export function ContentApprovalRequest({tenantId,brandId,target}:{tenantId:strin
 export function ImageApprovalRequest({tenantId,brandId,imageId}:{tenantId:string;brandId:string;imageId:string}){
   const [open,setOpen]=useState(false);
   return open?<ContentApprovalRequest tenantId={tenantId} brandId={brandId} target={{imageId,version:1}}/>:<button className="button secondary" onClick={()=>setOpen(true)}>Назначить согласующего</button>;
+}
+
+export function VideoApprovalRequest({tenantId,brandId,videoId,version,coverRevision}:{tenantId:string;brandId:string;videoId:string;version:number;coverRevision:number}){
+  const [open,setOpen]=useState(false);
+  return open?<ContentApprovalRequest tenantId={tenantId} brandId={brandId} target={{videoId,version,coverRevision}}/>:<button className="button secondary" onClick={()=>setOpen(true)}>Назначить согласующего видео</button>;
 }

@@ -19,3 +19,8 @@ it('binds an image to its sole generated version and rejects mixed targets or cl
   const input={imageId:randomUUID(),version:1,requestedFrom:randomUUID(),idempotencyKey:randomUUID()};expect(approvalRequestSchema.safeParse(input).success).toBe(true);
   for(const raw of [{...input,version:2},{...input,postId:randomUUID()},{...input,mediaHash:'a'.repeat(64)},{...input,lifecycleRevision:0}])expect(approvalRequestSchema.safeParse(raw).success).toBe(false);
 });
+
+it('requires the ready video revision and cover revision without mixed targets',()=>{
+  const input={videoId:randomUUID(),version:8,coverRevision:0,requestedFrom:randomUUID(),idempotencyKey:randomUUID()};expect(approvalRequestSchema.safeParse(input).success).toBe(true);
+  for(const raw of [{...input,coverRevision:undefined},{...input,coverRevision:-1},{...input,imageId:randomUUID()},{...input,version:0}])expect(approvalRequestSchema.safeParse(raw).success).toBe(false);
+});

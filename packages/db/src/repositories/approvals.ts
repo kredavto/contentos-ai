@@ -1,3 +1,5 @@
+import {readyVideoInTransaction} from './videos';
+import type {ConsentPolicy} from './avatars';
 import {approveImageInTransaction} from './images';
 import {createHash} from 'node:crypto';
 import {and,eq,desc,or,sql,isNull,isNotNull,inArray} from 'drizzle-orm';
@@ -9,7 +11,7 @@ import {editScriptInTransaction,editPostInTransaction,editCarouselInTransaction}
 import {approvalTarget} from './approval-targets';
 export class ApprovalRepository {
   constructor(private readonly db:Database){}
-  async create(userId:string,tenantId:string,brandId:string,input:ApprovalRequest,correlationId:string){
+  async create(userId:string,tenantId:string,brandId:string,input:ApprovalRequest,correlationId:string,policies:ConsentPolicy[]=[]){
     const inputHash=createHash('sha256').update(JSON.stringify({brandId,...input})).digest('hex');
     return this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
@@ -17,9 +19,10 @@ export class ApprovalRepository {
       if(existing){if(existing.inputHash!==inputHash)throw new DomainError('CONFLICT',409);return {id:existing.id,status:existing.status};}
       await assertMembership(tx,input.requestedFrom,tenantId,'approve');
       const target=await approvalTarget(tx,tenantId,brandId,input);
-      if(target.currentVersion!==input.version||target.approvedVersion===input.version||target.archived||('lifecycleRevision' in input&&input.lifecycleRevision!==target.lifecycleRevision))throw new DomainError('CONFLICT',409);
-      const identities={entityType:target.entityType,imageId:'imageId' in input?input.imageId:null,mediaHash:target.mediaHash,scriptId:'scriptId' in input?input.scriptId:null,postId:'postId' in input?input.postId:null,carouselId:'carouselId' in input?input.carouselId:null,lifecycleRevision:'lifecycleRevision' in input?input.lifecycleRevision:null};
-      const pendingTarget=identities.scriptId?eq(approvalRequests.scriptId,identities.scriptId):identities.postId?eq(approvalRequests.postId,identities.postId):identities.carouselId?eq(approvalRequests.carouselId,identities.carouselId):eq(approvalRequests.imageId,identities.imageId!);
+      if(target.currentVersion!==input.version||target.approvedVersion===input.version||target.archived||('coverRevision' in input&&input.coverRevision!==target.coverRevision)||('lifecycleRevision' in input&&input.lifecycleRevision!==target.lifecycleRevision))throw new DomainError('CONFLICT',409);
+      if(target.entityType==='VIDEO')await readyVideoInTransaction(tx,userId,tenantId,brandId,target.id,policies);
+      const identities={entityType:target.entityType,videoId:'videoId' in input?input.videoId:null,coverRevision:target.coverRevision,imageId:'imageId' in input?input.imageId:null,mediaHash:target.mediaHash,scriptId:'scriptId' in input?input.scriptId:null,postId:'postId' in input?input.postId:null,carouselId:'carouselId' in input?input.carouselId:null,lifecycleRevision:'lifecycleRevision' in input?input.lifecycleRevision:null};
+      const pendingTarget=identities.scriptId?eq(approvalRequests.scriptId,identities.scriptId):identities.postId?eq(approvalRequests.postId,identities.postId):identities.carouselId?eq(approvalRequests.carouselId,identities.carouselId):identities.imageId?eq(approvalRequests.imageId,identities.imageId):eq(approvalRequests.videoId,identities.videoId!);
       const [pending]=await tx.select().from(approvalRequests).where(and(eq(approvalRequests.tenantId,tenantId),pendingTarget,eq(approvalRequests.status,'PENDING')));
       if(pending)throw new DomainError('CONFLICT',409);
       const [row]=await tx.insert(approvalRequests).values({tenantId,brandId,...identities,version:input.version,requestedBy:userId,requestedFrom:input.requestedFrom,requestComment:input.comment,idempotencyKey:input.idempotencyKey,inputHash}).returning({id:approvalRequests.id,status:approvalRequests.status});
@@ -28,7 +31,7 @@ export class ApprovalRepository {
       return row!;
     });
   }
-  async decide(userId:string,tenantId:string,requestId:string,input:ApprovalDecision,correlationId:string){
+  async decide(userId:string,tenantId:string,requestId:string,input:ApprovalDecision,correlationId:string,policies:ConsentPolicy[]=[]){
     return this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);const member=await assertMembership(tx,userId,tenantId,input.status==='CANCELLED'?'read':'approve');
       const [row]=await tx.select().from(approvalRequests).where(and(eq(approvalRequests.tenantId,tenantId),eq(approvalRequests.id,requestId))).for('update');
@@ -37,8 +40,9 @@ export class ApprovalRepository {
       if(row.status!=='PENDING'){if(row.status===input.status&&row.resolvedBy===userId&&row.comment===input.comment)return {id:row.id,status:row.status};throw new DomainError('CONFLICT',409);}
       if(input.status!=='CANCELLED'){
         const target=await approvalTarget(tx,tenantId,row.brandId,row);
-        if(target.currentVersion!==row.version||target.approvedVersion===row.version||target.archived||target.lifecycleRevision!==row.lifecycleRevision||target.mediaHash!==row.mediaHash)throw new DomainError('CONFLICT',409);
-        if(input.status==='APPROVED'){
+        if(target.currentVersion!==row.version||target.approvedVersion===row.version||target.archived||target.lifecycleRevision!==row.lifecycleRevision||target.mediaHash!==row.mediaHash||target.coverRevision!==row.coverRevision)throw new DomainError('CONFLICT',409);
+        if(target.entityType==='VIDEO')await readyVideoInTransaction(tx,userId,tenantId,row.brandId,target.id,policies,input.status==='APPROVED',correlationId,row.coverRevision!);
+        if(input.status==='APPROVED'&&target.entityType!=='VIDEO'){
           if(target.entityType==='SCRIPT')await editScriptInTransaction(tx,userId,tenantId,row.brandId,target.id,row.version,null,correlationId);
           else if(target.entityType==='POST')await editPostInTransaction(tx,userId,tenantId,row.brandId,target.id,{revision:row.version,content:null},correlationId);
           else if(target.entityType==='IMAGE')await approveImageInTransaction(tx,userId,tenantId,row.brandId,target.id,correlationId);
@@ -56,19 +60,24 @@ export class ApprovalRepository {
       const visible=and(eq(approvalRequests.tenantId,tenantId),['OWNER','ADMIN','MANAGER'].includes(member.role)?undefined:or(eq(approvalRequests.requestedBy,userId),eq(approvalRequests.requestedFrom,userId)));
       const [before]=cursor?await tx.select({id:approvalRequests.id}).from(approvalRequests).where(and(visible,eq(approvalRequests.id,cursor))):[];
       if(cursor&&!before)throw new DomainError('NOT_FOUND',404);
-      const rows=await tx.select({id:approvalRequests.id,brandId:approvalRequests.brandId,scriptId:approvalRequests.scriptId,postId:approvalRequests.postId,carouselId:approvalRequests.carouselId,imageId:approvalRequests.imageId,requestedMediaHash:approvalRequests.mediaHash,version:approvalRequests.version,requestedLifecycleRevision:approvalRequests.lifecycleRevision,requestedBy:approvalRequests.requestedBy,requestedFrom:approvalRequests.requestedFrom,requestComment:approvalRequests.requestComment,status:approvalRequests.status,comment:approvalRequests.comment,createdAt:approvalRequests.createdAt,resolvedAt:approvalRequests.resolvedAt}).from(approvalRequests)
+      const rows=await tx.select({id:approvalRequests.id,brandId:approvalRequests.brandId,scriptId:approvalRequests.scriptId,postId:approvalRequests.postId,carouselId:approvalRequests.carouselId,imageId:approvalRequests.imageId,videoId:approvalRequests.videoId,requestedCoverRevision:approvalRequests.coverRevision,requestedMediaHash:approvalRequests.mediaHash,version:approvalRequests.version,requestedLifecycleRevision:approvalRequests.lifecycleRevision,requestedBy:approvalRequests.requestedBy,requestedFrom:approvalRequests.requestedFrom,requestComment:approvalRequests.requestComment,status:approvalRequests.status,comment:approvalRequests.comment,createdAt:approvalRequests.createdAt,resolvedAt:approvalRequests.resolvedAt}).from(approvalRequests)
         .where(and(visible,before?sql`(${approvalRequests.createdAt},${approvalRequests.id}) < (select created_at,id from approval_requests where id=${before.id}::uuid)`:undefined)).orderBy(desc(approvalRequests.createdAt),desc(approvalRequests.id)).limit(21);
       const items=[];
-      for(const row of rows.slice(0,20)){const {id:entityId,mediaHash,...target}=await approvalTarget(tx,tenantId,row.brandId,row);const {requestedMediaHash,...publicRow}=row;items.push({...publicRow,...target,entityId,targetChanged:mediaHash!==requestedMediaHash});}
+      for(const row of rows.slice(0,20)){const {id:entityId,mediaHash,...target}=await approvalTarget(tx,tenantId,row.brandId,row);const {requestedMediaHash,...publicRow}=row;items.push({...publicRow,...target,entityId,targetChanged:mediaHash!==requestedMediaHash||target.coverRevision!==row.requestedCoverRevision});}
       return {items,nextCursor:rows.length>20?rows[19]!.id:null,userId,role:member.role};
     });
   }
-  async preview(userId:string,tenantId:string,requestId:string){return this.db.transaction(async tx=>{
+  async preview(userId:string,tenantId:string,requestId:string,policies:ConsentPolicy[]=[]){return this.db.transaction(async tx=>{
     await lockTenant(tx,tenantId);const member=await assertMembership(tx,userId,tenantId);
     const [row]=await tx.select().from(approvalRequests).where(and(eq(approvalRequests.tenantId,tenantId),eq(approvalRequests.id,requestId),['OWNER','ADMIN','MANAGER'].includes(member.role)?undefined:or(eq(approvalRequests.requestedBy,userId),eq(approvalRequests.requestedFrom,userId))));
+    if(row?.entityType==='VIDEO'&&row.videoId){
+      const project=await readyVideoInTransaction(tx,userId,tenantId,row.brandId,row.videoId,policies);
+      if(project.stageRevision!==row.version||project.coverRevision!==row.coverRevision)throw new DomainError('CONFLICT',409);
+      return {kind:'VIDEO' as const,id:project.id,storageKey:project.finalKey,coverKey:project.coverKey,sha256:null,coverRevision:project.coverRevision};
+    }
     if(!row||row.entityType!=='IMAGE'||!row.imageId)throw new DomainError('NOT_FOUND',404);
     const [image]=await tx.select({id:generatedImages.id,storageKey:generatedImages.storageKey,sha256:generatedImages.sha256}).from(generatedImages).where(and(eq(generatedImages.tenantId,tenantId),eq(generatedImages.brandId,row.brandId),eq(generatedImages.id,row.imageId),eq(generatedImages.status,'READY')));
-    if(!image||image.sha256!==row.mediaHash)throw new DomainError('CONFLICT',409);return image;
+    if(!image||image.sha256!==row.mediaHash)throw new DomainError('CONFLICT',409);return {...image,kind:'IMAGE' as const,coverKey:null,coverRevision:null};
   });}
   async reviewers(userId:string,tenantId:string){return this.db.transaction(async tx=>{
     await assertMembership(tx,userId,tenantId,'generate');

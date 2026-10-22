@@ -1,11 +1,12 @@
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {LibraryMediaRepository,CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {ApprovalRepository,LibraryMediaRepository,CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {CalendarService} from '../../packages/core/src/calendar';
 import {CoverService,CoverProcessor} from '../../packages/core/src/covers';
+import {ApprovalService} from '../../packages/core/src/approvals';
 import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
 import {MediaService} from '../../packages/core/src/media';
@@ -18,8 +19,9 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
   const tenantId=randomUUID(),userId=randomUUID(),viewerId=randomUUID(),workspaceId=randomUUID(),brandId=randomUUID(),correlationId=randomUUID();
   const providerName=`video-fixture-${tenantId}`;
   const repo=new VideoRepository(database.db),ledger=new LedgerRepository(database.db),consent=new ConsentService(new ConsentRepository(database.db));
-  const objects=new Map<string,Uint8Array>();let lookId='',consentId='',submissions=0;
+  const objects=new Map<string,Uint8Array>();let lookId='',consentId='',submissions=0;let pendingVideoReview='';
   const storage:StorageProvider={get:async key=>{const bytes=objects.get(key);if(!bytes)throw new Error('Missing fixture');return bytes;},put:async(key,bytes)=>{objects.set(key,bytes);},delete:async key=>{objects.delete(key);},signedDownload:async key=>`https://storage.example.test/${key}`};
+  const approvals=new ApprovalService(new ApprovalRepository(database.db),storage);
   const provider:VideoProvider={delete:async()=>{},submit:async(_input,context)=>{submissions++;return {provider:providerName,internalId:context.internalId,externalId:`test:${context.internalId}`,metadata:{}};},status:async()=>({status:'READY',downloadUrl:'mock://fixture'}),download:async()=>Buffer.from('original-fixture')};
   const processing:VideoProcessingProvider={prepareAudio:async()=>({bytes:Buffer.from('fixture-wav'),durationSeconds:11.2}),process:async input=>{for(const stage of ['CAPTIONS_GENERATING','BROLL_PROCESSING','COVER_GENERATING','QC'] as const)await input.onStage?.(stage,{fixture:true});return {bytes:Buffer.from('final-fixture'),thumbnail:Buffer.from('cover-fixture'),durationSeconds:11.2,width:720,height:1280};}};
   const service=new VideoService(repo,{name:providerName,provider},storage,true);
@@ -553,6 +555,29 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect((await database.client`select fade_ms from broll_segments where project_id=${project.id}`)[0]?.fade_ms).toBe(200);
     await service.delete(userId,tenantId,brandId,project.id,correlationId);
   });
+  it('binds assigned review to ready video and cover revisions and commits approval once',async()=>{
+    const job=await service.create(userId,tenantId,brandId,await request(),correlationId);await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    const input={videoId:project.id,version:project.stageRevision,coverRevision:project.coverRevision,requestedFrom:userId,idempotencyKey:randomUUID()};
+    const [review,retry]=await Promise.all([approvals.create(userId,tenantId,brandId,input,correlationId),approvals.create(userId,tenantId,brandId,input,correlationId)]);expect(review).toEqual(retry);
+    const preview=await approvals.preview(userId,tenantId,review.id,correlationId);expect('videoUrl' in preview&&preview.videoUrl).toContain('/final.mp4');expect('coverUrl' in preview&&preview.coverUrl).toContain('/cover.jpg');
+    await expect(approvals.preview(viewerId,tenantId,review.id,correlationId)).rejects.toThrow('NOT_FOUND');
+    const covers=new CoverRepository(database.db),coverService=new CoverService(covers,storage);const cover=await coverService.request(userId,tenantId,brandId,project.id,{design:project.options.cover!,idempotencyKey:randomUUID()},correlationId);
+    await new CoverProcessor(covers,storage,{renderCover:async()=>({bytes:Buffer.from('review-cover'),width:720,height:1280})}).run(tenantId,cover.id);
+    let signed=false;const racing=new ApprovalService(new ApprovalRepository(database.db),{...storage,signedDownload:async(key,ttl,context)=>{if(!signed){signed=true;await coverService.select(userId,tenantId,brandId,project.id,{version:1,revision:0},correlationId);}return storage.signedDownload(key,ttl,context);}});
+    await expect(racing.preview(userId,tenantId,review.id,correlationId)).rejects.toThrow('CONFLICT');
+    await expect(approvals.preview(userId,tenantId,review.id,correlationId)).rejects.toThrow('CONFLICT');await expect(approvals.decide(userId,tenantId,review.id,{status:'APPROVED'},correlationId)).rejects.toThrow('CONFLICT');
+    await coverService.select(userId,tenantId,brandId,project.id,{version:0,revision:1},correlationId);
+    expect((await approvals.list(userId,tenantId,{})).items.find(item=>item.id===review.id)?.targetChanged).toBe(true);
+    await approvals.decide(userId,tenantId,review.id,{status:'CANCELLED'},correlationId);
+    const current=await approvals.create(userId,tenantId,brandId,{...input,coverRevision:2,idempotencyKey:randomUUID()},correlationId);
+    await Promise.all([approvals.decide(userId,tenantId,current.id,{status:'APPROVED'},correlationId),approvals.decide(userId,tenantId,current.id,{status:'APPROVED'},correlationId)]);
+    expect((await database.client`select count(*)::int as n from audit_logs where resource_id=${project.id} and action='VIDEO_APPROVED'`)[0]?.n).toBe(1);
+    await expect(database.client`update approval_requests set cover_revision=3 where id=${current.id}`).rejects.toThrow('immutable');
+    const pendingJob=await service.create(userId,tenantId,brandId,await request(),correlationId);await due(pendingJob.id);await processor.run(tenantId,pendingJob.id);await due(pendingJob.id);await processor.run(tenantId,pendingJob.id);
+    const pending=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===pendingJob.id)!;
+    pendingVideoReview=(await approvals.create(userId,tenantId,brandId,{videoId:pending.id,version:pending.stageRevision,coverRevision:0,requestedFrom:userId,idempotencyKey:randomUUID()},correlationId)).id;
+  });
   it('blocks stale approved scripts and revoked consent before remote submission',async()=>{
     const input=await request(),stale=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;
     await database.client`update scripts set approved_version=null where id=${input.scriptId}`;
@@ -572,6 +597,9 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await expect(coverService.select(userId,tenantId,brandId,ready.id,{version:1,revision:0},correlationId)).rejects.toThrow('CONFLICT');
     clock=new Date('2030-01-01T00:11:00Z');const publishingJob=(await publishing.claim(tenantId,publication.id))!;await publishing.prepare(publishingJob,avatarConsentPolicies());
     await consent.revoke(userId,tenantId,brandId,consentId,correlationId);
+    await expect(approvals.preview(userId,tenantId,pendingVideoReview,correlationId)).rejects.toThrow('CONSENT_REQUIRED');
+    await expect(approvals.decide(userId,tenantId,pendingVideoReview,{status:'APPROVED'},correlationId)).rejects.toThrow('CONSENT_REQUIRED');
+    await approvals.decide(userId,tenantId,pendingVideoReview,{status:'CANCELLED'},correlationId);
     await expect(coverService.download(userId,tenantId,brandId,ready.id,'1',correlationId)).rejects.toThrow('CONSENT_REQUIRED');
     await expect(publishing.begin(publishingJob,avatarConsentPolicies())).rejects.toThrow('CONSENT_REQUIRED');
     await expect(service.confirmCaptions(userId,tenantId,brandId,waitingProject.id,{revision:0},correlationId)).rejects.toThrow('CONSENT_REQUIRED');
