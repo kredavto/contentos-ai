@@ -66,7 +66,39 @@ test('owner manages encrypted HeyGen keys with revision, role and CSRF boundarie
  await expect(page.getByRole('alert').filter({hasText:'Подключение аватара недоступно'})).toBeVisible();
  await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
  await page.unroute(`**/brands/${brand.id}/avatars`);
+ const restoredResponse=await page.request.put(endpoint,{headers:{origin:baseURL!},data:{...input,revision:key.revision+1}});expect(restoredResponse.status()).toBe(200);
+ const restored=(await restoredResponse.json()).data;
  await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
  expect((await page.request.get(endpoint)).status()).toBe(403);expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:{...input,revision:1}})).status()).toBe(403);
  await page.reload();await expect(page.getByRole('heading',{name:'Студия аватаров',exact:true})).toBeVisible();await expect(panel).toHaveCount(0);
+ await page.unroute(`**/brands/${brand.id}/voices`);
+ const requests:unknown[]=[];
+ await page.route(`**/brands/${brand.id}/voices`,async route=>{
+  if(route.request().method()==='POST'){
+   requests.push(route.request().postDataJSON());
+   return route.fulfill({json:{data:{nextCursor:requests.length===1?'fixture-page-two':requests.length===2?'fixture-page-three':null}}});
+  }
+  const response=await route.fetch(),body=await response.json();
+  await route.fulfill({json:{...body,data:{...body.data,configuration:{ready:false,byokReady:true}}}});
+ });
+ await page.reload();await expect(panel).toHaveCount(0);
+ const catalog=page.getByLabel('Подключение каталога голосов',{exact:true}),refresh=page.getByRole('button',{name:'Обновить каталог голосов',exact:true});
+ await expect(catalog).toHaveValue('platform');await expect(refresh).toBeDisabled();
+ await catalog.selectOption(`${restored.id}:${restored.revision}`);await expect(refresh).toBeEnabled();await refresh.click();
+ await expect(page.getByRole('status')).toContainText('Публичный каталог голосов обновлён');
+ await expect(page.getByRole('button',{name:'Загрузить ещё голоса',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Загрузить ещё голоса',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Загрузить ещё голоса',exact:true})).toBeEnabled();
+ expect(requests).toEqual([{connection:{id:restored.id,revision:restored.revision}},{connection:{id:restored.id,revision:restored.revision},cursor:'fixture-page-two'}]);
+ await catalog.selectOption('platform');await expect(refresh).toBeDisabled();
+ await catalog.selectOption(`${restored.id}:${restored.revision}`);await refresh.click();await expect(refresh).toBeEnabled();
+ expect(requests[2]).toEqual({connection:{id:restored.id,revision:restored.revision}});
+ await expect(selection).toHaveValue('platform');
+ await page.screenshot({path:testInfo.outputPath('editor-voice-catalog-mobile.png'),fullPage:true});
+ await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
+ expect((await page.request.post(`${endpoint}/${restored.id}/revoke`,{headers:{origin:baseURL!},data:{revision:restored.revision}})).status()).toBe(200);
+ await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
+ await expect(page.getByRole('alert').filter({hasText:'Ключ каталога заменён, отозван или недоступен по тарифу'})).toBeVisible({timeout:15000});
+ await expect(catalog).toHaveValue(`${restored.id}:${restored.revision}`);await expect(refresh).toBeDisabled();expect(requests).toHaveLength(3);
+
 });

@@ -96,6 +96,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     }
     expect(ratios[1]!/ratios[0]!).toBeGreaterThan(3);expect(ratios[1]!/ratios[0]!).toBeLessThan(7);
   });
+  // Two real renders plus PCM inspection can exceed the default budget on shared Docker hosts.
   it.each([{fadeInMs:300},{fadeOutMs:400},{fadeInMs:300,fadeOutMs:400}])('fades only music at main-relative edges, including with bookends: %j',async fades=>{
     const tag=`${fades.fadeInMs??0}-${fades.fadeOutMs??0}`,musicFile=join(directory,`music-fades-${tag}.mp3`);
     await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','sine=frequency=880:duration=0.25','-ac','2','-ar','48000','-c:a','libmp3lame',musicFile]);
@@ -117,7 +118,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
       expect(tone(440,time)/referenceTone(440,time)).toBeGreaterThan(.8);expect(tone(440,time)/referenceTone(440,time)).toBeLessThan(1.2);expect(tone(440,time)).toBeGreaterThan(.04);
     }
     expect(tone(880,.1)).toBeLessThan(.001);expect(tone(880,1.4)).toBeLessThan(.001);
-  });
+  },120_000);
   it('rejects music fades outside bounds or longer than the actual main video',async()=>{
     for(const fades of [{fadeInMs:0},{fadeOutMs:99},{fadeInMs:5001},{fadeOutMs:100.5},{fadeInMs:600,fadeOutMs:500},{fadeOutMs:1100}])await expect(processor.process({bytes,backgroundMusic:{bytes:Buffer.alloc(12),volumePercent:15,...fades},options:videoProcessingSchema.parse({})},context())).rejects.toThrow('INVALID_INPUT');
   });
@@ -214,7 +215,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     expect(tone(440)).toBeGreaterThan(.04);expect(tone(880)).toBeGreaterThan(.002);expect(tone(1760)).toBeLessThan(.001);
     for(const invalid of [[],[clips[1]!,clips[0]!],[clips[0]!,{...clips[1]!,startMs:150}],[...clips,clips[0]!],[clips[0]!,{...clips[1]!,endMs:1100}],[clips[0]!,{...clips[1]!,sourceStartMs:950}]])await expect(processor.process({bytes,brollClips:invalid,options},context())).rejects.toThrow('INVALID_INPUT');
     await expect(processor.process({bytes,broll:clips[0],brollClips:clips,options},context())).rejects.toThrow('INVALID_INPUT');
-  });
+  },120_000);
   it.each([false,true])('blends B-roll edges with the main picture while keeping decorations, sound and bookends (collection=%s)',async collection=>{
     const clipFile=join(directory,`fade-source-${collection}.mp4`),musicFile=join(directory,`fade-music-${collection}.mp3`);
     await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=yellow:s=320x240:r=30:d=1','-f','lavfi','-i','sine=frequency=1760:duration=1','-vf',"drawbox=x=0:y=0:w=iw:h=ih:color=blue:t=fill:enable='gte(t,0.4)'",'-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac',clipFile]);

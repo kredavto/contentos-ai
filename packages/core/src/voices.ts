@@ -7,7 +7,7 @@ import {CredentialVault} from './credential-vault';
 const scope=z.object({tenantId:z.uuid(),brandId:z.uuid()});
 export class VoiceService {
   constructor(private readonly repository:VoiceRepository,private readonly connection:{provider:VoiceCatalogProvider;name:string}|null,private readonly byok?:{repository:ProviderKeyRepository;vault:CredentialVault|null;catalog?:(key:string)=>VoiceCatalogProvider}){}
-  async overview(userId:string,tenantId:string,brandId:string){scope.parse({tenantId,brandId});return {voices:await this.repository.list(userId,tenantId,brandId),configuration:{ready:!!this.connection}};}
+  async overview(userId:string,tenantId:string,brandId:string){scope.parse({tenantId,brandId});return {voices:await this.repository.list(userId,tenantId,brandId),configuration:{ready:!!this.connection,byokReady:!!this.byok?.vault}};}
   async refresh(userId:string,tenantId:string,brandId:string,raw:unknown,correlationId:string){
     scope.parse({tenantId,brandId});const {cursor,connection:reference}=z.object({connection:providerKeyReferenceSchema.optional(),cursor:z.string().min(1).max(2048).optional()}).strict().parse(raw);
     await this.repository.authorize(userId,tenantId,brandId,true);

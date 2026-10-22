@@ -72,6 +72,8 @@ describe.skipIf(!url)('tenant/brand BYOK storage foundation',()=>{
   const f=await fixture(),apiKey=secret(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey,revision:null},randomUUID());
   let calls=0;
   const voices=new VoiceService(new VoiceRepository(database.db),null,{repository,vault,catalog:key=>{expect(key).toBe(apiKey);return {listPublicVoicePage:async(cursor,context)=>{calls++;expect(cursor).toBe('page-2');expect(context.tenantId).toBe(f.tenant);return {voices:[{name:'Public fixture',language:'Russian',previewUrl:null,reference:{provider:'heygen',internalId:context.internalId,externalId:'public-fixture',metadata:{public:true}}}],nextCursor:null};}};}});
+  expect((await voices.overview(f.editor,f.tenant,f.brand)).configuration).toEqual({ready:false,byokReady:true});
+  expect((await new VoiceService(new VoiceRepository(database.db),null,{repository,vault:null}).overview(f.editor,f.tenant,f.brand)).configuration).toEqual({ready:false,byokReady:false});
   expect(await voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:saved.revision},cursor:'page-2'},randomUUID())).toEqual({nextCursor:null});
   expect(calls).toBe(1);const rows=await new VoiceRepository(database.db).list(f.user,f.tenant,f.brand);expect(rows).toHaveLength(1);expect(JSON.stringify(rows)).not.toContain(apiKey);
   await service.revoke(f.user,f.tenant,f.brand,saved.id,{revision:saved.revision},randomUUID());

@@ -13,7 +13,8 @@ export function AvatarStudio({base,canWrite,canManage,canOwn=false,cost}:{base:s
   const [likenessType,setLikenessType]=useState<'OWN_LIKENESS'|'THIRD_PARTY_LIKENESS'>('OWN_LIKENESS');
   const [pending,setPending]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [connectionChoice,setConnectionChoice]=useState('platform');
-  const [voiceCursor,setVoiceCursor]=useState<string|null|undefined>(undefined);
+  const [voiceConnectionChoice,setVoiceConnectionChoice]=useState('platform');
+  const [voicePage,setVoicePage]=useState<{source:string;nextCursor:string|null}|null>(null);
   const intent=useRef<{payload:string;key:string}|null>(null);
   useEffect(()=>{
     let active=true;let timer:ReturnType<typeof setTimeout>;
@@ -31,6 +32,9 @@ export function AvatarStudio({base,canWrite,canManage,canOwn=false,cost}:{base:s
   });
   const useByok=connectionChoice!=='platform',connection=data?.configuration.connections.find(item=>`${item.id}:${item.revision}`===connectionChoice);
   const connectionReady=useByok?!!data?.configuration.byokReady&&!!connection:!!data?.configuration.ready;
+  const voiceByok=voiceConnectionChoice!=='platform',voiceConnection=data?.configuration.connections.find(item=>`${item.id}:${item.revision}`===voiceConnectionChoice);
+  const voiceReady=voiceByok?!!sources?.voices.configuration.byokReady&&!!voiceConnection:!!sources?.voices.configuration.ready;
+  const voiceSource=`${base}:${voiceConnectionChoice}`,voiceCursor=voicePage?.source===voiceSource?voicePage.nextCursor:null;
   const eligible=data?.looks.filter(look=>look.avatarStatus==='ACTIVE'&&look.status==='READY'&&look.consentValid&&look.subjectId===subjectId&&(useByok?look.connection?.id===connection?.id&&look.connection?.revision===connection?.revision:!look.connection))??[];
   const groups=eligible.filter((look,index)=>eligible.findIndex(other=>other.avatarId===look.avatarId)===index);
   return <section><h2>Студия аватаров</h2><p className="muted">Создайте аватар по фотографии или добавьте образ существующему аватару.</p>
@@ -56,10 +60,16 @@ export function AvatarStudio({base,canWrite,canManage,canOwn=false,cost}:{base:s
       <button className="button primary" disabled={pending||!connectionReady||(!!avatarId&&!groups.some(item=>item.avatarId===avatarId))||!consentReady||!sourceAssetId||!name.trim()||cost===undefined}>Создать образ · {cost??'—'} кр.</button>
     </form>:null}
     {data&&!data.looks.length?<div className="panel empty">Здесь появятся ваши аватары и их образы.</div>:null}
-    <div className="panel stack"><h3>Голоса для аватаров</h3><p className="muted">Публичные голоса провайдера. Клонирование личного голоса пока не подключено.</p>{canWrite?<button className="button secondary" disabled={pending||!sources?.voices.configuration.ready} onClick={()=>void perform(async()=>{
-      const result=await api<{nextCursor:string|null}>(`${base}/voices`,'POST',voiceCursor?{cursor:voiceCursor}:{});setVoiceCursor(result.nextCursor);
-      const voices=await api<Voices>(`${base}/voices`);setSources(current=>current?{...current,voices}:current);
-    })}>{voiceCursor?'Загрузить ещё голоса':'Обновить каталог голосов'}</button>:null}</div>
+    <div className="panel stack"><h3>Голоса для аватаров</h3><p className="muted">Публичные голоса провайдера. Клонирование личного голоса пока не подключено.</p>{canWrite?<>
+      <label>Подключение каталога голосов<select aria-label="Подключение каталога голосов" disabled={pending} value={voiceConnectionChoice} onChange={event=>{setVoiceConnectionChoice(event.target.value);setVoicePage(null);}}><option value="platform">Подключение платформы</option>{data?.configuration.connections.map(item=><option key={`${item.id}:${item.revision}`} value={`${item.id}:${item.revision}`}>Ключ HeyGen бренда</option>)}{voiceByok&&!voiceConnection?<option value={voiceConnectionChoice}>Выбранный ключ недоступен</option>:null}</select></label>
+      <p className="muted">Загрузка публичного каталога не создаёт голос или видео и не меняет подключение аватара.</p>
+      {voiceByok&&!voiceConnection?<p role="alert">Ключ каталога заменён, отозван или недоступен по тарифу. Выберите подключение заново.</p>:null}
+      {!voiceByok&&sources&&!sources.voices.configuration.ready?<p className="notice warning">Каталог платформы не подключён. Можно выбрать доступный ключ HeyGen бренда.</p>:null}
+      <button className="button secondary" disabled={pending||!voiceReady} onClick={()=>{if(!voiceReady)return;void perform(async()=>{
+        const result=await api<{nextCursor:string|null}>(`${base}/voices`,'POST',{...(voiceConnection?{connection:voiceConnection}:{}),...(voiceCursor?{cursor:voiceCursor}:{})});setVoicePage({source:voiceSource,nextCursor:result.nextCursor});
+        const voices=await api<Voices>(`${base}/voices`);setSources(current=>current?{...current,voices}:current);setNotice('Публичный каталог голосов обновлён.');
+      });}}>{voiceCursor?'Загрузить ещё голоса':'Обновить каталог голосов'}</button>
+    </>:null}</div>
     <div className="plan-grid">{data?.looks.map(look=><article className="panel stack" key={look.id}>
       <span className="badge">{look.avatarStatus==='DELETE_PENDING'?'Удаляется':labels[look.status]}</span><h3>{look.name}</h3><small>{look.avatarName} · {look.connection?'Ключ HeyGen бренда':'Подключение платформы'}</small>
       {look.avatarStatus==='ACTIVE'?<label>Голос аватара<select aria-label={`Голос для ${look.name}`} disabled={pending||!canWrite} value={look.voiceId??''} onChange={event=>{const voiceId=event.target.value;if(voiceId)void perform(async()=>{await api(`${base}/avatars/${look.avatarId}/voice`,'POST',{voiceId});setNotice('Голос сохранён');});}}><option value="">Выберите голос</option>{sources?.voices.voices.map(voice=><option key={voice.id} value={voice.id}>{voice.name}{voice.language?` · ${voice.language}`:''}</option>)}</select></label>:null}

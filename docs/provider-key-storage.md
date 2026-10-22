@@ -66,3 +66,10 @@ The avatar overview exposes only active HeyGen `{id,revision}` references to ver
 Avatar creation defaults explicitly to the platform connection. Selecting the brand key shows the external billing notice and submits only its reference. Additional-look choices are restricted to avatars with that exact binding. If polling detects replacement/revocation/entitlement loss, the selected value remains visibly unavailable and submission is disabled instead of reverting to another account. Video creation displays the selected avatar's inherited connection and blocks unavailable references; the server still derives the binding independently from the avatar. Key management remains owner-only, while authorized editors can select a provisioned reference without seeing its secret or masked suffix.
 
 No new migration is required for this UI slice. Migrations 0078/0079 and matching worker code remain prerequisites. Safe key rebinding, private voice cloning and live provider acceptance are not covered.
+
+
+## Editor public voice catalog
+
+Avatar Studio exposes a separate explicit connection selector for the public voice catalog to generation-capable members. It defaults to platform; choosing a provisioned HeyGen reference requires neither owner-only key metadata nor permission to manage keys. The voice overview advertises vault availability separately from platform readiness and avatar/storage readiness. No encryption keys or credential metadata are returned.
+
+Catalog requests submit the exact selected reference and bind pagination state to that source. Switching sources clears pagination; unavailable references remain selected and block requests instead of falling back. Loading voices does not change an avatar's creation binding or generate a voice/video. Existing service/repository checks still reauthorize the requester, entitlement and current revision before the remote read and before persisting public results. The owner panel retains its direct public-catalog shortcut.
