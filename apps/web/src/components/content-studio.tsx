@@ -76,7 +76,7 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified,initialT
     {tab==='utm'?<UtmStudio key={base} base={base} canWrite={canGenerate}/>:null}
     {tab==='calendar'?<ContentCalendar initialPost={postPlan??undefined} base={base} canWrite={canGenerate}/>:null}
     {tab==='videos'&&data?<VideoStudio captionCost={data.usage.policies.find(policy=>policy.operation==='AUTO_CAPTIONS')?.amount} aiAvailable={data.usage.balances.AI_CREDITS.available} base={base} scripts={data.scripts} canWrite={canGenerate} canApprove={canApprove} canManage={canStrategy} maximum={data.usage.policies.find(policy=>policy.operation==='GENERATE_VIDEO')?.amount} available={data.usage.balances.VIDEO_SECONDS.available}/>:null}
-    {tab==='avatars'?<AvatarStudio base={base} canWrite={canGenerate} canManage={canStrategy} cost={data?.usage.policies.find(policy=>policy.operation==='CREATE_AVATAR')?.amount}/>:null}
+    {tab==='avatars'?<AvatarStudio key={base} canOwn={role==='OWNER'&&verified} base={base} canWrite={canGenerate} canManage={canStrategy} cost={data?.usage.policies.find(policy=>policy.operation==='CREATE_AVATAR')?.amount}/>:null}
     {tab==='media'?<MediaLibrary base={base} canWrite={canGenerate}/>:null}
     {tab==='consents'?<ConsentCenter base={base} role={role}/>:null}
     {!data?<div className="loading" role="status"><LoaderCircle className="spin"/>Загружаем контент…</div>:null}

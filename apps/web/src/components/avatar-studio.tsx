@@ -1,12 +1,13 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import type {AvatarService,ConsentService,MediaService,VoiceService} from '@contentos/core';
+import {ProviderKeyPanel} from './provider-key-panel';
 import {api} from '../lib/api-client';
 type Overview=Awaited<ReturnType<AvatarService['overview']>>;
 type Voices=Awaited<ReturnType<VoiceService['overview']>>;
 type Sources={voices:Voices;media:Awaited<ReturnType<MediaService['overview']>>;consents:Awaited<ReturnType<ConsentService['overview']>>};
 const labels={QUEUED:'В очереди',PROCESSING:'Обрабатывается',READY:'Готово',FAILED:'Ошибка',RECONCILIATION:'Требуется проверка'};
-export function AvatarStudio({base,canWrite,canManage,cost}:{base:string;canWrite:boolean;canManage:boolean;cost?:number}){
+export function AvatarStudio({base,canWrite,canManage,canOwn=false,cost}:{base:string;canWrite:boolean;canManage:boolean;canOwn?:boolean;cost?:number}){
   const [data,setData]=useState<Overview|null>(null),[sources,setSources]=useState<Sources|null>(null);
   const [name,setName]=useState(''),[subjectId,setSubjectId]=useState(''),[sourceAssetId,setSourceAssetId]=useState(''),[avatarId,setAvatarId]=useState('');
   const [likenessType,setLikenessType]=useState<'OWN_LIKENESS'|'THIRD_PARTY_LIKENESS'>('OWN_LIKENESS');
@@ -34,6 +35,7 @@ export function AvatarStudio({base,canWrite,canManage,cost}:{base:string;canWrit
     {!data?<p role="status">Загружаем аватары…</p>:null}
     {data?.configuration.provider==='mock-avatar'?<p className="notice warning">ДЕМО: проверяется работа очереди. Настоящий аватар не создаётся.</p>:null}
     {data&&!data.configuration.ready?<p className="notice warning">Создание аватаров ещё не подключено. Администратор должен настроить HeyGen и хранилище.</p>:null}
+    {canOwn?<ProviderKeyPanel key={base} base={base}/>:null}
     {canWrite?<form className="panel stack" onSubmit={event=>{event.preventDefault();void perform(async()=>{
       const payload=JSON.stringify({name,subjectId,sourceAssetId,likenessType,...(avatarId?{avatarId}:{})});
       if(intent.current?.payload!==payload)intent.current={payload,key:crypto.randomUUID()};

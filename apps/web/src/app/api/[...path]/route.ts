@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -99,6 +99,11 @@ async function dispatch(request: Request, context: RouteContext) {
       }
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if(path[3]&&path[4]==='provider-keys'){
+          if(path.length===5&&request.method==='GET')return ok(await providerKeys.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='PUT')return ok(await providerKeys.save(user.userId,tenantId,path[3],await readBody(request),correlationId));
+          if(path[5]&&path[6]==='revoke'&&path.length===7&&request.method==='POST')return ok(await providerKeys.revoke(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+        }
         if (path[3] && path[4] === 'brain' && path[5] && path.length === 6) {
           if (request.method === 'GET') return ok(await brands.collection(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') return ok(await brands.saveCollection(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId));
