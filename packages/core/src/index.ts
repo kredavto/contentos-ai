@@ -55,3 +55,5 @@ export * from './youtube-resolutions';
 export * from './search';
 
 export * from './approvals';
+export * from './notification-preferences';
+export * from './notification-email';

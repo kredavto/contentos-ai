@@ -4,8 +4,8 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { YouTubeResolutionRepository, PublicationAnalyticsRepository, YouTubeUploadRepository, YouTubeOAuthRepository, SocialRepository, LibraryMediaRepository, ImageRepository, CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { YouTubeResolutionService, YouTubeResolutionProcessor, PublicationAnalyticsProcessor, YouTubePublishingProcessor, YouTubeService, LibraryMediaProcessor, ImageProcessor, reportError, CoverProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { NotificationEmailRepository, YouTubeResolutionRepository, PublicationAnalyticsRepository, YouTubeUploadRepository, YouTubeOAuthRepository, SocialRepository, LibraryMediaRepository, ImageRepository, CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { YouTubeResolutionService, YouTubeResolutionProcessor, PublicationAnalyticsProcessor, YouTubePublishingProcessor, YouTubeService, LibraryMediaProcessor, ImageProcessor, reportError, CoverProcessor, NotificationEmailProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, validateBrandReview, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
 import {  youtubePublishingFromEnvironment, FFmpegMediaPreparation, SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, imageFromEnvironment, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
@@ -16,6 +16,8 @@ function operationalError(event:string,code:string,error:unknown){const correlat
 const database = createDatabase(env.DATABASE_URL);
 const repository = new JobRepository(database.db);
 const emailRepository=new EmailRepository(database.db);
+const notificationEmailRepository=new NotificationEmailRepository(database.db);
+const notificationEmailProcessor=new NotificationEmailProcessor(notificationEmailRepository,env.SMTP_URL&&env.EMAIL_FROM?new SmtpEmailProvider(env.SMTP_URL,env.EMAIL_FROM,env.NODE_ENV==='production'):null,env.APP_URL,env.APP_NAME,errors);
 const emailProcessor=new EmailProcessor(emailRepository,env.SMTP_URL&&env.EMAIL_FROM?new SmtpEmailProvider(env.SMTP_URL,env.EMAIL_FROM,env.NODE_ENV==='production'):null,credentialVaultFromEnvironment(env),errors);
 const storage = storageFromEnvironment(env);
 const media = new MediaService(new MediaRepository(database.db),storage);
@@ -196,7 +198,7 @@ const notificationTimer=setInterval(()=>{
 },5000);
 let mailing=false;
 let emailTask:Promise<unknown>=Promise.resolve();
-const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).catch(error=>operationalError('email_worker_error','INTERNAL_ERROR',error)).finally(()=>{mailing=false;});},2000);
+const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).then(()=>notificationEmailRepository.projectBatch()).then(()=>notificationEmailProcessor.runOnce()).catch(error=>operationalError('email_worker_error','INTERNAL_ERROR',error)).finally(()=>{mailing=false;});},2000);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;

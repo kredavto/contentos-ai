@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useId, useState } from 'react';
 import Link from 'next/link';
+import {NotificationPreferences} from './notification-preferences';
 import type { NotificationStatus } from '@contentos/types';
 import { api } from '../lib/api-client';
 type Notice={id:string;title:string;body:string;href:string;createdAt:string;readAt:string|null};
@@ -34,6 +35,7 @@ function NotificationFeed({tenantId,status,onStatusChange}:{tenantId:string;stat
   }
   async function read(id:string){setPending(true);setError('');try{const result=await api<{readAt:string}>(`${base}/read`,'POST',{id});setFeed(current=>current?{...current,unread:Math.max(0,current.unread-(current.items.some(item=>item.id===id&&!item.readAt)?1:0)),items:current.items.map(item=>item.id===id?{...item,readAt:result.readAt}:item).filter(item=>status==='ALL'||!item.readAt)}:current);}catch(failure){setError(failure instanceof Error?failure.message:'Не удалось отметить уведомление');}finally{setPending(false);}}
   return <main className="workspace-main content-studio"><Link className="back-link" href="/dashboard">← Рабочее пространство</Link><div className="page-title"><div><h1>Уведомления</h1><p className="muted">{feed?`Непрочитано: ${feed.unread}`:'События вашей организации'}</p></div><button className="button secondary" disabled={pending} onClick={()=>void refresh()}>Обновить</button></div>
+    <NotificationPreferences key={tenantId} tenantId={tenantId}/>
     <div><label htmlFor={statusId}>Показать уведомления</label><select id={statusId} value={status} disabled={pending} onChange={event=>onStatusChange(event.target.value as NotificationStatus)}><option value="ALL">Все</option><option value="UNREAD">Непрочитанные</option></select></div>
     {batchIds.length?<div className="stack"><button className="button secondary" disabled={pending} onClick={()=>void readBatch()}>Отметить прочитанными: {batchIds.length}</button><p className="muted">До 50 загруженных непрочитанных уведомлений за один раз. Новые и ещё не загруженные события останутся непрочитанными.</p></div>:null}
     {error?<p className="notice error" role="alert">{error}</p>:null}

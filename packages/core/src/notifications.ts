@@ -25,3 +25,5 @@ export class NotificationService {
   markReadBatch(userId:string,tenantId:string,raw:unknown){return this.repository.markReadBatch(userId,z.uuid().parse(tenantId),notificationBatchReadSchema.parse(raw).ids);}
   markRead(userId:string,tenantId:string,raw:unknown){return this.repository.markRead(userId,z.uuid().parse(tenantId),notificationReadSchema.parse(raw).id);}
 }
+
+export function notificationEmailTitle(type:NotificationType){return copy[type].title;}

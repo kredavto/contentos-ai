@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -81,6 +81,10 @@ async function dispatch(request: Request, context: RouteContext) {
         }
       }
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
+      if(path[2]==='notifications'&&path[3]==='preferences'&&path.length===4){
+        if(request.method==='GET')return ok(await notificationPreferences.get(user.userId,tenantId));
+        if(request.method==='PUT'){await auth.throttle('mutation',user.userId);return ok(await notificationPreferences.update(user.userId,tenantId,await readBody(request),correlationId));}
+      }
       if(path[2]==='notifications'&&path.length===3&&request.method==='GET')return ok(await notifications.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
       if(path[2]==='notifications'&&path[3]==='read-batch'&&path.length===4&&request.method==='POST'){await auth.throttle('mutation',user.userId);return ok(await notifications.markReadBatch(user.userId,tenantId,await readBody(request)));}
       if(path[2]==='notifications'&&path[3]==='read'&&path.length===4&&request.method==='POST')return ok(await notifications.markRead(user.userId,tenantId,await readBody(request)));

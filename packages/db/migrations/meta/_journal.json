@@ -512,6 +512,20 @@
       "when": 1792700124016,
       "tag": "0072_real_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1792700671010,
+      "tag": "0073_lively_white_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1792700716604,
+      "tag": "0074_panoramic_slipstream",
+      "breakpoints": true
     }
   ]
 }

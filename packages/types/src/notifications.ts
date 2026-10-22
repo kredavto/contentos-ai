@@ -9,3 +9,5 @@ export const notificationBatchReadSchema=z.object({ids:z.array(z.uuid()).min(1).
 
 export const notificationListSchema=z.object({cursor:z.uuid().optional(),status:z.enum(['ALL','UNREAD']).default('ALL')}).strict();
 export type NotificationStatus=z.infer<typeof notificationListSchema>['status'];
+
+export const notificationPreferencesSchema=z.object({emailEnabled:z.boolean(),revision:z.uuid().nullable()}).strict();

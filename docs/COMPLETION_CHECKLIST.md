@@ -109,7 +109,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 91 | SUBSCRIPTION STATE | See TECH_SPEC.md §91; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 92 | AGENCY MODE | See TECH_SPEC.md §92; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 93 | CLIENT APPROVAL PORTAL | Simplified CLIENT_APPROVER dashboard, scoped pending count, approve/request-changes/reject decisions and independent comments. Technical studio/onboarding navigation redirects to approvals. Current-role/tenant checks, pagination, idempotency and mobile rendering verified locally; production acceptance remains — docs/client-portal.md. | LOCAL_VERIFIED |
-| 94 | NOTIFICATIONS | Durable role-scoped in-app event projection, script/video/limit notices; see notification-events.md. EMAIL/TELEGRAM and production verification remain. | PARTIAL |
+| 94 | NOTIFICATIONS | Durable role-scoped in-app event projection, script/video/limit notices; see notification-events.md. Opt-in EMAIL queue/settings added; TELEGRAM and production verification remain. | PARTIAL |
 | 95 | ADMIN PANEL | See TECH_SPEC.md §95; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 96 | PROVIDER COSTS | See TECH_SPEC.md §96; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 97 | UNIT ECONOMICS DASHBOARD | See TECH_SPEC.md §97; current implementation evidence must be inspected | AUDIT_REQUIRED |

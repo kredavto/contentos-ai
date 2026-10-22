@@ -62,3 +62,6 @@ export * from './repositories/youtube-resolutions';
 export * from './repositories/search';
 
 export * from './repositories/approvals';
+
+export * from './repositories/notification-preferences';
+export * from './repositories/notification-email';

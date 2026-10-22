@@ -1,6 +1,6 @@
 # Notification event coverage
 
-The durable in-app projection now includes SCRIPT_READY, VIDEO_FAILED and LIMIT_WARNING (migration 0072). Existing CONTENT_APPROVAL_REQUIRED and SOCIAL_TOKEN_EXPIRED represent the specification's APPROVAL_REQUIRED and TOKEN_EXPIRED events. Other existing events cover video readiness, publication results, payment results and subscription expiry. EMAIL and TELEGRAM notification delivery remain incomplete; authentication SMTP is a separate pipeline.
+The durable in-app projection now includes SCRIPT_READY, VIDEO_FAILED and LIMIT_WARNING (migration 0072). Existing CONTENT_APPROVAL_REQUIRED and SOCIAL_TOKEN_EXPIRED represent the specification's APPROVAL_REQUIRED and TOKEN_EXPIRED events. Other existing events cover video readiness, publication results, payment results and subscription expiry. Opt-in EMAIL delivery now has a separate durable queue; see notification-email.md. TELEGRAM delivery and production mailbox verification remain incomplete. Authentication SMTP remains a separate pipeline.
 
 A successful GENERATE_SCRIPT event emits SCRIPT_READY to current editors/managers/admins/owners and CONTENT_APPROVAL_REQUIRED to approvers. An owner can receive both because creation and approval are distinct actions. Projection receipts deduplicate retries. A video failure or uncertain remote video result emits VIDEO_FAILED to editors and links to the video studio; it does not imply a retry is safe. Older already-projected generic notifications are preserved without retroactive duplicate delivery.
 
