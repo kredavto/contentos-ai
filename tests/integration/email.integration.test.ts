@@ -4,7 +4,7 @@ import { AuthRepository,EmailRepository } from '../../packages/db/src/index';
 import { AuthService } from '../../packages/core/src/auth';
 import { EmailProcessor } from '../../packages/core/src/email';
 import { CredentialVault } from '../../packages/core/src/credential-vault';
-import { DomainError,type EmailProvider } from '../../packages/types/src/index';
+import { ProviderRequestError,type EmailProvider } from '../../packages/types/src/index';
 import { isolatedTestDatabase } from '../helpers/isolated-database';
 const url=process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)('durable encrypted authentication mail',()=>{
@@ -27,7 +27,7 @@ describe.skipIf(!url)('durable encrypted authentication mail',()=>{
   it('retries transient delivery with the same message/token and fences an expired lease',async()=>{
     const f=await fixture();let failed=0;
     let reports=0;
-    const failing=new EmailProcessor(repository,{send:async()=>{failed++;throw new DomainError('PROVIDER_UNAVAILABLE');}},vault,{capture(_error,context){reports++;expect(context.correlationId).toBe(f.correlation);expect(context.jobId).toBe(f.id);throw new Error('monitor offline');}});
+    const failing=new EmailProcessor(repository,{send:async()=>{failed++;throw new ProviderRequestError('PROVIDER_UNAVAILABLE',503,true);}},vault,{capture(_error,context){reports++;expect(context.correlationId).toBe(f.correlation);expect(context.jobId).toBe(f.id);throw new Error('monitor offline');}});
     await failing.runOnce(f.id);expect(failed).toBe(1);expect(reports).toBe(1);expect(await processor.runOnce(f.id)).toBe(false);
     await database.client`update email_outbox set next_attempt_at=now() where id=${f.id}`;
     const old=await repository.claim(f.id);expect(old?.attempt).toBe(2);
@@ -37,6 +37,30 @@ describe.skipIf(!url)('durable encrypted authentication mail',()=>{
     await repository.fail(f.id,current!.leaseToken!,'PROVIDER_UNAVAILABLE');
     await database.client`update email_outbox set next_attempt_at=now() where id=${f.id}`;
     await processor.runOnce(f.id);expect(delivered.at(-1)?.key).toBe(f.id);
+  });
+  it('never replays an uncertain SMTP outcome and preserves immutable reconciliation evidence',async()=>{
+    const f=await fixture();let sends=0;
+    const uncertain=new EmailProcessor(repository,{send:async()=>{sends++;throw new Error('connection lost after DATA');}},vault);
+    await uncertain.runOnce(f.id);await uncertain.runOnce(f.id);expect(sends).toBe(1);
+    const [row]=await database.client`select status,payload,error_code from email_outbox where id=${f.id}`;
+    expect(row).toEqual({status:'RECONCILIATION',payload:null,error_code:'DELIVERY_UNCERTAIN'});
+    expect(await database.client`select id from audit_logs where resource_id=${f.id} and action='AUTH_EMAIL_RECONCILIATION_REQUIRED'`).toHaveLength(1);
+    await expect(database.client`update email_outbox set error_code=null where id=${f.id}`).rejects.toThrow('immutable');
+  });
+  it('fences expired submitted attempts and rechecks token eligibility immediately before submission',async()=>{
+    const f=await fixture(),claimed=await repository.claim(f.id);
+    expect(await repository.begin(f.id,claimed!.leaseToken!)).toBe(true);
+    expect(await repository.begin(f.id,claimed!.leaseToken!)).toBe(false);
+    await database.client`update email_outbox set lease_until=now()-interval '1 second' where id=${f.id}`;
+    expect(await repository.complete(f.id,claimed!.leaseToken!)).toBe(false);
+    await repository.fail(f.id,claimed!.leaseToken!,'PROVIDER_UNAVAILABLE');
+    expect(await repository.claim(f.id)).toBe(null);
+    const [row]=await database.client`select status,payload from email_outbox where id=${f.id}`;
+    expect(row).toEqual({status:'RECONCILIATION',payload:null});
+    const revoked=await fixture(),pending=await repository.claim(revoked.id);
+    await database.client`update auth_tokens set consumed_at=now() where user_id=${revoked.userId}`;
+    expect(await repository.begin(revoked.id,pending!.leaseToken!)).toBe(false);
+    await repository.cleanup();expect(await processor.runOnce(revoked.id)).toBe(false);
   });
   it('cancels superseded, expired and disabled-account messages without delivery',async()=>{
     const f=await fixture();await auth.requestToken({email:f.email},'VERIFY_EMAIL',f.correlation,f.correlation);

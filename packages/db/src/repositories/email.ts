@@ -12,23 +12,31 @@ export class EmailRepository {
         sql`((${emailOutbox.status}='PENDING' and ${emailOutbox.nextAttemptAt}<=now()) or (${emailOutbox.status}='SENDING' and ${emailOutbox.leaseUntil}<=now()))`
       )).orderBy(emailOutbox.nextAttemptAt,emailOutbox.id).limit(1).for('update',{skipLocked:true});
       if(!row)return null;
+      if(row.status==='SENDING'&&row.submittedAt){
+        await tx.update(emailOutbox).set({status:'RECONCILIATION',payload:null,leaseToken:null,leaseUntil:null,completedAt:sql`now()`,errorCode:'DELIVERY_UNCERTAIN'}).where(eq(emailOutbox.id,row.id));
+        await tx.insert(auditLogs).values({userId:row.userId,resourceId:row.id,action:'AUTH_EMAIL_RECONCILIATION_REQUIRED',correlationId:row.correlationId});return null;
+      }
       const [valid]=await tx.select({id:emailOutbox.id}).from(emailOutbox).where(and(eq(emailOutbox.id,row.id),eligible));
       if(!valid||row.attempt>=8){await tx.update(emailOutbox).set({status:valid?'FAILED':'CANCELED',payload:null,leaseToken:null,leaseUntil:null,completedAt:sql`now()`,errorCode:valid?'DELIVERY_EXHAUSTED':null}).where(eq(emailOutbox.id,row.id));return null;}
       const [claimed]=await tx.update(emailOutbox).set({status:'SENDING',attempt:row.attempt+1,leaseToken:randomUUID(),leaseUntil:sql`now()+interval '60 seconds'`}).where(eq(emailOutbox.id,row.id)).returning();return claimed??null;
     });
   }
+  async begin(id:string,leaseToken:string){
+    const [row]=await this.db.update(emailOutbox).set({submittedAt:sql`now()`,leaseUntil:sql`now()+interval '60 seconds'`}).where(and(eq(emailOutbox.id,id),eq(emailOutbox.status,'SENDING'),eq(emailOutbox.leaseToken,leaseToken),sql`${emailOutbox.leaseUntil}>now()`,sql`${emailOutbox.submittedAt} is null`,eligible)).returning({id:emailOutbox.id});return Boolean(row);
+  }
   async complete(id:string,leaseToken:string){
     return this.db.transaction(async tx=>{
-      const [row]=await tx.update(emailOutbox).set({status:'SENT',payload:null,leaseToken:null,leaseUntil:null,completedAt:sql`now()`,errorCode:null}).where(and(eq(emailOutbox.id,id),eq(emailOutbox.status,'SENDING'),eq(emailOutbox.leaseToken,leaseToken))).returning();
+      const [row]=await tx.update(emailOutbox).set({status:'SENT',payload:null,leaseToken:null,leaseUntil:null,completedAt:sql`now()`,errorCode:null}).where(and(eq(emailOutbox.id,id),eq(emailOutbox.status,'SENDING'),eq(emailOutbox.leaseToken,leaseToken),sql`${emailOutbox.leaseUntil}>now()`)).returning();
       if(row)await tx.insert(auditLogs).values({userId:row.userId,resourceId:row.id,action:'AUTH_EMAIL_DELIVERED',correlationId:row.correlationId});
       return Boolean(row);
     });
   }
-  async fail(id:string,leaseToken:string,code:'CONFIGURATION_REQUIRED'|'PROVIDER_UNAVAILABLE'|'INVALID_INPUT'){
+  async fail(id:string,leaseToken:string,code:'CONFIGURATION_REQUIRED'|'PROVIDER_UNAVAILABLE'|'INVALID_INPUT',uncertain=false){
     return this.db.transaction(async tx=>{
-      const [row]=await tx.select().from(emailOutbox).where(and(eq(emailOutbox.id,id),eq(emailOutbox.status,'SENDING'),eq(emailOutbox.leaseToken,leaseToken))).for('update');if(!row)return;
-      const terminal=row.attempt>=8||code==='INVALID_INPUT';
-      await tx.update(emailOutbox).set({status:terminal?'FAILED':'PENDING',payload:terminal?null:row.payload,leaseToken:null,leaseUntil:null,errorCode:code,completedAt:terminal?sql`now()`:null,nextAttemptAt:sql`now()+${Math.min(300,5*2**(row.attempt-1))}*interval '1 second'`}).where(eq(emailOutbox.id,id));
+      const [row]=await tx.select().from(emailOutbox).where(and(eq(emailOutbox.id,id),eq(emailOutbox.status,'SENDING'),eq(emailOutbox.leaseToken,leaseToken),sql`${emailOutbox.leaseUntil}>now()`)).for('update');if(!row)return;
+      const terminal=uncertain||row.attempt>=8||code==='INVALID_INPUT';
+      await tx.update(emailOutbox).set({status:uncertain?'RECONCILIATION':terminal?'FAILED':'PENDING',submittedAt:terminal?row.submittedAt:null,payload:terminal?null:row.payload,leaseToken:null,leaseUntil:null,errorCode:uncertain?'DELIVERY_UNCERTAIN':code,completedAt:terminal?sql`now()`:null,nextAttemptAt:sql`now()+${Math.min(300,5*2**(row.attempt-1))}*interval '1 second'`}).where(eq(emailOutbox.id,id));
+      if(uncertain)await tx.insert(auditLogs).values({userId:row.userId,resourceId:row.id,action:'AUTH_EMAIL_RECONCILIATION_REQUIRED',correlationId:row.correlationId});
     });
   }
   async cleanup(){

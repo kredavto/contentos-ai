@@ -498,6 +498,13 @@
       "when": 1792697857511,
       "tag": "0070_material_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1792699748210,
+      "tag": "0071_sticky_brood",
+      "breakpoints": true
     }
   ]
 }
