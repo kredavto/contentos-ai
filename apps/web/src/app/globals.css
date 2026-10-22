@@ -57,3 +57,5 @@
 .funnel-studio { min-width: 0; overflow-wrap: anywhere; }
 
 .post-studio{min-width:0;overflow-wrap:anywhere}
+
+.organization-search{margin-bottom:24px;min-width:0}.search-results{list-style:none;padding:0;display:grid;gap:16px}.search-results li{border-bottom:1px solid var(--border);padding-bottom:16px;overflow-wrap:anywhere}.search-results h3{margin:6px 0}.search-results p{white-space:pre-wrap}.organization-search input,.organization-search select{max-width:100%;min-width:0}

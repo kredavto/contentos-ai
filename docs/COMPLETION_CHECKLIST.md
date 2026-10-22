@@ -145,7 +145,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 127 | UX LONG JOB | See TECH_SPEC.md §127; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 128 | OPTIMISTIC UI | See TECH_SPEC.md §128; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 129 | REALTIME | See TECH_SPEC.md §129; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 130 | SEARCH | See TECH_SPEC.md §130; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 130 | SEARCH | Implemented 2026-10-22: tenant-scoped brand/idea/current-script/content/publication search with literal matching, keyset pages and dashboard UI; 570 tests and Chrome search scenario passed. Large-tenant performance, direct entity selection and broader UX review remain — docs/search.md. | PARTIAL |
 | 131 | OBSERVABILITY | See TECH_SPEC.md §131; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 132 | STRUCTURED LOGGING | See TECH_SPEC.md §132; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 133 | HEALTH ENDPOINTS | See TECH_SPEC.md §133; current implementation evidence must be inspected | AUDIT_REQUIRED |

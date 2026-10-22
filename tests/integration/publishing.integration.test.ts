@@ -1,6 +1,6 @@
 import {randomUUID,randomBytes} from 'node:crypto';
 import {describe,it,expect,beforeAll,afterAll} from 'vitest';
-import {NotificationRepository,createDatabase,AnalyticsRepository,PublishingRepository,CalendarRepository,SocialRepository} from '../../packages/db/src/index';
+import {SearchRepository,NotificationRepository,createDatabase,AnalyticsRepository,PublishingRepository,CalendarRepository,SocialRepository} from '../../packages/db/src/index';
 import {PublishingProcessor} from '../../packages/core/src/publishing';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {SocialService} from '../../packages/core/src/social';
@@ -33,7 +33,7 @@ describe.skipIf(!url)('durable approval publishing',()=>{
     await expect(calendar.update(owner,tenantId,brandId,entry.id,calendarUpdateSchema.parse({...fields,revision:0}),[],correlation)).rejects.toThrow('CONFLICT');await expect(calendar.cancel(owner,tenantId,brandId,entry.id,0,correlation)).rejects.toThrow('CONFLICT');
     await expect(database.client`update publishing_jobs set snapshot='{}'::jsonb where id=${job.id}`).rejects.toThrow('immutable');
     now=new Date('2030-01-01T00:11:00Z');expect((await repo.due()).some(row=>row.id===job.id)).toBe(true);await Promise.all([processor.run(tenantId,job.id),processor.run(tenantId,job.id)]);await processor.run(tenantId,job.id);expect(sends).toBe(1);expect((await state(job.id)).status).toBe('PUBLISHED');const notifications=new NotificationRepository(database.db);await notifications.projectBatch(tenantId);expect((await notifications.list(owner,tenantId)).items.some(item=>item.type==='PUBLICATION_SUCCESS')).toBe(true);
-    expect(await database.client`select id from publications where job_id=${job.id}`).toHaveLength(1);expect(JSON.stringify(await repo.list(editor,tenantId,brandId))).not.toContain('credential');
+    expect(await database.client`select id from publications where job_id=${job.id}`).toHaveLength(1);const search=await new SearchRepository(database.db).search(editor,tenantId,{q:'telegram',kind:'PUBLICATION'});expect(search.items.some(item=>item.id)).toBe(true);expect(JSON.stringify(search)).not.toContain('credential');expect(JSON.stringify(await repo.list(editor,tenantId,brandId))).not.toContain('credential');
   });
   it('cancels before submission and permits a newly reviewed calendar revision',async()=>{
     const {entry,fields,input}=await planned(),job=await repo.approve(owner,tenantId,brandId,input,'telegram',[],correlation);await repo.cancel(owner,tenantId,brandId,job.id);await repo.cancel(owner,tenantId,brandId,job.id);

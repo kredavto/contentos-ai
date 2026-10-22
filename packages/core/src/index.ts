@@ -51,3 +51,5 @@ export * from './youtube-publications';
 export * from './publication-analytics';
 
 export * from './youtube-resolutions';
+
+export * from './search';

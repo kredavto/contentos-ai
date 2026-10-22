@@ -58,3 +58,5 @@ export * from './repositories/youtube-uploads';
 export * from './repositories/publication-analytics';
 
 export * from './repositories/youtube-resolutions';
+
+export * from './repositories/search';

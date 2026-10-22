@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, Building2, Plus, FolderOpen, CheckCircle2, LayoutDashboard, Lightbulb, CalendarDays, Clapperboard, BarChart3, Settings2, LogOut, Sparkles, ArrowRight, LoaderCircle } from 'lucide-react';
+import { OrganizationSearch } from './organization-search';
 import { NotificationLink } from './notification-center';
 import { api } from '../lib/api-client';
 type Organization = { id: string; name: string; role: string };
@@ -64,6 +65,7 @@ export function Workspace({ name, verified, initialOrganization, platformOperato
       {loading ? <div className="panel loading" role="status"><LoaderCircle className="spin" />Загружаем рабочее пространство…</div> : null}
       {!loading && (!organizations.length || creatingOrganization) ? <section className="panel setup-panel"><div className="icon-tile"><Building2 /></div><h2>Создайте организацию</h2><p className="muted">В ней будут ваши бренды, участники команды и настройки доступа.</p><form onSubmit={event => create(event, 'organization')} className="inline-form"><label>Название организации<input name="name" required maxLength={120} placeholder="Например, Северная студия" /></label><button className="button primary" disabled={pending}>Создать организацию<ArrowRight size={17} /></button></form></section> : null}
       {tenant && overview ? <>
+        <OrganizationSearch key={tenant} tenantId={tenant}/>
         <section className="hero-panel"><div><span className="badge dark">BRAND BRAIN</span><h2>Превратите знания о бизнесе<br />в основу сильного контента.</h2><p>Продукты, аудитория, позиционирование и голос бренда —<br />в одном структурированном пространстве.</p><button className="button light" onClick={() => setCreatingBrand(true)} disabled={!['OWNER', 'ADMIN', 'MANAGER'].includes(overview.role)}><Plus size={18} />Добавить бренд</button></div><div className="brain-graphic" aria-hidden="true"><div className="brain-ring ring-one" /><div className="brain-ring ring-two" /><div className="brain-core"><Sparkles size={44} /></div><span className="brain-node node-one">Аудитория</span><span className="brain-node node-two">Голос бренда</span><span className="brain-node node-three">Продукты</span></div></section>
         {creatingBrand ? <section className="panel"><h2>Новый бренд</h2><form className="inline-form" onSubmit={event => create(event, 'brand')}><label>Название бренда<input name="name" required maxLength={120} placeholder="Название вашего бренда" /></label><button className="button primary" disabled={pending}>Перейти к настройке<ArrowRight size={17} /></button></form></section> : null}
         <div className="section-heading"><h2>Ваши бренды <span className="count">{overview.brands.length}</span></h2><span className="muted">Контекст под вашим контролем</span></div>
