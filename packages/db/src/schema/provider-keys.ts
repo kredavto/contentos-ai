@@ -6,7 +6,7 @@ export const providerKeys=pgTable('provider_keys',{
  id:uuid('id').primaryKey(),tenantId:uuid('tenant_id').notNull(),brandId:uuid('brand_id').notNull(),provider:text('provider').$type<ProviderKeyProvider>().notNull(),
  credential:jsonb('credential').$type<EncryptedCredential>(),maskedKey:text('masked_key').notNull(),status:text('status').$type<'ACTIVE'|'REVOKED'>().notNull(),revision:integer('revision').notNull().default(0),
  createdBy:uuid('created_by').notNull().references(()=>users.id),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),updatedAt:timestamp('updated_at',{withTimezone:true}).notNull().defaultNow(),
-},t=>[index('provider_key_creator_history_idx').on(t.createdBy,t.createdAt,t.id),unique('provider_key_scope_uq').on(t.tenantId,t.brandId,t.provider),unique('provider_key_tenant_id_uq').on(t.tenantId,t.id),
+},t=>[unique('provider_key_brand_identity_uq').on(t.tenantId,t.brandId,t.id,t.provider),index('provider_key_creator_history_idx').on(t.createdBy,t.createdAt,t.id),unique('provider_key_scope_uq').on(t.tenantId,t.brandId,t.provider),unique('provider_key_tenant_id_uq').on(t.tenantId,t.id),
  foreignKey({columns:[t.tenantId,t.brandId],foreignColumns:[brands.tenantId,brands.id]}),
  check('provider_key_provider_valid',sql`${t.provider} in ('heygen','openai')`),
  check('provider_key_status_valid',sql`${t.status} in ('ACTIVE','REVOKED') and (${t.status}='ACTIVE')=(${t.credential} is not null)`),

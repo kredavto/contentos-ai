@@ -28,3 +28,5 @@ export function voiceCatalogFromEnvironment(env:{AVATAR_PROVIDER:string;HEYGEN_A
 
 /** Creates a request-scoped public catalog adapter; never caches a tenant credential. */
 export function voiceCatalogFromKey(apiKey:string):VoiceCatalogProvider {return new HeyGenVideoProvider(new HeyGenClient(apiKey));}
+
+export function avatarFromKey(apiKey:string):AvatarProvider{return new HeyGenAvatarProvider(new HeyGenClient(apiKey));}

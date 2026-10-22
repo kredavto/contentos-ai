@@ -101,6 +101,8 @@ export class VideoRepository {
       if(script.currentVersion!==input.scriptVersion||script.approvedVersion!==input.scriptVersion)throw new DomainError('CONFLICT',409);
       const [version]=await tx.select().from(scriptVersions).where(and(eq(scriptVersions.tenantId,tenantId),eq(scriptVersions.scriptId,script.id),eq(scriptVersions.version,input.scriptVersion)));
       const [owned]=await tx.select({look:avatarLooks,avatar:avatars,input:jobs.input}).from(avatarLooks).innerJoin(avatars,and(eq(avatars.tenantId,avatarLooks.tenantId),eq(avatars.id,avatarLooks.avatarId))).innerJoin(jobs,and(eq(jobs.tenantId,avatarLooks.tenantId),eq(jobs.id,avatarLooks.jobId))).where(and(eq(avatarLooks.tenantId,tenantId),eq(avatarLooks.id,input.lookId),eq(avatars.brandId,brandId),eq(avatars.status,'ACTIVE'),eq(avatarLooks.status,'READY')));
+      // BYOK avatar/video account binding must be implemented before using these private assets.
+      if(owned?.avatar.providerKeyId)throw new DomainError('CONFIGURATION_REQUIRED',503);
       if(!version||!owned?.look.reference||!owned.avatar.voiceId)throw new DomainError('INVALID_INPUT');
       const [voice]=await tx.select().from(voiceProfiles).where(and(eq(voiceProfiles.tenantId,tenantId),eq(voiceProfiles.brandId,brandId),eq(voiceProfiles.id,owned.avatar.voiceId)));
       if(!voice||voice.provider!==provider||owned.avatar.provider!==provider||voice.reference.metadata.public!==true)throw new DomainError('INVALID_INPUT');
