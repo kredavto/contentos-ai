@@ -1,8 +1,9 @@
 import {randomUUID} from 'node:crypto';
 import {and,eq,desc} from 'drizzle-orm';
-import {DomainError,type VoiceCatalogProvider} from '@contentos/types';
+import {DomainError,type VoiceCatalogProvider,type ProviderKeyReference} from '@contentos/types';
 import type {Database} from '../index';
 import {voiceProfiles,avatars,brands,auditLogs} from '../schema';
+import {resolveProviderKey} from './provider-keys';
 import {AuthRepository} from './auth';
 import {assertMembership,lockTenant} from './ledger';
 type CatalogVoice=Awaited<ReturnType<VoiceCatalogProvider['listPublicVoicePage']>>['voices'][number];
@@ -16,9 +17,10 @@ export class VoiceRepository {
     await this.authorize(userId,tenantId,brandId);
     return this.db.select({id:voiceProfiles.id,name:voiceProfiles.name,language:voiceProfiles.language,previewUrl:voiceProfiles.previewUrl,provider:voiceProfiles.provider}).from(voiceProfiles).where(and(eq(voiceProfiles.tenantId,tenantId),eq(voiceProfiles.brandId,brandId))).orderBy(desc(voiceProfiles.refreshedAt)).limit(500);
   }
-  async savePage(userId:string,tenantId:string,brandId:string,provider:string,voices:CatalogVoice[]){
+  async savePage(userId:string,tenantId:string,brandId:string,provider:string,voices:CatalogVoice[],connection?:ProviderKeyReference){
     return this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
+      if(connection){const key=await resolveProviderKey(tx,userId,tenantId,brandId,connection);if(key.provider!==provider)throw new DomainError('INVALID_INPUT');}
       for(const voice of voices){
         if(voice.reference.provider!==provider||voice.reference.metadata.public!==true)throw new DomainError('PROVIDER_REJECTED',502);
         const id=randomUUID();

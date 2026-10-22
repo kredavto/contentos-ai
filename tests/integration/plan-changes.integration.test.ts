@@ -25,6 +25,11 @@ describe.skipIf(!url)('confirmed monthly plan changes',()=>{
     await settle(await buy(code));const overview=await billing.overview(owner,tenantId);
     return {tenantId,owner,buy,settle,term:overview.current!};
   }
+  async function claimReady(tenantId:string,id:string){
+    // This suite checks plan reconciliation, not scheduling. PostgreSQL and Node clocks can differ slightly.
+    await database.client`update payment_tasks set next_attempt_at=now()-interval '1 minute' where tenant_id=${tenantId} and id=${id} and status='QUEUED'`;
+    const task=await tasks.claim(tenantId,id);expect(task).not.toBeNull();return task!;
+  }
   it.each([['EXPERT','UPGRADE'],['START','DOWNGRADE']] as const)('confirms %s for the next paid month without replacing the current term',async(target,direction)=>{
     const f=await fixture(),preview=await billing.purchasePreview(f.owner,f.tenantId,quotes[target]!);expect(preview.direction).toBe(direction);expect(preview.expectedTermId).toBe(f.term.id);expect(preview.effectiveAt).toEqual(f.term.endsAt);
     await expect(f.buy(target)).rejects.toThrow('CONFLICT');
@@ -35,11 +40,11 @@ describe.skipIf(!url)('confirmed monthly plan changes',()=>{
   it('rejects a stale preview and cancels unsent work after another payment extends the period',async()=>{
     const f=await fixture(),queued=await f.buy('EXPERT',f.term.id);await f.settle(await f.buy('CREATOR'));
     await expect(f.buy('START',f.term.id)).rejects.toThrow('CONFLICT');
-    const task=await tasks.claim(f.tenantId,queued.id);expect(await tasks.prepare(f.tenantId,queued.id,task!.leaseToken!,merchant)).toBeNull();
+    const task=await claimReady(f.tenantId,queued.id);expect(await tasks.prepare(f.tenantId,queued.id,task!.leaseToken!,merchant)).toBeNull();
     expect((await billing.orderStatus(f.owner,f.tenantId,queued.id)).status).toBe('CANCELED');
   });
   it('keeps an already sent payment reconcilable and appends its paid month once',async()=>{
-    const f=await fixture(),queued=await f.buy('EXPERT',f.term.id),task=await tasks.claim(f.tenantId,queued.id);await tasks.prepare(f.tenantId,queued.id,task!.leaseToken!,merchant);
+    const f=await fixture(),queued=await f.buy('EXPERT',f.term.id),task=await claimReady(f.tenantId,queued.id);await tasks.prepare(f.tenantId,queued.id,task!.leaseToken!,merchant);
     await f.settle(await f.buy('CREATOR'));await f.settle(queued);
     const after=await billing.overview(f.owner,f.tenantId);expect(after.upcoming).toHaveLength(2);expect(after.upcoming[1]!.planCode).toBe('EXPERT');expect(after.upcoming[1]!.startsAt).toEqual(after.upcoming[0]!.endsAt);
   });

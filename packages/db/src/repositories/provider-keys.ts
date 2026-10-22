@@ -1,5 +1,5 @@
 import {and,eq,inArray,sql} from 'drizzle-orm';
-import {DomainError,type EncryptedCredential,type ProviderKeyProvider} from '@contentos/types';
+import {DomainError,type EncryptedCredential,type ProviderKeyProvider,type ProviderKeyReference} from '@contentos/types';
 import type {Database} from '../index';
 import {providerKeys,brands,subscriptionTerms,planVersions,plans,auditLogs} from '../schema';
 import {assertMembership,lockTenant,type Transaction} from './ledger';
@@ -11,6 +11,12 @@ async function entitlement(tx:Transaction,tenantId:string){
 async function authorize(tx:Transaction,userId:string,tenantId:string,brandId:string){
  await assertMembership(tx,userId,tenantId,'billing');
  const [brand]=await tx.select({id:brands.id}).from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId)));if(!brand)throw new DomainError('NOT_FOUND',404);
+}
+/** Called inside the consumer transaction, under its tenant lock, before persisting remote results. */
+export async function resolveProviderKey(tx:Transaction,userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference){
+ await assertMembership(tx,userId,tenantId,'generate');await entitlement(tx,tenantId);
+ const [row]=await tx.select().from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.id,reference.id),eq(providerKeys.revision,reference.revision),eq(providerKeys.status,'ACTIVE')));
+ if(!row?.credential)throw new DomainError('CONFIGURATION_REQUIRED',503);return row;
 }
 /** Metadata is safe for a future management API; credentials are worker-only. */
 export class ProviderKeyRepository {
@@ -36,8 +42,6 @@ export class ProviderKeyRepository {
  });}
  /** Internal job execution rechecks entitlement and the exact connection revision. Never expose through HTTP. */
  async resolve(userId:string,tenantId:string,brandId:string,id:string,revision:number){return this.db.transaction(async tx=>{
-  await assertMembership(tx,userId,tenantId,'generate');await entitlement(tx,tenantId);
-  const [row]=await tx.select().from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.id,id),eq(providerKeys.revision,revision),eq(providerKeys.status,'ACTIVE')));
-  if(!row?.credential)throw new DomainError('CONFIGURATION_REQUIRED',503);return row;
+  return resolveProviderKey(tx,userId,tenantId,brandId,{id,revision});
  });}
 }

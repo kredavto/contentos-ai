@@ -1,6 +1,7 @@
 import {randomUUID,randomBytes} from 'node:crypto';
 import {beforeAll,describe,it,expect} from 'vitest';
-import {BillingRepository,ProviderKeyRepository} from '../../packages/db/src/index';
+import {BillingRepository,ProviderKeyRepository,VoiceRepository} from '../../packages/db/src/index';
+import {VoiceService} from '../../packages/core/src/voices';
 import {ProviderKeyService} from '../../packages/core/src/provider-keys';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {isolatedTestDatabase} from '../helpers/isolated-database';
@@ -46,6 +47,35 @@ describe.skipIf(!url)('tenant/brand BYOK storage foundation',()=>{
   await expect(service.revoke(f.user,f.tenant,f.brand,first.id,{revision:first.revision},randomUUID())).rejects.toThrow('CONFLICT');
   const revoked=await service.revoke(f.user,f.tenant,f.brand,next.id,{revision:next.revision},randomUUID());await expect(repository.resolve(f.user,f.tenant,f.brand,next.id,revoked.revision)).rejects.toThrow('CONFIGURATION_REQUIRED');
   await expect(database.client`update provider_keys set provider='openai',revision=revision+1 where id=${next.id}`).rejects.toThrow('immutable');
+ });
+ it('uses only the explicitly bound brand key for public catalog requests',async()=>{
+  const f=await fixture(),apiKey=secret(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey,revision:null},randomUUID());
+  let calls=0;
+  const voices=new VoiceService(new VoiceRepository(database.db),null,{repository,vault,catalog:key=>{expect(key).toBe(apiKey);return {listPublicVoicePage:async(cursor,context)=>{calls++;expect(cursor).toBe('page-2');expect(context.tenantId).toBe(f.tenant);return {voices:[{name:'Public fixture',language:'Russian',previewUrl:null,reference:{provider:'heygen',internalId:context.internalId,externalId:'public-fixture',metadata:{public:true}}}],nextCursor:null};}};}});
+  expect(await voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:saved.revision},cursor:'page-2'},randomUUID())).toEqual({nextCursor:null});
+  expect(calls).toBe(1);const rows=await new VoiceRepository(database.db).list(f.user,f.tenant,f.brand);expect(rows).toHaveLength(1);expect(JSON.stringify(rows)).not.toContain(apiKey);
+  await service.revoke(f.user,f.tenant,f.brand,saved.id,{revision:saved.revision},randomUUID());
+  await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:saved.revision}},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');expect(calls).toBe(1);
+ });
+ it.each(['revoke','replace','role'] as const)('discards a public catalog response after concurrent %s',async(change)=>{
+  const f=await fixture(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:null},randomUUID());
+  const voices=new VoiceService(new VoiceRepository(database.db),null,{repository,vault,catalog:()=>({listPublicVoicePage:async(_cursor,context)=>{
+   if(change==='revoke')await service.revoke(f.user,f.tenant,f.brand,saved.id,{revision:saved.revision},randomUUID());
+   if(change==='replace')await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:saved.revision},randomUUID());
+   if(change==='role')await database.client`update organization_members set role='VIEWER' where tenant_id=${f.tenant} and user_id=${f.editor}`;
+   return {voices:[{name:'Discard me',language:null,previewUrl:null,reference:{provider:'heygen',internalId:context.internalId,externalId:'public-fixture',metadata:{public:true}}}],nextCursor:null};
+  }})});
+  await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:saved.revision}},randomUUID())).rejects.toThrow(change==='role'?'NOT_AUTHORIZED':'CONFIGURATION_REQUIRED');
+  expect(await database.client`select id from voice_profiles where tenant_id=${f.tenant}`).toHaveLength(0);
+ });
+ it('does not fall back to a shared catalog for foreign, stale or incompatible BYOK references',async()=>{
+  const f=await fixture(),other=await fixture(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'openai',apiKey:secret(),revision:null},randomUUID());let calls=0;
+  const provider={listPublicVoicePage:async()=>{calls++;return {voices:[],nextCursor:null};}};
+  const voices=new VoiceService(new VoiceRepository(database.db),{name:'heygen',provider},{repository,vault,catalog:()=>provider});
+  await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:0}},randomUUID())).rejects.toThrow('INVALID_INPUT');
+  await expect(voices.refresh(other.user,other.tenant,other.brand,{connection:{id:saved.id,revision:0}},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
+  await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:1}},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
+  await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:0,apiKey:secret()}},randomUUID())).rejects.toThrow();expect(calls).toBe(0);
  });
  it('enforces owner, tenant, brand and verified-account boundaries and missing encryption configuration',async()=>{
   const f=await fixture(),other=await fixture(),input={provider:'heygen',apiKey:secret(),revision:null};
