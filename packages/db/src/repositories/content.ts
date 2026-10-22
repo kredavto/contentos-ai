@@ -119,6 +119,12 @@ export class ContentRepository {
   }
   async editScript(userId:string,tenantId:string,brandId:string,scriptId:string,revision:number,content:ScriptOutput | null,correlationId:string) {
     return this.db.transaction(async tx=> {
+      return editScriptInTransaction(tx,userId,tenantId,brandId,scriptId,revision,content,correlationId);
+    });
+  }
+}
+
+export async function editScriptInTransaction(tx:Transaction,userId:string,tenantId:string,brandId:string,scriptId:string,revision:number,content:ScriptOutput|null,correlationId:string){
       await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,content ? 'generate' : 'approve');
       const [script] = await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId),eq(scripts.id,scriptId))).for('update');
       if (!script) throw new DomainError('NOT_FOUND',404);
@@ -130,6 +136,4 @@ export class ContentRepository {
       await tx.update(contentItems).set({status:content?'SCRIPT':'APPROVED_SCRIPT',revision:sql`${contentItems.revision}+1`}).where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.id,script.contentItemId)));
       await tx.insert(auditLogs).values({tenantId,userId,action:content?'SCRIPT_EDITED':'SCRIPT_APPROVED',resourceId:scriptId,correlationId,metadata:{version:content?revision+1:revision}});
       return {version:content?revision+1:revision};
-    });
-  }
 }

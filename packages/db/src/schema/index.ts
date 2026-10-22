@@ -58,3 +58,5 @@ export * from './publication-analytics';
 export * from './youtube-resolutions';
 
 export * from './youtube-resolution-tasks';
+
+export * from './approvals';

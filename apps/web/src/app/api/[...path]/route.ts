@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -54,6 +54,12 @@ async function dispatch(request: Request, context: RouteContext) {
     if(request.method==='POST'&&key==='team/accept')return ok(await team.accept(user.userId,await readBody(request),correlationId));
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
+      if(path[2]==='approvals'){
+        if(path.length===3&&request.method==='GET')return ok(await approvals.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
+        if(path[3]==='reviewers'&&path.length===4&&request.method==='GET')return ok(await approvals.reviewers(user.userId,tenantId));
+        if(path[3]&&path.length===4&&request.method==='POST')return ok(await approvals.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
+      }
+      if(path[2]==='brands'&&path[3]&&path[4]==='approval-requests'&&path.length===5&&request.method==='POST')return ok(await approvals.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
       if(path[2]==='search'&&path.length===3&&request.method==='GET'){await auth.throttle('search',user.userId);return ok(await search.search(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));}
       if (path[2] === 'agency') {
         if (path.length === 3 && request.method === 'GET') return ok(await agency.overview(user.userId, tenantId));

@@ -60,3 +60,5 @@ export * from './repositories/publication-analytics';
 export * from './repositories/youtube-resolutions';
 
 export * from './repositories/search';
+
+export * from './repositories/approvals';

@@ -1,0 +1,11 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import Link from 'next/link';
+import {api} from '../lib/api-client';
+export function ScriptApprovalRequest({tenantId,brandId,scriptId,version}:{tenantId:string;brandId:string;scriptId:string;version:number}){
+  const [reviewers,setReviewers]=useState<Array<{id:string;name:string;role:string}>>([]),[reviewer,setReviewer]=useState(''),[comment,setComment]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false),[sent,setSent]=useState(false);
+  const intent=useRef<{payload:string;key:string}|null>(null);
+  useEffect(()=>{const controller=new AbortController();api<typeof reviewers>(`organizations/${tenantId}/approvals/reviewers`,'GET',undefined,controller.signal).then(setReviewers).catch(failure=>{if(!controller.signal.aborted)setError(failure.message);});return()=>controller.abort();},[tenantId]);
+  async function request(){setPending(true);setError('');const data={scriptId,version,requestedFrom:reviewer,comment};const payload=JSON.stringify(data);if(intent.current?.payload!==payload)intent.current={payload,key:crypto.randomUUID()};try{await api(`organizations/${tenantId}/brands/${brandId}/approval-requests`,'POST',{...data,idempotencyKey:intent.current.key});setSent(true);}catch(failure){setError(failure instanceof Error?failure.message:'Не удалось отправить запрос');}finally{setPending(false);}}
+  return <section aria-label="Запрос согласования сценария" className="panel stack"><h3>Запросить согласование версии {version}</h3>{sent?<p role="status">Запрос сохранён.</p>:<><label htmlFor={`reviewer-${scriptId}`}>Согласующий</label><select id={`reviewer-${scriptId}`} value={reviewer} onChange={event=>setReviewer(event.target.value)}><option value="">Выберите участника</option>{reviewers.map(item=><option key={item.id} value={item.id}>{item.name} · {item.role}</option>)}</select><label>Комментарий согласующему<textarea maxLength={2000} value={comment} onChange={event=>setComment(event.target.value)}/></label><button className="button secondary" disabled={pending||!reviewer} onClick={()=>void request()}>Отправить на согласование</button></>}{error?<p role="alert">{error}</p>:null}<Link href={`/approvals?organization=${tenantId}`}>Открыть согласования</Link></section>;
+}
