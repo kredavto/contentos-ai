@@ -66,10 +66,7 @@ export class ImageRepository{
     await assertMembership(tx,userId,tenantId);const [row]=await tx.select().from(images).where(and(where(tenantId,id),eq(images.brandId,brandId),eq(images.status,'READY')));
     if(!row)throw new DomainError('NOT_FOUND',404);if(approved&&!row.approvedAt)throw new DomainError('CONFLICT',409);return row;
   });}
-  async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId?:string){await this.db.transaction(async tx=>{
-    await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'approve');const [row]=await tx.select().from(images).where(and(where(tenantId,id),eq(images.brandId,brandId),eq(images.status,'READY')));if(!row)throw new DomainError('NOT_FOUND',404);if(row.approvedAt)return;
-    await tx.update(images).set({approvedAt:new Date(),approvedBy:userId}).where(where(tenantId,id));await audit(tx,row,'IMAGE_APPROVED',userId,correlationId);
-  });}
+  async approve(userId:string,tenantId:string,brandId:string,id:string,correlationId?:string){await this.db.transaction(tx=>approveImageInTransaction(tx,userId,tenantId,brandId,id,correlationId));}
   async delete(userId:string,tenantId:string,brandId:string,id:string,correlationId?:string){return this.db.transaction(async tx=>{
     await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');const [row]=await tx.select().from(images).where(and(where(tenantId,id),eq(images.brandId,brandId)));if(!row)throw new DomainError('NOT_FOUND',404);
     if(['DELETE_PENDING','DELETED'].includes(row.status))return {status:row.status};
@@ -86,4 +83,9 @@ export class ImageRepository{
     await tx.update(images).set({leaseToken:null,leaseExpiresAt:null,deleteAfter:success?(Date.now()-finished.getTime()<86_400_000?new Date(Date.now()+3600_000):null):new Date(Date.now()+Math.min(3600_000,5000*2**Math.min(row.deleteAttempts,10))),...(success&&deleted?{status:'DELETED',input:null,name:'[deleted]',reference:null,sha256:null,approvedAt:null,approvedBy:null,deletedAt:new Date()}:{} )}).where(where(row.tenantId,row.id));
     if(success&&deleted)await audit(tx,row,'IMAGE_DELETED');
   });}
+}
+
+export async function approveImageInTransaction(tx:Transaction,userId:string,tenantId:string,brandId:string,id:string,correlationId?:string){
+    await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'approve');const [row]=await tx.select().from(images).where(and(where(tenantId,id),eq(images.brandId,brandId),eq(images.status,'READY')));if(!row)throw new DomainError('NOT_FOUND',404);if(row.approvedAt)return;
+    await tx.update(images).set({approvedAt:new Date(),approvedBy:userId}).where(where(tenantId,id));await audit(tx,row,'IMAGE_APPROVED',userId,correlationId);
 }

@@ -28,7 +28,13 @@ test('image queue, private preview, approval and deletion work with demo storage
   await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
   expect((await page.request.post(`${base}/${id}/approve`,{headers:{Origin:baseURL!}})).status()).toBe(403);
   await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
-  await card.getByRole('button',{name:'Одобрить изображение',exact:true}).click();await expect(card.getByText(/Одобрено/)).toBeVisible();
+  await card.getByRole('button',{name:'Назначить согласующего',exact:true}).click();
+  const approval=card.getByRole('region',{name:'Запрос согласования изображения'});await approval.getByLabel('Согласующий',{exact:true}).selectOption(user);await approval.getByRole('button',{name:'Отправить на согласование',exact:true}).click();await expect(approval.getByRole('status')).toHaveText('Запрос сохранён.');
+  await page.goto(`/approvals?organization=${tenant}`);await page.getByText('Изображение на согласовании',{exact:true}).click();await page.getByRole('button',{name:'Посмотреть файл на согласовании',exact:true}).click();
+  await expect.poll(()=>page.getByRole('img',{name:'Изображение на согласовании'}).evaluate((image:HTMLImageElement)=>image.naturalWidth)).toBe(1024);
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('image-approval-mobile.png'),fullPage:true});
+  await page.getByRole('button',{name:'Одобрить версию',exact:true}).click();await expect(page.getByText('Одобрен',{exact:true})).toBeVisible();
+  await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=images`);await expect(card.getByText(/Одобрено/)).toBeVisible();
   const download=await page.request.get(`${base}/${id}/download`);const signed=(await download.json()).data.url;const file=await page.request.get(signed);const metadata=await sharp(await file.body()).metadata();expect(metadata.format).toBe('jpeg');expect(metadata.width).toBe(1024);expect(metadata.height).toBe(1536);
   const balance=(await ledger.overview(user,tenant)).balances.AI_CREDITS;expect(balance.reserved).toBe(0);
   const rows=await database.client`select count(*)::int as n from usage_ledger where tenant_id=${tenant} and type='CAPTURE' and reservation_id=${row!.reservation_id}`;expect(rows[0]?.n).toBe(1);

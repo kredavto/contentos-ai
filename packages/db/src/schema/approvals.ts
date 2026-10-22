@@ -1,3 +1,4 @@
+import {generatedImages} from './images';
 import {sql} from 'drizzle-orm';
 import {pgTable,uuid,text,integer,timestamp,foreignKey,unique,uniqueIndex,index,check} from 'drizzle-orm/pg-core';
 import {users,brands} from './identity';
@@ -6,7 +7,7 @@ import {posts,postVersions} from './posts';
 import {carousels,carouselVersions} from './carousels';
 export const approvalRequests=pgTable('approval_requests',{
   id:uuid('id').primaryKey().defaultRandom(),tenantId:uuid('tenant_id').notNull(),brandId:uuid('brand_id').notNull(),
-  entityType:text('entity_type').notNull().default('SCRIPT'),scriptId:uuid('script_id'),postId:uuid('post_id'),carouselId:uuid('carousel_id'),lifecycleRevision:integer('lifecycle_revision'),version:integer('version').notNull(),
+  entityType:text('entity_type').notNull().default('SCRIPT'),scriptId:uuid('script_id'),postId:uuid('post_id'),carouselId:uuid('carousel_id'),imageId:uuid('image_id'),mediaHash:text('media_hash'),lifecycleRevision:integer('lifecycle_revision'),version:integer('version').notNull(),
   requestedBy:uuid('requested_by').notNull().references(()=>users.id),requestedFrom:uuid('requested_from').notNull().references(()=>users.id),
   requestComment:text('request_comment').notNull(),idempotencyKey:uuid('idempotency_key').notNull(),inputHash:text('input_hash').notNull(),
   status:text('status',{enum:['PENDING','APPROVED','REJECTED','CHANGES_REQUESTED','CANCELLED']}).notNull().default('PENDING'),
@@ -18,7 +19,9 @@ export const approvalRequests=pgTable('approval_requests',{
   foreignKey({columns:[t.postId,t.version],foreignColumns:[postVersions.postId,postVersions.version]}),
   foreignKey({columns:[t.tenantId,t.carouselId],foreignColumns:[carousels.tenantId,carousels.id]}),
   foreignKey({columns:[t.carouselId,t.version],foreignColumns:[carouselVersions.carouselId,carouselVersions.version]}),
-  check('approval_target_valid',sql`((${t.entityType}='SCRIPT' and ${t.scriptId} is not null and ${t.postId} is null and ${t.carouselId} is null and ${t.lifecycleRevision} is null) or (${t.entityType}='POST' and ${t.scriptId} is null and ${t.postId} is not null and ${t.carouselId} is null and ${t.lifecycleRevision} is null) or (${t.entityType}='CAROUSEL' and ${t.scriptId} is null and ${t.postId} is null and ${t.carouselId} is not null and ${t.lifecycleRevision} is not null and ${t.lifecycleRevision}>=0))`),
+  check('approval_target_valid',sql`((((${t.entityType}='SCRIPT' and ${t.scriptId} is not null and ${t.postId} is null and ${t.carouselId} is null and ${t.lifecycleRevision} is null) or (${t.entityType}='POST' and ${t.scriptId} is null and ${t.postId} is not null and ${t.carouselId} is null and ${t.lifecycleRevision} is null) or (${t.entityType}='CAROUSEL' and ${t.scriptId} is null and ${t.postId} is null and ${t.carouselId} is not null and ${t.lifecycleRevision} is not null and ${t.lifecycleRevision}>=0)) and ${t.imageId} is null and ${t.mediaHash} is null) or (${t.entityType}='IMAGE' and ${t.imageId} is not null and ${t.scriptId} is null and ${t.postId} is null and ${t.carouselId} is null and ${t.lifecycleRevision} is null and ${t.version}=1 and ${t.mediaHash} is not null and ${t.mediaHash} ~ '^[a-f0-9]{64}$'))`),
+  uniqueIndex('approval_pending_image_uq').on(t.tenantId,t.imageId).where(sql`${t.status}='PENDING'`),
+  foreignKey({columns:[t.tenantId,t.imageId],foreignColumns:[generatedImages.tenantId,generatedImages.id]}),
   index('approval_tenant_created_idx').on(t.tenantId,t.createdAt,t.id),
   foreignKey({columns:[t.tenantId,t.brandId],foreignColumns:[brands.tenantId,brands.id]}),
   foreignKey({columns:[t.tenantId,t.scriptId],foreignColumns:[scripts.tenantId,scripts.id]}),

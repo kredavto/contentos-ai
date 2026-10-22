@@ -477,6 +477,13 @@
       "when": 1792650886481,
       "tag": "0067_majestic_random",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1792651592097,
+      "tag": "0068_smart_anthem",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import type {ImageService} from '@contentos/core';
+import {ImageApprovalRequest} from './script-approval-request';
 import {api} from '../lib/api-client';
 type Overview=Awaited<ReturnType<ImageService['overview']>>;
 const labels={QUEUED:'В очереди',RUNNING:'Подготовка',SUBMITTING:'Создаётся изображение',READY:'Готово',FAILED:'Ошибка — резерв возвращён',RECONCILIATION:'Результат недоступен — резерв возвращён',DELETE_PENDING:'Удаляется',DELETED:'Удалено'};
@@ -22,6 +23,7 @@ export function ImageStudio({base,canWrite,canApprove}:{base:string;canWrite:boo
       <button className="button primary" disabled={pending||!data?.configuration.ready}>Создать изображение</button>
     </form>:null}
     {!data?<p role="status">Загружаем изображения…</p>:!data.items.length?<p className="panel empty">Здесь появятся созданные изображения.</p>:data.items.map(item=><article className="panel stack" key={item.id}><h3>{item.name}</h3><span>{labels[item.status]}{item.approvedAt?' · Одобрено':''}{item.provider==='mock-image'?' · Демо':''}</span><p className="preserve-lines">{item.input?.prompt}</p>
+      {canWrite&&item.status==='READY'&&!item.approvedAt?<ImageApprovalRequest tenantId={base.split('/')[1]!} brandId={base.split('/')[3]!} imageId={item.id}/>:null}
       {item.status==='RECONCILIATION'?<p className="notice warning">Провайдер мог выполнить запрос, но сохранённого результата нет. Автоматического повтора не будет. Для нового результата создайте новую задачу.</p>:null}
       <div className="studio-actions">{item.status==='READY'?<><button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>setPreview({id:item.id,...await api<{url:string}>(`${base}/images/${item.id}/preview`)}))}>Посмотреть изображение</button>{canApprove&&!item.approvedAt?<button className="button primary" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/images/${item.id}/approve`,'POST');setNotice('Изображение одобрено.');})}>Одобрить изображение</button>:null}{item.approvedAt?<button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>{const result=await api<{url:string}>(`${base}/images/${item.id}/download`);setPreview({id:item.id,url:result.url});setNotice('Файл готов: используйте ссылку под изображением.');})}>Подготовить скачивание</button>:null}</>:null}
       {canWrite&&!['DELETE_PENDING','DELETED'].includes(item.status)?<button className="text-button" disabled={pending} onClick={()=>setDeleting(item.id)}>Удалить изображение</button>:null}</div>

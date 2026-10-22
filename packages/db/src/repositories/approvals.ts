@@ -1,8 +1,9 @@
+import {approveImageInTransaction} from './images';
 import {createHash} from 'node:crypto';
 import {and,eq,desc,or,sql,isNull,isNotNull,inArray} from 'drizzle-orm';
 import {DomainError,type ApprovalRequest,type ApprovalDecision} from '@contentos/types';
 import type {Database} from '../index';
-import {notifications,approvalRequests,organizationMembers,users,auditLogs} from '../schema';
+import {generatedImages,notifications,approvalRequests,organizationMembers,users,auditLogs} from '../schema';
 import {assertMembership,lockTenant} from './ledger';
 import {editScriptInTransaction,editPostInTransaction,editCarouselInTransaction} from './content';
 import {approvalTarget} from './approval-targets';
@@ -17,8 +18,8 @@ export class ApprovalRepository {
       await assertMembership(tx,input.requestedFrom,tenantId,'approve');
       const target=await approvalTarget(tx,tenantId,brandId,input);
       if(target.currentVersion!==input.version||target.approvedVersion===input.version||target.archived||('lifecycleRevision' in input&&input.lifecycleRevision!==target.lifecycleRevision))throw new DomainError('CONFLICT',409);
-      const identities={entityType:target.entityType,scriptId:'scriptId' in input?input.scriptId:null,postId:'postId' in input?input.postId:null,carouselId:'carouselId' in input?input.carouselId:null,lifecycleRevision:'lifecycleRevision' in input?input.lifecycleRevision:null};
-      const pendingTarget=identities.scriptId?eq(approvalRequests.scriptId,identities.scriptId):identities.postId?eq(approvalRequests.postId,identities.postId):eq(approvalRequests.carouselId,identities.carouselId!);
+      const identities={entityType:target.entityType,imageId:'imageId' in input?input.imageId:null,mediaHash:target.mediaHash,scriptId:'scriptId' in input?input.scriptId:null,postId:'postId' in input?input.postId:null,carouselId:'carouselId' in input?input.carouselId:null,lifecycleRevision:'lifecycleRevision' in input?input.lifecycleRevision:null};
+      const pendingTarget=identities.scriptId?eq(approvalRequests.scriptId,identities.scriptId):identities.postId?eq(approvalRequests.postId,identities.postId):identities.carouselId?eq(approvalRequests.carouselId,identities.carouselId):eq(approvalRequests.imageId,identities.imageId!);
       const [pending]=await tx.select().from(approvalRequests).where(and(eq(approvalRequests.tenantId,tenantId),pendingTarget,eq(approvalRequests.status,'PENDING')));
       if(pending)throw new DomainError('CONFLICT',409);
       const [row]=await tx.insert(approvalRequests).values({tenantId,brandId,...identities,version:input.version,requestedBy:userId,requestedFrom:input.requestedFrom,requestComment:input.comment,idempotencyKey:input.idempotencyKey,inputHash}).returning({id:approvalRequests.id,status:approvalRequests.status});
@@ -36,10 +37,11 @@ export class ApprovalRepository {
       if(row.status!=='PENDING'){if(row.status===input.status&&row.resolvedBy===userId&&row.comment===input.comment)return {id:row.id,status:row.status};throw new DomainError('CONFLICT',409);}
       if(input.status!=='CANCELLED'){
         const target=await approvalTarget(tx,tenantId,row.brandId,row);
-        if(target.currentVersion!==row.version||target.approvedVersion===row.version||target.archived||target.lifecycleRevision!==row.lifecycleRevision)throw new DomainError('CONFLICT',409);
+        if(target.currentVersion!==row.version||target.approvedVersion===row.version||target.archived||target.lifecycleRevision!==row.lifecycleRevision||target.mediaHash!==row.mediaHash)throw new DomainError('CONFLICT',409);
         if(input.status==='APPROVED'){
           if(target.entityType==='SCRIPT')await editScriptInTransaction(tx,userId,tenantId,row.brandId,target.id,row.version,null,correlationId);
           else if(target.entityType==='POST')await editPostInTransaction(tx,userId,tenantId,row.brandId,target.id,{revision:row.version,content:null},correlationId);
+          else if(target.entityType==='IMAGE')await approveImageInTransaction(tx,userId,tenantId,row.brandId,target.id,correlationId);
           else await editCarouselInTransaction(tx,userId,tenantId,row.brandId,target.id,{revision:row.version,lifecycleRevision:target.lifecycleRevision,content:null},correlationId);
         }
       }
@@ -54,13 +56,20 @@ export class ApprovalRepository {
       const visible=and(eq(approvalRequests.tenantId,tenantId),['OWNER','ADMIN','MANAGER'].includes(member.role)?undefined:or(eq(approvalRequests.requestedBy,userId),eq(approvalRequests.requestedFrom,userId)));
       const [before]=cursor?await tx.select({id:approvalRequests.id}).from(approvalRequests).where(and(visible,eq(approvalRequests.id,cursor))):[];
       if(cursor&&!before)throw new DomainError('NOT_FOUND',404);
-      const rows=await tx.select({id:approvalRequests.id,brandId:approvalRequests.brandId,scriptId:approvalRequests.scriptId,postId:approvalRequests.postId,carouselId:approvalRequests.carouselId,version:approvalRequests.version,requestedLifecycleRevision:approvalRequests.lifecycleRevision,requestedBy:approvalRequests.requestedBy,requestedFrom:approvalRequests.requestedFrom,requestComment:approvalRequests.requestComment,status:approvalRequests.status,comment:approvalRequests.comment,createdAt:approvalRequests.createdAt,resolvedAt:approvalRequests.resolvedAt}).from(approvalRequests)
+      const rows=await tx.select({id:approvalRequests.id,brandId:approvalRequests.brandId,scriptId:approvalRequests.scriptId,postId:approvalRequests.postId,carouselId:approvalRequests.carouselId,imageId:approvalRequests.imageId,requestedMediaHash:approvalRequests.mediaHash,version:approvalRequests.version,requestedLifecycleRevision:approvalRequests.lifecycleRevision,requestedBy:approvalRequests.requestedBy,requestedFrom:approvalRequests.requestedFrom,requestComment:approvalRequests.requestComment,status:approvalRequests.status,comment:approvalRequests.comment,createdAt:approvalRequests.createdAt,resolvedAt:approvalRequests.resolvedAt}).from(approvalRequests)
         .where(and(visible,before?sql`(${approvalRequests.createdAt},${approvalRequests.id}) < (select created_at,id from approval_requests where id=${before.id}::uuid)`:undefined)).orderBy(desc(approvalRequests.createdAt),desc(approvalRequests.id)).limit(21);
       const items=[];
-      for(const row of rows.slice(0,20)){const {id:entityId,...target}=await approvalTarget(tx,tenantId,row.brandId,row);items.push({...row,...target,entityId});}
+      for(const row of rows.slice(0,20)){const {id:entityId,mediaHash,...target}=await approvalTarget(tx,tenantId,row.brandId,row);const {requestedMediaHash,...publicRow}=row;items.push({...publicRow,...target,entityId,targetChanged:mediaHash!==requestedMediaHash});}
       return {items,nextCursor:rows.length>20?rows[19]!.id:null,userId,role:member.role};
     });
   }
+  async preview(userId:string,tenantId:string,requestId:string){return this.db.transaction(async tx=>{
+    await lockTenant(tx,tenantId);const member=await assertMembership(tx,userId,tenantId);
+    const [row]=await tx.select().from(approvalRequests).where(and(eq(approvalRequests.tenantId,tenantId),eq(approvalRequests.id,requestId),['OWNER','ADMIN','MANAGER'].includes(member.role)?undefined:or(eq(approvalRequests.requestedBy,userId),eq(approvalRequests.requestedFrom,userId))));
+    if(!row||row.entityType!=='IMAGE'||!row.imageId)throw new DomainError('NOT_FOUND',404);
+    const [image]=await tx.select({id:generatedImages.id,storageKey:generatedImages.storageKey,sha256:generatedImages.sha256}).from(generatedImages).where(and(eq(generatedImages.tenantId,tenantId),eq(generatedImages.brandId,row.brandId),eq(generatedImages.id,row.imageId),eq(generatedImages.status,'READY')));
+    if(!image||image.sha256!==row.mediaHash)throw new DomainError('CONFLICT',409);return image;
+  });}
   async reviewers(userId:string,tenantId:string){return this.db.transaction(async tx=>{
     await assertMembership(tx,userId,tenantId,'generate');
     return tx.select({id:users.id,name:users.name,role:organizationMembers.role}).from(organizationMembers).innerJoin(users,eq(users.id,organizationMembers.userId)).where(and(eq(organizationMembers.tenantId,tenantId),inArray(organizationMembers.role,['OWNER','ADMIN','MANAGER','CLIENT_APPROVER']),isNull(users.disabledAt),isNotNull(users.emailVerifiedAt))).orderBy(users.name,users.id).limit(100);
