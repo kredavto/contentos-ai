@@ -77,6 +77,27 @@ describe.skipIf(!url)('tenant/brand BYOK storage foundation',()=>{
   await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:1}},randomUUID())).rejects.toThrow('CONFIGURATION_REQUIRED');
   await expect(voices.refresh(f.editor,f.tenant,f.brand,{connection:{id:saved.id,revision:0,apiKey:secret()}},randomUUID())).rejects.toThrow();expect(calls).toBe(0);
  });
+ it('checks a key read-only, audits only a current binding and rate-limits reads',async()=>{
+  const f=await fixture(),apiKey=secret(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey,revision:null},randomUUID());let calls=0;
+  const checking=new ProviderKeyService(repository,vault,async(key,context)=>{calls++;expect(key).toBe(apiKey);expect(context.internalId).toBe(saved.id);expect(context.tenantId).toBe(f.tenant);});
+  await expect(checking.verify(f.editor,f.tenant,f.brand,saved.id,{revision:0},randomUUID())).rejects.toThrow('NOT_AUTHORIZED');expect(calls).toBe(0);
+  for(let i=0;i<10;i++)expect(await checking.verify(f.user,f.tenant,f.brand,saved.id,{revision:0},randomUUID())).toEqual({accepted:true});
+  await expect(checking.verify(f.user,f.tenant,f.brand,saved.id,{revision:0},randomUUID())).rejects.toThrow('RATE_LIMITED');expect(calls).toBe(10);
+  const audits=await database.client`select metadata from audit_logs where resource_id=${saved.id} and action='PROVIDER_KEY_CHECKED'`;expect(audits).toHaveLength(10);expect(audits.every(row=>JSON.stringify(row.metadata)==='{}')).toBe(true);expect((await service.list(f.user,f.tenant,f.brand))[0]?.revision).toBe(0);
+ });
+ it.each(['revoke','replace','role'] as const)('rejects a stale verification response after %s',async(change)=>{
+  const f=await fixture(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:null},randomUUID());
+  const checking=new ProviderKeyService(repository,vault,async()=>{
+   if(change==='revoke')await service.revoke(f.user,f.tenant,f.brand,saved.id,{revision:0},randomUUID());
+   if(change==='replace')await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:0},randomUUID());
+   if(change==='role')await database.client`update organization_members set role='EDITOR' where tenant_id=${f.tenant} and user_id=${f.user}`;
+  });
+  await expect(checking.verify(f.user,f.tenant,f.brand,saved.id,{revision:0},randomUUID())).rejects.toThrow(change==='role'?'NOT_AUTHORIZED':'CONFIGURATION_REQUIRED');expect(await database.client`select id from audit_logs where resource_id=${saved.id} and action='PROVIDER_KEY_CHECKED'`).toHaveLength(0);
+ });
+ it('does not audit provider failure as successful verification',async()=>{
+  const f=await fixture(),saved=await service.save(f.user,f.tenant,f.brand,{provider:'heygen',apiKey:secret(),revision:null},randomUUID());const checking=new ProviderKeyService(repository,vault,async()=>{throw new Error('fixture rejection');});
+  await expect(checking.verify(f.user,f.tenant,f.brand,saved.id,{revision:0},randomUUID())).rejects.toThrow('fixture rejection');expect(await database.client`select id from audit_logs where resource_id=${saved.id} and action='PROVIDER_KEY_CHECKED'`).toHaveLength(0);
+ });
  it('enforces owner, tenant, brand and verified-account boundaries and missing encryption configuration',async()=>{
   const f=await fixture(),other=await fixture(),input={provider:'heygen',apiKey:secret(),revision:null};
   await expect(service.save(f.editor,f.tenant,f.brand,input,randomUUID())).rejects.toThrow('NOT_AUTHORIZED');await expect(service.list(f.user,other.tenant,other.brand)).rejects.toThrow('NOT_FOUND');await expect(service.save(f.user,f.tenant,other.brand,input,randomUUID())).rejects.toThrow('NOT_FOUND');

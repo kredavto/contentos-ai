@@ -35,6 +35,9 @@ test('owner manages encrypted HeyGen keys with revision, role and CSRF boundarie
  const [row]=await database.client`select credential from provider_keys where id=${key.id}`;expect(row!.credential).not.toBeNull();expect(JSON.stringify(row)).not.toContain(apiKey);
  expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:input})).status()).toBe(409);
  expect((await page.request.get(`/api/organizations/${randomUUID()}/brands/${brand.id}/provider-keys`)).status()).toBe(404);
+ expect((await page.request.post(`${endpoint}/${key.id}/verify`,{data:{revision:key.revision}})).status()).toBe(403);
+ await page.route(`**/provider-keys/${key.id}/verify`,async route=>{expect(route.request().postDataJSON()).toEqual({revision:key.revision});await route.fulfill({json:{data:{accepted:true}}});});
+ await panel.getByRole('button',{name:'Проверить ключ HeyGen',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Доступ к генерации и баланс не проверялись');
  await page.route(`**/brands/${brand.id}/voices`,async route=>{if(route.request().method()!=='POST')return route.continue();expect(route.request().postDataJSON()).toEqual({connection:{id:key.id,revision:key.revision}});await route.fulfill({json:{data:{nextCursor:null}}});});
  await panel.getByRole('button',{name:'Загрузить голоса через свой ключ',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Публичные голоса загружены');
  await page.reload();await expect(field).toBeEnabled();await expect(field).toHaveValue('');

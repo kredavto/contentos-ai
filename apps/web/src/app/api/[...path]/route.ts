@@ -102,6 +102,7 @@ async function dispatch(request: Request, context: RouteContext) {
         if(path[3]&&path[4]==='provider-keys'){
           if(path.length===5&&request.method==='GET')return ok(await providerKeys.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='PUT')return ok(await providerKeys.save(user.userId,tenantId,path[3],await readBody(request),correlationId));
+          if(path[5]&&path[6]==='verify'&&path.length===7&&request.method==='POST')return ok(await providerKeys.verify(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
           if(path[5]&&path[6]==='revoke'&&path.length===7&&request.method==='POST')return ok(await providerKeys.revoke(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
         }
         if (path[3] && path[4] === 'brain' && path[5] && path.length === 6) {

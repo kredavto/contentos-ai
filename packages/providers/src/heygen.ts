@@ -101,3 +101,9 @@ export class HeyGenVideoProvider implements VideoProvider {
     return voices.filter(voice=>voice.type==='public').map(voice=>({reference:reference(context,voice.voice_id,{public:true}),name:voice.name,language:voice.language??null,previewUrl:voice.preview_audio_url??null}));
   }
 }
+
+/** Read-only authentication check. Does not assert generation permissions, account identity or balance. */
+export async function verifyHeyGenKey(apiKey:string,context:OperationContext,transport:typeof fetch=fetch):Promise<void>{
+ const result=await new HeyGenClient(apiKey,transport).request('/v3/api_keys/self','GET',z.object({data:z.object({key_id:externalId,status:z.string().min(1).max(100)})}),context);
+ if(result.data.status!=='active')throw new DomainError('CONFIGURATION_REQUIRED',503);
+}

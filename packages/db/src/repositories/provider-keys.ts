@@ -2,6 +2,7 @@ import {and,eq,inArray,sql} from 'drizzle-orm';
 import {DomainError,type EncryptedCredential,type ProviderKeyProvider,type ProviderKeyReference} from '@contentos/types';
 import type {Database} from '../index';
 import {providerKeys,brands,subscriptionTerms,planVersions,plans,auditLogs} from '../schema';
+import {AuthRepository} from './auth';
 import {assertMembership,lockTenant,type Transaction} from './ledger';
 const metadata={id:providerKeys.id,provider:providerKeys.provider,maskedKey:providerKeys.maskedKey,status:providerKeys.status,revision:providerKeys.revision,updatedAt:providerKeys.updatedAt};
 async function entitlement(tx:Transaction,tenantId:string){
@@ -21,6 +22,12 @@ export async function resolveProviderKey(tx:Transaction,userId:string,tenantId:s
 /** Metadata is safe for a future management API; credentials are worker-only. */
 export class ProviderKeyRepository {
  constructor(private readonly db:Database){}
+ async verificationInput(userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);return resolveProviderKey(tx,userId,tenantId,brandId,reference);});}
+ async allowVerification(tenantId:string){if(!await new AuthRepository(this.db).rateLimit(`provider-key-check:${tenantId}`,10,60))throw new DomainError('RATE_LIMITED',429);}
+ async completeVerification(userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference,correlationId:string){return this.db.transaction(async tx=>{
+  await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId);await resolveProviderKey(tx,userId,tenantId,brandId,reference);
+  await tx.insert(auditLogs).values({tenantId,userId,resourceId:reference.id,action:'PROVIDER_KEY_CHECKED',correlationId});
+ });}
  async list(userId:string,tenantId:string,brandId:string){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);return tx.select(metadata).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId))).orderBy(providerKeys.provider);});}
  async prepare(userId:string,tenantId:string,brandId:string,provider:ProviderKeyProvider){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);await entitlement(tx,tenantId);const [row]=await tx.select(metadata).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.provider,provider)));return row??null;});}
  async save(userId:string,tenantId:string,brandId:string,input:{id:string;provider:ProviderKeyProvider;credential:EncryptedCredential;maskedKey:string;revision:number|null},correlationId:string){
