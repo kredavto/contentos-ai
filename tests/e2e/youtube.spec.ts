@@ -1,0 +1,44 @@
+import {test,expect} from '@playwright/test';
+import {randomUUID,randomBytes,createHash} from 'node:crypto';
+import {createDatabase,BrandRepository} from '../../packages/db/src/index';
+import {BrandService} from '../../packages/core/src/brands';
+import {CredentialVault} from '../../packages/core/src/credential-vault';
+import {emptyOnboarding} from '../../packages/types/src/index';
+const url=process.env.TEST_DATABASE_URL;
+if(!url||!new URL(url).pathname.endsWith('_test'))throw new Error('Dedicated test database required');
+const database=createDatabase(url);test.afterAll(()=>database.close());
+test('YouTube configuration, isolated channel cards, local disconnect and viewer boundaries',async({page,context,baseURL},testInfo)=>{
+  const user=randomUUID(),token=randomBytes(32).toString('base64url'),correlation=randomUUID(),connection=randomUUID(),brands=new BrandService(new BrandRepository(database.db));
+  await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${user},${`${user}@example.test`},'unusable','YouTube browser fixture',now())`;
+  await database.client`insert into sessions(user_id,token_hash,expires_at) values(${user},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+  const tenant=(await brands.createOrganization(user,{name:'YouTube fixture'},correlation)).id;
+  try{
+    const workspace=(await brands.overview(user,tenant)).workspaces[0]!,brand=(await brands.createBrand(user,tenant,{workspaceId:workspace.id,name:'YouTube fixture brand'},correlation)).id;
+    await brands.saveOnboarding(user,tenant,brand,{revision:0,step:14,complete:true,data:{...emptyOnboarding('YouTube fixture brand'),niche:'Education',geography:'Online',usp:'Practice',voice:'Calm',goals:['Trust'],platforms:['YOUTUBE'],products:[{name:'Course',description:''}],audience:[{name:'Students',description:''}],pains:[{name:'Time',description:''}],ctas:[{name:'Read',description:''}]}},correlation);
+    const base=`/api/organizations/${tenant}/brands/${brand}`,address=`/brands/${brand}/content?organization=${tenant}&tab=integrations`;
+    await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
+    const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(address);
+    const panel=page.getByRole('region',{name:'Подключения YouTube'});
+    await expect(panel.getByText('YouTube ещё не настроен.',{exact:false})).toBeVisible();
+    await expect(panel.getByRole('button',{name:'Подключить YouTube через Google'})).toBeDisabled();
+    const overview=await page.request.get(`${base}/youtube`);expect(overview.status()).toBe(200);expect(overview.headers()['cache-control']).toBe('no-store');expect((await overview.json()).data.configuration.status).toBe('CONFIGURATION_REQUIRED');
+    expect((await page.request.post(`${base}/youtube`,{data:{}})).status()).toBe(403);
+    expect((await page.request.post(`${base}/youtube`,{headers:{origin:baseURL!},data:{}})).status()).toBe(503);
+    expect((await page.request.get(`/api/organizations/${tenant}/brands/${randomUUID()}/youtube`)).status()).toBe(404);
+    const callback=await page.request.get('/api/social/youtube/callback?state=invalid&code=fixture');expect(callback.status()).toBe(400);expect(callback.headers()['referrer-policy']).toBe('no-referrer');
+    const vault=new CredentialVault(JSON.stringify({fixture:Buffer.alloc(32,5).toString('base64')}),'fixture');
+    const credential=vault.encrypt('synthetic unusable credential',{tenantId:tenant,brandId:brand,connectionId:connection,provider:'youtube'});
+    await database.client`insert into social_connections(id,tenant_id,brand_id,provider,reference,name,status,credential,idempotency_key,input_hash,created_by) values(${connection},${tenant},${brand},'youtube',${JSON.stringify({provider:'youtube',internalId:connection,externalId:'UC'+'c'.repeat(22),metadata:{}})}::jsonb,'Synthetic YouTube fixture','ACTIVE',${JSON.stringify(credential)}::jsonb,${randomUUID()},'browser-fixture',${user})`;
+    await page.reload();await expect(panel.getByRole('heading',{name:'Synthetic YouTube fixture'})).toBeVisible();
+    expect(await page.locator('article').filter({has:page.getByRole('heading',{name:'Synthetic YouTube fixture'})}).count()).toBe(1);
+    expect(JSON.stringify((await (await page.request.get(`${base}/youtube`)).json()).data)).not.toContain('ciphertext');
+    await page.setViewportSize({width:390,height:844});await panel.scrollIntoViewIfNeeded();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('youtube-connections-mobile.png'),fullPage:false});
+    await panel.getByRole('button',{name:'Отключить YouTube',exact:true}).click();await panel.getByRole('button',{name:'Подтвердить отключение YouTube'}).click();
+    await expect(panel.getByText('YouTube отключён',{exact:true})).toBeVisible();expect((await database.client`select status,credential from social_connections where id=${connection}`)[0]).toMatchObject({status:'REVOKED',credential:null});
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
+    await page.reload();await expect(panel.getByRole('heading',{name:'Synthetic YouTube fixture'})).toBeVisible();await expect(panel.getByRole('button',{name:'Подключить YouTube через Google'})).toHaveCount(0);
+    expect((await page.request.post(`${base}/youtube`,{headers:{origin:baseURL!},data:{}})).status()).toBe(403);
+    expect(errors).toEqual([]);
+  }finally{await database.client`delete from sessions where user_id=${user}`;}
+});

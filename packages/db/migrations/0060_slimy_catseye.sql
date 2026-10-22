@@ -1,0 +1,2 @@
+ALTER TABLE "publication_metrics" DROP CONSTRAINT "publication_metrics_source_valid";--> statement-breakpoint
+ALTER TABLE "publication_metrics" ADD CONSTRAINT "publication_metrics_source_valid" CHECK ("publication_metrics"."source" in ('MANUAL','API'));

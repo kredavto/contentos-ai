@@ -52,6 +52,36 @@ describe.skipIf(!url)('versioned post creation and approval',()=>{
     await expect(service.enqueue(user,tenant,brand,{...input,idempotencyKey:randomUUID()},correlation)).rejects.toThrow('NOT_AUTHORIZED');
     await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
   });
+  it('reaches older than 100 versions while new edits arrive and restores as a new unapproved version',async()=>{
+    const original=(await service.postHistory(user,tenant,brand,postId)).find(row=>row.version===1)!.content;
+    const before=await ledger.overview(user,tenant);
+    for(let revision=2;revision<105;revision++)await service.editPost(user,tenant,brand,postId,{revision,content:{...original,body:`Version ${revision+1}`}},correlation);
+    let page=await service.postHistoryPage(user,tenant,brand,postId,{});expect(page.items).toHaveLength(20);expect(page.nextBefore).toBe(86);
+    const versions=page.items.map(row=>row.version);
+    await service.editPost(user,tenant,brand,postId,{revision:105,content:{...original,body:'Concurrent latest'}},correlation);
+    while(page.nextBefore!==null){page=await service.postHistoryPage(user,tenant,brand,postId,{before:String(page.nextBefore)});versions.push(...page.items.map(row=>row.version));}
+    expect(versions).toEqual(Array.from({length:105},(_,index)=>105-index));expect(page.items).toHaveLength(5);
+    expect(await service.postHistoryPage(user,tenant,brand,postId,{before:'1'})).toEqual({items:[],nextBefore:null});
+    const exact=await service.postHistoryPage(user,tenant,brand,postId,{before:'21'});expect(exact.items).toHaveLength(20);expect(exact.nextBefore).toBeNull();
+    expect((await service.postHistoryPage(user,tenant,brand,postId,{})).items[0]?.version).toBe(106);
+    await service.editPost(user,tenant,brand,postId,{revision:106,content:null},correlation);
+    await service.editPost(user,tenant,brand,postId,{revision:106,content:page.items.at(-1)!.content},correlation);
+    const post=(await content.overview(user,tenant,brand)).posts[0]!;expect(post.currentVersion).toBe(107);expect(post.approvedVersion).toBeNull();expect(post.content).toEqual(original);
+    expect((await service.postHistoryPage(user,tenant,brand,postId,{before:'2'})).items[0]?.content).toEqual(original);
+    expect(await service.postHistory(user,tenant,brand,postId)).toHaveLength(100);expect((await ledger.overview(user,tenant)).balances).toEqual(before.balances);
+  });
+  it('authorizes every history page and allows viewers to read but not restore',async()=>{
+    await expect(service.postHistoryPage(user,tenant,randomUUID(),postId,{})).rejects.toThrow('NOT_FOUND');
+    await expect(service.postHistoryPage(user,randomUUID(),brand,postId,{})).rejects.toThrow('NOT_FOUND');
+    await expect(service.postHistoryPage(randomUUID(),tenant,brand,postId,{})).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
+    const page=await service.postHistoryPage(user,tenant,brand,postId,{before:'21'});expect(page.items).toHaveLength(20);
+    await expect(service.editPost(user,tenant,brand,postId,{revision:107,content:page.items[0]!.content},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await database.client`update users set disabled_at=now() where id=${user}`;
+    await expect(service.postHistoryPage(user,tenant,brand,postId,{before:'21'})).rejects.toThrow('NOT_FOUND');
+    await database.client`update users set disabled_at=null where id=${user}`;
+    await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
+  });
   it('rejects invalid script-oriented requests and rechecks disabled accounts before completion',async()=>{
     await expect(service.enqueue(user,tenant,brand,{...input,options:{...input.options,revision:1}},correlation)).rejects.toThrow('INVALID_INPUT');
     const saved=await service.enqueue(user,tenant,brand,{...input,idempotencyKey:randomUUID()},correlation),job=await jobs.claim(tenant,saved.id);

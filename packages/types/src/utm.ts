@@ -8,7 +8,7 @@ export const utmFieldsSchema = z.object({
 }).strict();
 export const utmCreateSchema = utmFieldsSchema.extend({ idempotencyKey: z.uuid() });
 export const utmArchiveSchema = z.object({ revision: z.number().int().min(0).max(2147483646), archived: z.boolean() }).strict();
-export const utmListSchema = z.object({ status: z.enum(['ACTIVE', 'ARCHIVED']).default('ACTIVE'), before: z.uuid().optional() }).strict();
+export const utmListSchema = z.object({ status: z.enum(['ACTIVE', 'ARCHIVED']).default('ACTIVE'), search: clean(100).default(''), before: z.uuid().optional() }).strict();
 export type UtmFields = z.infer<typeof utmFieldsSchema>;
 export type UtmCreate = z.infer<typeof utmCreateSchema>;
 export type UtmList = z.infer<typeof utmListSchema>;

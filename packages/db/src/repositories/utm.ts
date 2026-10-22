@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNull, isNotNull, lt } from 'drizzle-orm';
+import { and, desc, eq, isNull, isNotNull, lt, or, sql } from 'drizzle-orm';
 import { DomainError, type UtmCreate, type UtmList } from '@contentos/types';
 import type { Database } from '../index';
 import { utmLinks, brands, auditLogs } from '../schema';
@@ -13,8 +13,9 @@ export class UtmRepository {
   constructor(private readonly db: Database) {}
   async list(userId: string, tenantId: string, brandId: string, input: UtmList) {
     return this.db.transaction(async tx => {
+      await tx.execute(sql`set local statement_timeout = '5s'`);
       await assertMembership(tx, userId, tenantId); await ownedBrand(tx, tenantId, brandId);
-      const rows = await tx.select(projection).from(utmLinks).where(and(eq(utmLinks.tenantId, tenantId), eq(utmLinks.brandId, brandId), input.status === 'ACTIVE' ? isNull(utmLinks.archivedAt) : isNotNull(utmLinks.archivedAt), input.before ? lt(utmLinks.id, input.before) : undefined)).orderBy(desc(utmLinks.id)).limit(51);
+      const rows = await tx.select(projection).from(utmLinks).where(and(eq(utmLinks.tenantId, tenantId), eq(utmLinks.brandId, brandId), input.status === 'ACTIVE' ? isNull(utmLinks.archivedAt) : isNotNull(utmLinks.archivedAt), input.before ? lt(utmLinks.id, input.before) : undefined, input.search ? or(...[utmLinks.name, utmLinks.campaign, utmLinks.source].map(column => sql`strpos(lower(${column}),lower(${input.search}))>0`)) : undefined)).orderBy(desc(utmLinks.id)).limit(51);
       return { rows: rows.slice(0, 50), nextCursor: rows.length > 50 ? rows[49]!.id : null };
     });
   }

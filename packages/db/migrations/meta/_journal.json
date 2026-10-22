@@ -344,6 +344,125 @@
       "when": 1791762172911,
       "tag": "0048_pale_kat_farrell",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791839563798,
+      "tag": "0049_amazing_mother_askani",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791919771589,
+      "tag": "0050_cold_mattie_franklin",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791921844849,
+      "tag": "0051_wakeful_zeigeist",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791922981105,
+      "tag": "0052_lethal_ezekiel_stane",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1791924049262,
+      "tag": "0053_redundant_gorgon",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1791953998849,
+      "tag": "0054_fixed_gamma_corps",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1791954859593,
+      "tag": "0055_faithful_shadow_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1791956573052,
+      "tag": "0056_opposite_black_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1792010510794,
+      "tag": "0057_jittery_blizzard",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792358685848,
+      "tag": "0058_cuddly_angel",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792360934604,
+      "tag": "0059_parallel_james_howlett",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1792645351029,
+      "tag": "0060_slimy_catseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1792646105139,
+      "tag": "0061_powerful_sharon_ventura",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792646884819,
+      "tag": "0062_deep_odin",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1792647768140,
+      "tag": "0063_abandoned_saracen",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792648389047,
+      "tag": "0064_sloppy_stepford_cuckoos",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792648531895,
+      "tag": "0065_classy_kulan_gath",
+      "breakpoints": true
     }
   ]
 }

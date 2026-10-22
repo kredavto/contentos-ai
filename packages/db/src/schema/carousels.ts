@@ -7,10 +7,12 @@ import type { CarouselOutput } from '@contentos/types';
 export const carousels = pgTable('carousels', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), brandId: uuid('brand_id').notNull(), contentItemId: uuid('content_item_id').notNull(),
   currentVersion: integer('current_version').notNull().default(1), approvedVersion: integer('approved_version'), approvedBy: uuid('approved_by').references(() => users.id),
+  archivedAt: timestamp('archived_at', {withTimezone:true}), lifecycleRevision: integer('lifecycle_revision').notNull().default(0),
   platform: text('platform').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [unique('carousels_tenant_id_uq').on(t.tenantId,t.id), unique('carousels_content_uq').on(t.contentItemId),
   foreignKey({ columns: [t.tenantId,t.brandId], foreignColumns: [brands.tenantId,brands.id] }),
   foreignKey({ columns: [t.tenantId,t.brandId,t.contentItemId], foreignColumns: [contentItems.tenantId,contentItems.brandId,contentItems.id] }),
+  check('carousels_lifecycle_valid',sql`${t.lifecycleRevision}>=0 and (${t.archivedAt} is null or (${t.approvedVersion} is null and ${t.approvedBy} is null))`),
   check('carousels_version_valid',sql`${t.currentVersion}>0 and (${t.approvedVersion} is null or ${t.approvedVersion}=${t.currentVersion})`),
 ]);
 export const carouselVersions = pgTable('carousel_versions', {

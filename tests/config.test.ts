@@ -7,6 +7,13 @@ it('refuses insecure production origin and omits secrets from public config', ()
 
 it('rejects mock avatars in production',()=>{expect(()=>parseServerEnvironment({NODE_ENV:'production',APP_URL:'https://example.test',DATABASE_URL:'postgresql://localhost/db',REDIS_URL:'redis://localhost:6379',AVATAR_PROVIDER:'mock'})).toThrow();});
 
+it('requires explicit enablement of the general media library',()=>{
+  const base={APP_URL:'https://example.test',DATABASE_URL:'postgresql://localhost/db',REDIS_URL:'redis://localhost:6379'};
+  expect(parseServerEnvironment(base).MEDIA_LIBRARY_ENABLED).toBe('false');
+  expect(parseServerEnvironment({...base,MEDIA_LIBRARY_ENABLED:'true'}).MEDIA_LIBRARY_ENABLED).toBe('true');
+  expect(()=>parseServerEnvironment({...base,MEDIA_LIBRARY_ENABLED:'yes'})).toThrow();
+});
+
 it('requires explicit valid receipt classifications without inventing defaults',()=>{
   const base={APP_URL:'https://example.test',DATABASE_URL:'postgresql://localhost/db',REDIS_URL:'redis://localhost:6379'};
   expect(parseServerEnvironment(base).PAYMENT_RECEIPT_VAT_CODE).toBeUndefined();

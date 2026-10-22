@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import type {CalendarService,SocialService,PublishingService,VideoService} from '@contentos/core';
 import {api} from '../lib/api-client';
+import {YouTubePublishing} from './youtube-publishing';
 type Entry=Awaited<ReturnType<CalendarService['list']>>[number];
 type Overview=Awaited<ReturnType<PublishingService['overview']>>;
 type Social=Awaited<ReturnType<SocialService['overview']>>;
@@ -26,7 +27,7 @@ export function PublishingStudio({base,canPublish}:{base:string;canPublish:boole
     {overview?.configuration.provider==='mock-telegram'?<p className="notice warning">ДЕМО: очередь работает локально. Сообщения в Telegram не отправляются.</p>:null}
     {canPublish?<div className="panel stack"><h3>Проверить и запланировать</h3><label>Планы начиная с даты<input aria-label="Планы начиная с даты" type="date" value={anchor} onChange={event=>{if(event.target.value)setAnchor(event.target.value);}}/></label><p className="muted">Показаны планы на следующие 60 дней. Для другой даты измените начало периода.</p>
       <label>Материал для публикации<select aria-label="Материал для публикации" value={selected?.id??''} disabled={pending} onChange={event=>{setSelected(candidates.find(entry=>entry.id===event.target.value)??null);setConfirmed(false);setPreview(null);intent.current=null;}}><option value="">Выберите материал</option>{candidates.map(entry=><option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
-      <label>Канал публикации<select aria-label="Канал публикации" value={connection} disabled={pending} onChange={event=>{setConnection(event.target.value);setConfirmed(false);intent.current=null;}}><option value="">Выберите канал</option>{social?.connections.filter(row=>row.status==='ACTIVE').map(row=><option key={row.id} value={row.id}>{row.name}{row.username?` (@${row.username})`:''}</option>)}</select></label>
+      <label>Канал публикации<select aria-label="Канал публикации" value={connection} disabled={pending} onChange={event=>{setConnection(event.target.value);setConfirmed(false);intent.current=null;}}><option value="">Выберите канал</option>{social?.connections.filter(row=>row.status==='ACTIVE'&&row.provider===overview?.configuration.provider).map(row=><option key={row.id} value={row.id}>{row.name}{row.username?` (@${row.username})`:''}</option>)}</select></label>
       {social?.connections.filter(row=>row.id===connection).map(row=><p className="muted" key={row.id}>Канал: {row.privacy==='PUBLIC'?'публичный':'приватный'}, комментарии {row.commentsEnabled?'включены':'выключены'}. Укажите такие же параметры в календаре.</p>)}
       {selected?<div className="stack"><h3>{selected.title}</h3><p>{new Date(selected.plannedAt).toLocaleString('ru',{timeZone:selected.timeZone})} · {selected.timeZone} · {selected.privacy==='PUBLIC'?'Публичный канал':'Приватный канал'} · Комментарии: {selected.commentsEnabled?'включены':'выключены'}</p><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{[selected.caption,selected.hashtags.map(tag=>`#${tag}`).join(' ')].filter(Boolean).join('\n\n')||'Без подписи'}</p>
         {selected.videoProjectId?<button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>setPreview(await api(`${base}/videos/${selected.videoProjectId}/download`)))}>Просмотреть ролик перед публикацией</button>:null}
@@ -36,8 +37,8 @@ export function PublishingStudio({base,canPublish}:{base:string;canPublish:boole
         <button className="button primary" disabled={pending||!confirmed||!connection||!overview?.configuration.ready} onClick={()=>void perform(async()=>{const data={calendarId:selected.id,revision:selected.revision,connectionId:connection},payload=JSON.stringify(data);if(intent.current?.payload!==payload)intent.current={payload,key:crypto.randomUUID()};await api(`${base}/publishing`,'POST',{...data,idempotencyKey:intent.current.key});setSelected(null);setConfirmed(false);setPreview(null);intent.current=null;setNotice('Публикация одобрена и поставлена в очередь');})}>Одобрить и запланировать публикацию</button>
       </div>:null}
     </div>:null}
-    <h3>История и очередь</h3>{overview&&!overview.jobs.length?<div className="panel empty">Публикаций пока нет.</div>:null}
-    {overview?.jobs.map(job=><article key={job.id} className="panel stack"><span className="badge">{labels[job.status]}</span><h3>{job.title}</h3><p>{new Date(job.scheduledAt).toLocaleString('ru',{timeZone:job.timeZone})} · {job.timeZone}</p><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{job.caption}</p>
+    <h3>История и очередь</h3>{overview&&!overview.jobs.filter(job=>job.provider!=='youtube').length?<div className="panel empty">Публикаций пока нет.</div>:null}
+    {overview?.jobs.filter(job=>job.provider!=='youtube').map(job=><article key={job.id} className="panel stack"><span className="badge">{labels[job.status]}</span><h3>{job.title}</h3><p>{new Date(job.scheduledAt).toLocaleString('ru',{timeZone:job.timeZone})} · {job.timeZone}</p><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{job.caption}</p>
       {job.status==='PUBLISHED'?<p className="notice success">{job.provider==='mock-telegram'?'Демонстрационный провайдер подтвердил отправку.':'Telegram подтвердил отправку.'} {job.publishedAt?`${new Date(job.publishedAt).toLocaleString('ru',{timeZone:job.timeZone})} · ${job.timeZone}`:''} Это сохранённый результат отправки; последующее удаление сообщения в Telegram здесь не отслеживается.</p>:null}
       {job.url?<a href={job.url} target="_blank" rel="noreferrer" className="button secondary">Открыть публикацию</a>:null}
       {job.status==='RECONCILIATION'?<p className="notice warning">Не удалось достоверно определить результат отправки. Автоматический повтор заблокирован, чтобы не создать дубликат. Проверьте канал; для разрешения состояния требуется операторская проверка.</p>:null}
@@ -46,5 +47,6 @@ export function PublishingStudio({base,canPublish}:{base:string;canPublish:boole
       {canPublish&&['SCHEDULED','PREPARING'].includes(job.status)?<button className="text-button" disabled={pending} onClick={()=>setCancel(job.id)}>Отменить отправку</button>:null}
       {cancel===job.id?<div className="notice warning"><p>Отменить публикацию? Это возможно только до начала отправки в Telegram.</p><button className="button secondary" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/publishing/${job.id}/cancel`,'POST');setCancel(null);setNotice('Отправка отменена');})}>Подтвердить отмену отправки</button><button className="text-button" onClick={()=>setCancel(null)}>Закрыть</button></div>:null}
     </article>)}
+    <YouTubePublishing base={base} canPublish={canPublish}/>
   </section>;
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
-import { DomainError, type NotificationType, type NotificationAudience, type Role } from '@contentos/types';
+import { DomainError, type NotificationType, type NotificationAudience, type NotificationStatus, type Role } from '@contentos/types';
 import type { Database } from '../index';
 import { generatedImages, notifications, notificationReceipts, organizationMembers, users, auditLogs, videoProjects, jobs, publishingJobs, socialConnections, channelAnalyticsJobs, paymentSettlements, paymentTasks, subscriptionTerms } from '../schema';
 import { assertMembership, type Transaction } from './ledger';
@@ -65,15 +65,29 @@ export class NotificationRepository {
       return events.length+failed.length+expiring.length;
     });
   }
-  async list(userId:string,tenantId:string,cursor?:string){
+  async list(userId:string,tenantId:string,cursor?:string,status:NotificationStatus='ALL'){
     return this.db.transaction(async tx=>{
       const member=await assertMembership(tx,userId,tenantId);
       const visible=and(eq(notifications.tenantId,tenantId),eq(notifications.userId,userId),inArray(notifications.audience,audiences(member.role)));
+      // A read cursor remains a valid anchor: marking a page read must not break unread pagination.
       const [before]=cursor?await tx.select({id:notifications.id,createdAt:notifications.createdAt}).from(notifications).where(and(visible,eq(notifications.id,cursor))):[];
       if(cursor&&!before)throw new DomainError('NOT_FOUND',404);
-      const items=await tx.select({id:notifications.id,type:notifications.type,resourceId:notifications.resourceId,brandId:notifications.brandId,createdAt:notifications.createdAt,readAt:notifications.readAt,jobType:jobs.type,imageId:generatedImages.id}).from(notifications).leftJoin(jobs,and(eq(jobs.tenantId,notifications.tenantId),eq(jobs.id,notifications.resourceId))).leftJoin(generatedImages,and(eq(generatedImages.tenantId,notifications.tenantId),eq(generatedImages.id,notifications.resourceId))).where(and(visible,before?sql`(${notifications.createdAt},${notifications.id}) < (select n.created_at,n.id from notifications n where n.id=${before.id}::uuid)`:undefined)).orderBy(desc(notifications.createdAt),desc(notifications.id)).limit(51);
+      const items=await tx.select({id:notifications.id,type:notifications.type,resourceId:notifications.resourceId,brandId:notifications.brandId,createdAt:notifications.createdAt,readAt:notifications.readAt,jobType:jobs.type,imageId:generatedImages.id}).from(notifications).leftJoin(jobs,and(eq(jobs.tenantId,notifications.tenantId),eq(jobs.id,notifications.resourceId))).leftJoin(generatedImages,and(eq(generatedImages.tenantId,notifications.tenantId),eq(generatedImages.id,notifications.resourceId))).where(and(visible,status==='UNREAD'?isNull(notifications.readAt):undefined,before?sql`(${notifications.createdAt},${notifications.id}) < (select n.created_at,n.id from notifications n where n.id=${before.id}::uuid)`:undefined)).orderBy(desc(notifications.createdAt),desc(notifications.id)).limit(51);
       const [count]=await tx.select({value:sql<number>`count(*)::int`}).from(notifications).where(and(visible,isNull(notifications.readAt)));
       return {items:items.slice(0,50),nextCursor:items.length>50?items[49]!.id:null,unread:count?.value??0};
+    });
+  }
+  async markReadBatch(userId:string,tenantId:string,ids:string[]){
+    return this.db.transaction(async tx=>{
+      const member=await assertMembership(tx,userId,tenantId);
+      const visible=and(eq(notifications.tenantId,tenantId),eq(notifications.userId,userId),inArray(notifications.audience,audiences(member.role)));
+      const selected=and(visible,inArray(notifications.id,ids));
+      // A deterministic lock order avoids deadlocks between overlapping batches.
+      const rows=await tx.select({id:notifications.id}).from(notifications).where(selected).orderBy(notifications.id).for('update');
+      if(rows.length!==ids.length)throw new DomainError('NOT_FOUND',404);
+      const items=await tx.update(notifications).set({readAt:sql`coalesce(${notifications.readAt},now())`}).where(selected).returning({id:notifications.id,readAt:notifications.readAt});
+      const [count]=await tx.select({value:sql<number>`count(*)::int`}).from(notifications).where(and(visible,isNull(notifications.readAt)));
+      return {items,unread:count?.value??0};
     });
   }
   async markRead(userId:string,tenantId:string,id:string){

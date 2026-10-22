@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {youtubeVideoIdSchema,youtubeChannelIdSchema} from './youtube';
 const count=z.number().int().min(0).max(1_000_000_000_000).nullable().default(null);
 const seconds=z.number().min(0).max(1_000_000_000_000).nullable().default(null);
 export const normalizedMetricsSchema=z.object({views:count,impressions:count,reach:count,likes:count,comments:count,shares:count,saves:count,watch_time:seconds,average_watch_time:seconds,completion_rate:z.number().min(0).max(1).nullable().default(null),clicks:count,followers_delta:z.number().int().min(-1_000_000_000_000).max(1_000_000_000_000).nullable().default(null)}).strict();
@@ -11,3 +12,8 @@ export const channelAnalyticsRequestSchema=z.object({connectionId:z.uuid(),idemp
 export const channelObservationSchema=z.object({memberCount:z.number().int().min(0).max(1_000_000_000_000),observedAt:z.iso.datetime({offset:true}),rawResult:z.number().int().min(0).max(1_000_000_000_000)}).strict().refine(value=>value.memberCount===value.rawResult);
 export type ChannelObservation=z.infer<typeof channelObservationSchema>;
 export type ChannelAnalyticsState='QUEUED'|'RUNNING'|'SUCCEEDED'|'FAILED'|'CANCELLED';
+
+export const youtubeMetricsObservationSchema=z.object({publicationId:z.uuid(),idempotencyKey:z.uuid(),credentialVersion:z.number().int().positive(),videoId:youtubeVideoIdSchema,channelId:youtubeChannelIdSchema,observedAt:z.iso.datetime({offset:true}),metrics:normalizedMetricsSchema}).strict().refine(value=>Object.entries(value.metrics).every(([key,count])=>['views','likes','comments'].includes(key)||count===null),'Unsupported YouTube Data API metric');
+export type YouTubeMetricsObservation=z.infer<typeof youtubeMetricsObservationSchema>;
+
+export const publicationAnalyticsRequestSchema=z.object({publicationId:z.uuid(),idempotencyKey:z.uuid()}).strict();

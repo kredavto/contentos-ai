@@ -2,11 +2,12 @@ import { cookies } from 'next/headers';
 import { DomainError } from '@contentos/types';
 import { services, sessionCookie } from '../../../server/services';
 import { apiResponse, assertOrigin, clientAddress, readBody, readPhotoUpload } from '../../../server/api';
+import {readLibrarySource} from '../../../server/library-upload';
 export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const { path } = await context.params;
     const key = path.join('/');
     const jar = await cookies();
@@ -41,6 +42,8 @@ async function dispatch(request: Request, context: RouteContext) {
     if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
+      if(key==='admin/youtube-resolution'&&request.method==='POST'){await auth.throttle('youtube-resolution',user.userId);return ok(await youtubeResolutions.request(user.userId,await readBody(request),correlationId),202);}
+      if(key==='admin/youtube-resolution/tasks'&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await youtubeResolutions.tasks(user.userId,query.get('tenantId')??'',query.get('jobId')??'',correlationId));}
       if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
       if (key === 'admin/finance' && request.method === 'GET') { await auth.throttle('admin-finance', user.userId); return ok(await admin.finance(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId)); }
       if (key === 'admin/plans' && request.method === 'GET') return ok(await admin.catalog(user.userId, correlationId));
@@ -70,6 +73,7 @@ async function dispatch(request: Request, context: RouteContext) {
       }
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
       if(path[2]==='notifications'&&path.length===3&&request.method==='GET')return ok(await notifications.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
+      if(path[2]==='notifications'&&path[3]==='read-batch'&&path.length===4&&request.method==='POST'){await auth.throttle('mutation',user.userId);return ok(await notifications.markReadBatch(user.userId,tenantId,await readBody(request)));}
       if(path[2]==='notifications'&&path[3]==='read'&&path.length===4&&request.method==='POST')return ok(await notifications.markRead(user.userId,tenantId,await readBody(request)));
       if(path[2]==='billing'){
         if(path.length===3&&request.method==='GET')return ok(await billing.overview(user.userId,tenantId));
@@ -90,6 +94,10 @@ async function dispatch(request: Request, context: RouteContext) {
           if(request.method==='GET')return ok(await performance.list(user.userId,tenantId,path[3]));
           if(request.method==='POST')return ok(await performance.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
         }
+        if(path[3]&&path[4]==='publication-analytics'&&path.length===5){
+          if(request.method==='GET')return ok(await publicationAnalytics.overview(user.userId,tenantId,path[3]));
+          if(request.method==='POST'){await auth.throttle('publication-analytics',user.userId);return ok(await publicationAnalytics.request(user.userId,tenantId,path[3],await readBody(request),correlationId),202);}
+        }
         if(path[3]&&path[4]==='channel-analytics'){
           if(path.length===5&&request.method==='GET')return ok(await channelAnalytics.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await channelAnalytics.request(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
@@ -104,6 +112,14 @@ async function dispatch(request: Request, context: RouteContext) {
           if(path.length===5&&request.method==='GET')return ok(await publishing.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await publishing.approve(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
           if(path[5]&&path[6]==='cancel'&&path.length===7&&request.method==='POST'){await publishing.cancel(user.userId,tenantId,path[3],path[5]);return ok({cancelled:true});}
+        }
+        if(path[3]&&path[4]==='youtube'){
+          if(path.length===6&&path[5]==='publications'&&request.method==='GET')return ok(await youtubePublications.overview(user.userId,tenantId,path[3]));
+          if(path.length===6&&path[5]==='publications'&&request.method==='POST'){await auth.throttle('youtube-approve',user.userId);return ok(await youtubePublications.approve(user.userId,tenantId,path[3],await readBody(request),correlationId),202);}
+          if(path.length===6&&path[5]==='categories'&&request.method==='GET'){await auth.throttle('youtube-categories',user.userId);return ok(await youtubePublications.categories(user.userId,tenantId,path[3],new URL(request.url).searchParams.get('connectionId')??'',new URL(request.url).searchParams.get('regionCode')??'',correlationId));}
+          if(path.length===5&&request.method==='GET')return ok(await youtube.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST'){await auth.throttle('youtube-connect',user.userId);return ok(await youtube.start(user.userId,user.id,tenantId,path[3],await readBody(request),correlationId));}
+          if(path.length===7&&path[5]&&path[6]==='check'&&request.method==='POST'){await auth.throttle('youtube-check',user.userId);return ok(await youtube.check(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));}
         }
         if(path[3]&&path[4]==='social'){
           if(path.length===5&&request.method==='GET')return ok(await social.overview(user.userId,tenantId,path[3]));
@@ -175,6 +191,34 @@ async function dispatch(request: Request, context: RouteContext) {
           if (path[5] && path[6] === 'delete' && path.length === 7 && request.method === 'POST') return ok(await avatars.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
         }
         if (path[3] && path[4] === 'avatar-jobs' && path[5] && path[6] === 'resume' && path.length === 7 && request.method === 'POST') {await avatars.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
+        if(path[3]&&path[4]==='library-media'){
+          if(path.length===5&&request.method==='GET')return ok(await libraryMedia.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST'){
+            await auth.throttle('library-upload',`${tenantId}:${user.userId}`);
+            return ok(await libraryMedia.begin(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          }
+          if(path.length===6&&path[5]==='upload-intents'&&request.method==='POST'){
+            await auth.throttle('library-upload',`${tenantId}:${user.userId}`);
+            return ok(await libraryMedia.beginBrowserUpload(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          }
+          if(path[5]&&path.length===8&&path[6]==='chunks'&&path[7]&&request.method==='POST'){
+            await auth.throttle('library-chunk',`${tenantId}:${user.userId}`);
+            const index=Number(path[7]);
+            await libraryMedia.authorizeChunk(user.userId,tenantId,path[3],path[5],index);
+            const source=await readLibrarySource(request,1);
+            return ok(await libraryMedia.uploadChunk(user.userId,tenantId,path[3],path[5],index,source.bytes,source.mimeType),202);
+          }
+          if(path[5]&&path.length===7&&path[6]==='source'&&request.method==='POST'){
+            await auth.throttle('library-upload',`${tenantId}:${user.userId}`);
+            await libraryMedia.authorizeSource(user.userId,tenantId,path[3],path[5]);
+            const source=await readLibrarySource(request);
+            return ok(await libraryMedia.uploadSource(user.userId,tenantId,path[3],path[5],source.bytes,source.mimeType),202);
+          }
+          if(path[5]&&path.length===7&&path[6]==='upload-intent'&&request.method==='GET')return ok(await libraryMedia.resumeUpload(user.userId,tenantId,path[3],path[5]));
+          if(path[5]&&path.length===7&&path[6]==='confirm'&&request.method==='POST')return ok(await libraryMedia.confirm(user.userId,tenantId,path[3],path[5]),202);
+          if(path[5]&&path.length===7&&path[6]==='delete'&&request.method==='POST')return ok(await libraryMedia.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+          if(path[5]&&path.length===7&&path[6]==='download'&&request.method==='GET')return ok(await libraryMedia.download(user.userId,tenantId,path[3],path[5]));
+        }
         if (path[3] && path[4] === 'media') {
           if (path.length === 5 && request.method === 'GET') return ok(await media.overview(user.userId,tenantId,path[3]));
           if (path.length === 5 && request.method === 'POST') {
@@ -193,10 +237,14 @@ async function dispatch(request: Request, context: RouteContext) {
         }
         if (path[3] && path[4] === 'content' && path.length === 5 && request.method === 'GET') return ok(await generation.overview(user.userId, tenantId, path[3]));
         if (path[3] && path[4] === 'jobs' && path.length === 5 && request.method === 'POST') return ok(await generation.enqueue(user.userId, tenantId, path[3], await readBody(request), correlationId), 202);
+        if(path[3]&&path[4]==='posts'&&path[5]&&path[6]==='history'&&path.length===7&&request.method==='GET')return ok(await generation.postHistoryPage(user.userId,tenantId,path[3],path[5],Object.fromEntries(new URL(request.url).searchParams)));
         if (path[3] && path[4] === 'posts' && path[5] && path.length === 6) {
           if (request.method === 'GET') return ok(await generation.postHistory(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editPost(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }
         }
+        if(path[3]&&path[4]==='carousels'&&path[5]&&path[6]==='history'&&path.length===7&&request.method==='GET')return ok(await generation.carouselHistoryPage(user.userId,tenantId,path[3],path[5],Object.fromEntries(new URL(request.url).searchParams)));
+        if(path[3]&&path[4]==='carousels'&&path[5]&&path[6]==='export'&&path.length===7&&request.method==='GET')return ok(await generation.authorizeCarouselExport(user.userId,tenantId,path[3],path[5],Object.fromEntries(new URL(request.url).searchParams)));
+        if(path[3]&&path[4]==='carousels'&&path[5]&&path[6]==='archive'&&path.length===7&&request.method==='PUT'){await auth.throttle('mutation',user.userId);return ok(await generation.setCarouselArchived(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));}
         if (path[3] && path[4] === 'carousels' && path[5] && path.length === 6) {
           if (request.method === 'GET') return ok(await generation.carouselHistory(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editCarousel(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }

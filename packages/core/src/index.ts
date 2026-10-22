@@ -40,3 +40,14 @@ export * from './covers';
 
 export * from './error-reporting';
 export * from './images';
+
+export * from './library-media';
+export * from './youtube';
+
+export * from './youtube-publishing';
+
+export * from './youtube-publications';
+
+export * from './publication-analytics';
+
+export * from './youtube-resolutions';

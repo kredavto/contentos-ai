@@ -3,6 +3,7 @@ import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {AnalyticsService} from '@contentos/core';
 import {metricLabels,type NormalizedMetrics} from '@contentos/types';
 import {api} from '../lib/api-client';
+import {PublicationAnalytics,type PublicationAnalyticsOverview} from './publication-analytics';
 import {ChannelAnalytics} from './channel-analytics';
 type Overview=Awaited<ReturnType<AnalyticsService['overview']>>;
 type History=Awaited<ReturnType<AnalyticsService['history']>>;
@@ -11,6 +12,18 @@ function Metrics({values}:{values:NormalizedMetrics|null}){return <dl className=
 export function AnalyticsStudio({base,canManage}:{base:string;canManage:boolean}){
   const [rows,setRows]=useState<Overview|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[pending,setPending]=useState(false),[refresh,setRefresh]=useState(0);
   const [selected,setSelected]=useState(''),[history,setHistory]=useState<History|null>(null),[historyId,setHistoryId]=useState('');
+  const [tasks,setTasks]=useState<PublicationAnalyticsOverview|null>(null),[taskRefresh,setTaskRefresh]=useState(0);
+  const completed=useRef('');
+  useEffect(()=>{
+    let active=true,timer:ReturnType<typeof setTimeout>|undefined;
+    async function load(){try{
+      const data=await api<PublicationAnalyticsOverview>(`${base}/publication-analytics`);if(!active)return;setTasks(data);
+      const finished=data.jobs.filter(job=>job.status==='SUCCEEDED').map(job=>job.id).sort().join(',');
+      if(completed.current!==finished){completed.current=finished;setRefresh(value=>value+1);}
+      if(data.jobs.some(job=>['QUEUED','RUNNING'].includes(job.status)))timer=setTimeout(()=>void load(),3000);
+    }catch(failure){if(active)setError(failure instanceof Error?failure.message:'Не удалось загрузить задачи аналитики');}}
+    void load();return()=>{active=false;if(timer)clearTimeout(timer);};
+  },[base,taskRefresh]);
   const intent=useRef<{payload:string;key:string}|null>(null),historyRequest=useRef(0);
   useEffect(()=>{let active=true;api<Overview>(`${base}/analytics`).then(data=>{if(active)setRows(data);}).catch(failure=>{if(active)setError(failure instanceof Error?failure.message:'Не удалось загрузить аналитику');});return()=>{active=false;historyRequest.current++;};},[base,refresh]);
   async function showHistory(id:string){const request=++historyRequest.current;setHistoryId(id);setHistory(null);setError('');try{const result=await api<History>(`${base}/analytics/${id}`);if(request===historyRequest.current)setHistory(result);}catch(failure){if(request===historyRequest.current){setHistoryId('');setError(failure instanceof Error?failure.message:'Не удалось загрузить историю');}}}
@@ -25,7 +38,7 @@ export function AnalyticsStudio({base,canManage}:{base:string;canManage:boolean}
     }catch(failure){setError(failure instanceof Error?failure.message:'Не удалось сохранить показатели');}finally{setPending(false);}
   }
   return <section className="stack"><ChannelAnalytics base={base} canManage={canManage}/><h2>Аналитика публикаций</h2><p className="muted">Последние 100 публикаций. У каждой показаны значения из последнего по дате наблюдения; наблюдения не суммируются. Пустое поле означает отсутствие данных, а 0 — измеренный ноль.</p>
-    <p className="notice warning">Автоматический сбор показателей отдельных постов пока не подключён. Telegram Bot API не предоставляет просмотры отдельных постов. Введите доступные показатели из статистики площадки; они будут отмечены как введённые вручную.</p>
+    <p className="notice warning">Для YouTube можно запросить накопленные просмотры, лайки и комментарии. Отсутствующие показатели остаются пустыми. Telegram Bot API не предоставляет просмотры отдельных постов; их можно внести вручную.</p>
     {error?<p role="alert" className="notice error">{error}</p>:null}{notice?<p role="status" className="notice success">{notice}</p>:null}
     {!rows&&!error?<p role="status">Загружаем аналитику…</p>:null}<button className="text-button" disabled={pending} onClick={()=>{setError('');setRefresh(value=>value+1);}}>Обновить аналитику</button>
     {rows&&!rows.length?<div className="panel empty">После подтверждённой отправки здесь появятся публикации.</div>:null}
@@ -36,9 +49,9 @@ export function AnalyticsStudio({base,canManage}:{base:string;canManage:boolean}
       <div className="analytics-inputs">{keys.map(key=><label key={key}>{metricLabels[key]}<input name={key} type="number" min={key==='followers_delta'?-1_000_000_000_000:0} max={key==='completion_rate'?1:1_000_000_000_000} step={['watch_time','average_watch_time','completion_rate'].includes(key)?'any':1} placeholder="Нет данных"/></label>)}</div>
       <button className="button primary" disabled={!selected}>Сохранить показатели</button></fieldset></form>:null}
     {rows?.map(row=><article key={row.id} className="panel stack"><h3>{row.title}</h3><p className="muted">Опубликовано: {new Date(row.publishedAt).toLocaleString('ru')}{row.provider.startsWith('mock-')?' · ДЕМО: отправка была имитирована':''}</p>
-      {row.latest?<><span className="badge">Введено вручную</span><p>Наблюдение: {new Date(row.latest.observedAt).toLocaleString('ru')} · Источник: {row.latest.sourceNote}</p></>:<p className="muted">Наблюдений пока нет.</p>}
-      <Metrics values={row.latest?.metrics??null}/><button className="button secondary" onClick={()=>void showHistory(row.id)}>История показателей</button>
-      {historyId===row.id?<div className="stack"><h4>Последние 100 наблюдений</h4>{history===null?<p role="status">Загружаем историю…</p>:!history.length?<p>Наблюдений пока нет.</p>:history.map(item=><details key={item.id}><summary>{new Date(item.observedAt).toLocaleString('ru')} · Введено вручную</summary><p>Источник: {item.sourceNote}</p><p className="muted">Сохранено: {new Date(item.recordedAt).toLocaleString('ru')}</p><Metrics values={item.metrics}/></details>)}</div>:null}
+      {row.latest?<><span className="badge">{row.latest.source==='DEMO'?'ДЕМО · тестовые показатели':row.latest.source==='API'?'Получено через API':'Введено вручную'}</span><p>Наблюдение: {new Date(row.latest.observedAt).toLocaleString('ru')} · Источник: {row.latest.sourceNote}</p></>:<p className="muted">Наблюдений пока нет.</p>}
+      {row.provider==='youtube'?<PublicationAnalytics base={base} publicationId={row.id} canManage={canManage} data={tasks} onRequested={()=>setTaskRefresh(value=>value+1)}/>:null}<Metrics values={row.latest?.metrics??null}/><button className="button secondary" onClick={()=>void showHistory(row.id)}>История показателей</button>
+      {historyId===row.id?<div className="stack"><h4>Последние 100 наблюдений</h4>{history===null?<p role="status">Загружаем историю…</p>:!history.length?<p>Наблюдений пока нет.</p>:history.map(item=><details key={item.id}><summary>{new Date(item.observedAt).toLocaleString('ru')} · {item.source==='DEMO'?'ДЕМО · тестовые показатели':item.source==='API'?'Получено через API':'Введено вручную'}</summary><p>Источник: {item.sourceNote}</p><p className="muted">Сохранено: {new Date(item.recordedAt).toLocaleString('ru')}</p><Metrics values={item.metrics}/></details>)}</div>:null}
     </article>)}
   </section>;
 }

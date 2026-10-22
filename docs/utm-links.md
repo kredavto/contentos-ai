@@ -8,8 +8,12 @@ Migration 0040 adds `utm_links` with composite tenant/brand ownership, creator, 
 
 Routes under `/api/organizations/:tenant/brands/:brand/utm`:
 
-- GET accepts `status=ACTIVE|ARCHIVED` and optional `before` UUID. Pages use stable descending UUID order, at most 50 rows and a next cursor; this is not chronological ordering.
+- GET accepts `status=ACTIVE|ARCHIVED`, optional `search` (up to 100 characters) and optional `before` UUID. Search is a case-insensitive literal substring match across name, campaign and source, applied before pagination within the selected brand/status; `%`, `_`, quotes and backslashes have no wildcard or SQL meaning. Empty search keeps the unfiltered listing. The query has a five-second database statement timeout. Pages use stable descending UUID order, at most 50 rows and a next cursor; this is not chronological ordering.
 - POST accepts the fields plus an idempotency UUID. Origin, authenticated-session, mutation-rate and JSON-body controls apply.
 - POST `/:id/archive` accepts revision and desired archive boolean. Already-matching state is a no-op; stale state changes conflict. Restoration does not change URL data. Archiving only organizes the library and cannot disable an already distributed destination URL.
 
 Audit records contain actor/tenant/resource/action and correlation IDs, never URLs or campaign text. No paid provider, DNS, SMTP or new remote service is required. Content-to-CTA relations and versioned manual aggregate reports are now available in the separate Funnels tab; see [funnel scope](funnels.md). Automatic click-to-lead attribution, lead forms and messenger integration remain outstanding.
+
+## Finding saved links
+
+The search form applies a query only on explicit submission and resets pagination to the first page. The applied query is shown separately from the editable field. Pagination, Refresh and archive-state changes preserve that query; Reset clears it. A failed request shows an error and can be retried with the same submit action. Obsolete list requests cannot replace newer search results. Saving a new link clears search so the saved item is not hidden by an old filter. Viewers can search and copy existing links without receiving write controls. Search neither changes link data nor fetches destinations, consumes credits or invokes providers. Existing role, tenant and brand boundaries and no-store responses remain in place. No schema migration is required.

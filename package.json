@@ -15,7 +15,8 @@
     "db:generate": "pnpm --filter @contentos/db generate",
     "db:migrate": "node scripts/with-env.mjs pnpm --filter @contentos/db migrate",
     "admin:operator": "node scripts/with-env.mjs pnpm --filter @contentos/db operator",
-    "db:seed": "node scripts/with-env.mjs tsx scripts/seed-development.ts"
+    "db:seed": "node scripts/with-env.mjs tsx scripts/seed-development.ts",
+    "test:local": "node scripts/test-local.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -24,6 +25,7 @@
     "@types/node": "^26.6.4",
     "@types/smtp-server": "^3.5.13",
     "eslint": "^10.12.0",
+    "fflate": "0.8.3",
     "mailparser": "^3.9.34",
     "sharp": "^0.35.5",
     "smtp-server": "^3.19.17",

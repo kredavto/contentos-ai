@@ -41,3 +41,20 @@ export * from './covers';
 
 export * from './carousels';
 export * from './images';
+
+export * from './library-media';
+export * from './youtube-oauth';
+
+export * from './video-music';
+
+export * from './broll';
+
+export * from './video-bookends';
+
+export * from './youtube-uploads';
+
+export * from './publication-analytics';
+
+export * from './youtube-resolutions';
+
+export * from './youtube-resolution-tasks';

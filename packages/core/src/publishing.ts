@@ -35,7 +35,7 @@ export class PublishingProcessor{
       }
       if(abort.signal.aborted)throw new DomainError('PROVIDER_UNAVAILABLE',503);
       await this.repository.begin(job,avatarConsentPolicies());
-      const result=await this.connection.provider.publish({credential,channel:inspected.reference,type:job.snapshot.type,caption:job.snapshot.caption,privacy:job.snapshot.privacy,commentsEnabled:job.snapshot.commentsEnabled,bytes},context);
+      const result=await this.connection.provider.publish({credential,channel:inspected.reference,type:job.snapshot.type,caption:job.snapshot.caption,privacy:job.snapshot.privacy as 'PUBLIC'|'PRIVATE',commentsEnabled:job.snapshot.commentsEnabled,bytes},context);
       await this.repository.complete(job,result);
     }catch(error){reportError(this.errors,error,{correlationId:job.correlationId,jobId:id});await this.repository.fail(job,error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE',error instanceof ProviderRequestError&&error.definitiveRejection);}
     finally{clearTimeout(timer);}

@@ -48,6 +48,33 @@ describe.skipIf(!url)('tenant-owned UTM links', () => {
     const restored = await service.archive(user,tenant,brand,linkId,{revision:1,archived:false},correlation);
     expect(restored.taggedUrl).toBe(archived.taggedUrl); expect(restored.revision).toBe(2);
   });
+  it('searches name, campaign and source literally within the current brand and archive state', async () => {
+    const searchBrand=randomUUID();await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${searchBrand},${tenant},${tenant},'Search fixture')`;
+    const named=await service.create(user,tenant,searchBrand,{...input,name:'Осенний запуск',campaign:'september',idempotencyKey:randomUUID()},correlation);
+    const campaign=await service.create(user,tenant,searchBrand,{...input,name:'Other',campaign:'50%_Launch',source:String.raw`path\draft`,idempotencyKey:randomUUID()},correlation);
+    const ids=async(search:string,status='ACTIVE')=>(await service.list(viewer,tenant,searchBrand,{search,status})).rows.map(row=>row.id);
+    expect(await ids('осенний')).toEqual([named.id]);expect(await ids('SEPTEMBER')).toEqual([named.id]);
+    expect(await ids('%_')).toEqual([campaign.id]);expect(await ids(String.raw`\draft`)).toEqual([campaign.id]);
+    expect(await ids("' OR true --")).toEqual([]);expect(await ids('no-match')).toEqual([]);
+    expect((await service.list(user,tenant,brand,{search:'50%_Launch'})).rows).toEqual([]);
+    await expect(service.list(outsider,tenant,searchBrand,{search:'Launch'})).rejects.toThrow('NOT_FOUND');
+    await expect(service.list(user,foreignTenant,searchBrand,{search:'Launch'})).rejects.toThrow('NOT_FOUND');
+    await service.archive(user,tenant,searchBrand,campaign.id,{revision:0,archived:true},correlation);
+    expect(await ids('%_')).toEqual([]);expect(await ids('%_','ARCHIVED')).toEqual([campaign.id]);
+    expect((await service.list(viewer,tenant,searchBrand,{search:''})).rows.map(row=>row.id)).toEqual([named.id]);
+  });
+  it('paginates filtered matches without duplicates or nonmatching rows', async () => {
+    const searchBrand=randomUUID();await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${searchBrand},${tenant},${tenant},'Search pages')`;
+    for(let i=0;i<52;i++)await service.create(user,tenant,searchBrand,{...input,name:`Search ${i}`,campaign:'winter_match',idempotencyKey:randomUUID()},correlation);
+    await service.create(user,tenant,searchBrand,{...input,name:'Unrelated',campaign:'other',idempotencyKey:randomUUID()},correlation);
+    const first=await service.list(viewer,tenant,searchBrand,{search:'WINTER_'}),next=await service.list(viewer,tenant,searchBrand,{search:'WINTER_',before:first.nextCursor});
+    expect(first.rows).toHaveLength(50);expect(next.rows).toHaveLength(2);expect(next.nextCursor).toBeNull();
+    expect(new Set([...first.rows,...next.rows].map(row=>row.id)).size).toBe(52);
+    expect([...first.rows,...next.rows].every(row=>row.campaign==='winter_match')).toBe(true);
+    await database.client`update users set disabled_at=now() where id=${viewer}`;
+    await expect(service.list(viewer,tenant,searchBrand,{search:'WINTER_'})).rejects.toThrow('NOT_FOUND');
+    await database.client`update users set disabled_at=null where id=${viewer}`;
+  });
   it('paginates without duplicates and fences revoked membership even for an idempotent replay', async () => {
     for (let i=0;i<52;i++) await service.create(user,tenant,brand,{...input,name:`Page ${i}`,idempotencyKey:randomUUID()},correlation);
     const first = await service.list(user,tenant,brand,{}); expect(first.rows).toHaveLength(50); expect(first.nextCursor).not.toBeNull();

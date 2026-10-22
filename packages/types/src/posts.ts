@@ -9,3 +9,6 @@ export const postEditSchema = z.object({ revision: z.number().int().positive(), 
 export function postPublicationText(post: Pick<PostOutput, 'body' | 'hashtags'>) {
   return post.body + (post.hashtags.length ? '\n\n' + post.hashtags.map(tag => `#${tag}`).join(' ') : '');
 }
+
+export const postHistoryQuerySchema=z.object({before:z.string().regex(/^[1-9]\d*$/).transform(Number).pipe(z.number().int().max(2147483647)).optional()}).strict();
+export type PostHistoryQuery=z.infer<typeof postHistoryQuerySchema>;

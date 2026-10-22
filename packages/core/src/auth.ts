@@ -13,7 +13,7 @@ const dummyHash = 'scrypt:v1:00000000000000000000000000000000:' + '00'.repeat(64
 export class AuthService {
   constructor(private readonly repository: AuthRepository, private readonly vault: CredentialVault|null, private readonly appUrl: string, private readonly appName: string) {}
   async throttle(action: string, ip: string, email?: string) {
-    const allowed = await this.repository.rateLimit(hashToken(`${action}:ip:${ip}`), action === 'onboarding' || action === 'mutation' ? 120 : action === 'login' ? 30 : 15, 900);
+    const allowed = await this.repository.rateLimit(hashToken(`${action}:ip:${ip}`), action === 'onboarding' || action === 'mutation' || action === 'library-chunk' ? 120 : action === 'login' ? 30 : 15, 900);
     if (!allowed) throw new DomainError('RATE_LIMITED', 429);
     if (email && !await this.repository.rateLimit(hashToken(`${action}:email:${email}`), 8, 900)) throw new DomainError('RATE_LIMITED', 429);
   }

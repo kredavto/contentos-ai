@@ -1,8 +1,8 @@
 import {randomUUID,createHash} from 'node:crypto';
-import {and,eq,desc,sql} from 'drizzle-orm';
-import {DomainError,avatarJobInputSchema,videoJobInputSchema,videoProcessingSchema,videoStages,videoReservationSeconds,captionSegmentsSchema,type CaptionEdit,type CaptionSegment,type VideoRequest,type VideoStage,type ProviderReference} from '@contentos/types';
+import {and,eq,asc,desc,sql,inArray} from 'drizzle-orm';
+import {musicFadesFit,DomainError,videoBrollSelections,brollSelectionsSchema,maxBrollTotalBytes,avatarJobInputSchema,videoJobInputSchema,videoProcessingSchema,videoStages,videoReservationSeconds,captionSegmentsSchema,type CaptionEdit,type CaptionSegment,type VideoRequest,type VideoStage,type ProviderReference} from '@contentos/types';
 import type {Database} from '../index';
-import {videoProjects,videoTransitions,jobs,outbox,scripts,scriptVersions,avatars,avatarLooks,voiceProfiles,usagePolicies,auditLogs,aiCalls,captions,covers} from '../schema';
+import {videoProjects,videoTransitions,jobs,outbox,scripts,scriptVersions,avatars,avatarLooks,voiceProfiles,usagePolicies,auditLogs,aiCalls,captions,covers,videoMusic,libraryMedia,brollSegments,videoBookends} from '../schema';
 import {lockTenant,assertMembership,reserveInTransaction,settleInTransaction,type Transaction} from './ledger';
 import {ownedJob,type StoredJob} from './jobs';
 import {requireConsent} from './consent';
@@ -16,8 +16,60 @@ async function projectFor(tx:Transaction,job:StoredJob){
   const [project]=await tx.select().from(videoProjects).where(and(projectWhere(job.tenantId,input.projectId),eq(videoProjects.jobId,job.id),eq(videoProjects.brandId,job.brandId)));
   if(!project)throw new DomainError('NOT_FOUND',404);return project;
 }
+async function musicAsset(tx:Transaction,tenantId:string,brandId:string,assetId:string){
+  const [asset]=await tx.select().from(libraryMedia).where(and(eq(libraryMedia.tenantId,tenantId),eq(libraryMedia.brandId,brandId),eq(libraryMedia.id,assetId)));
+  if(!asset)throw new DomainError('NOT_FOUND',404);
+  if(asset.status!=='READY'||asset.mimeType!=='audio/mpeg'||!asset.hasAudio||!asset.storageKey||!asset.bytes)throw new DomainError('CONFLICT',409);
+  if(asset.provider!=='s3')throw new DomainError('CONFIGURATION_REQUIRED',503);
+  return asset;
+}
+async function projectMusic(tx:Transaction,project:StoredVideo){
+  const [music]=await tx.select().from(videoMusic).where(and(eq(videoMusic.tenantId,project.tenantId),eq(videoMusic.projectId,project.id)));
+  return music?{asset:await musicAsset(tx,project.tenantId,project.brandId,music.assetId),volumePercent:music.volumePercent,...(music.fadeInMs?{fadeInMs:music.fadeInMs}:{}),...(music.fadeOutMs?{fadeOutMs:music.fadeOutMs}:{})}:null;
+}
+async function brollAsset(tx:Transaction,tenantId:string,brandId:string,selection:NonNullable<VideoRequest['broll']>){
+  const [asset]=await tx.select().from(libraryMedia).where(and(eq(libraryMedia.tenantId,tenantId),eq(libraryMedia.brandId,brandId),eq(libraryMedia.id,selection.assetId)));
+  if(!asset)throw new DomainError('NOT_FOUND',404);
+  if(!selection.approved||asset.status!=='READY'||asset.mimeType!=='video/mp4'||!asset.storageKey||!asset.bytes||!asset.durationMs)throw new DomainError('CONFLICT',409);
+  if(selection.sourceStartMs+selection.endMs-selection.startMs>asset.durationMs)throw new DomainError('INVALID_INPUT');
+  if(asset.provider!=='s3')throw new DomainError('CONFIGURATION_REQUIRED',503);return asset;
+}
+async function brollAssets(tx:Transaction,tenantId:string,brandId:string,selections:ReturnType<typeof videoBrollSelections>){
+  if(!selections.length)return [];
+  const parsed=brollSelectionsSchema.safeParse(selections);
+  if(!parsed.success)throw new DomainError('INVALID_INPUT');
+  const checked=parsed.data,result=[];
+  let totalBytes=0;
+  for(const selection of checked){
+    const asset=await brollAsset(tx,tenantId,brandId,selection);totalBytes+=asset.bytes!;
+    if(totalBytes>maxBrollTotalBytes)throw new DomainError('INVALID_INPUT');
+    result.push({asset,selection});
+  }
+  return result;
+}
+async function projectBroll(tx:Transaction,project:StoredVideo){
+  const segments=await tx.select().from(brollSegments).where(and(eq(brollSegments.tenantId,project.tenantId),eq(brollSegments.projectId,project.id))).orderBy(asc(brollSegments.position));
+  const selections=segments.map(segment=>{
+    if(!segment.approved||segment.source!=='USER_MEDIA')throw new DomainError('CONFLICT',409);
+    return {...(segment.fadeMs?{fadeMs:segment.fadeMs}:{}),assetId:segment.assetId,startMs:segment.startMs,endMs:segment.endMs,sourceStartMs:segment.sourceStartMs,approved:true as const};
+  });
+  return brollAssets(tx,project.tenantId,project.brandId,selections);
+}
+async function bookendAsset(tx:Transaction,tenantId:string,brandId:string,selection:NonNullable<NonNullable<VideoRequest['bookends']>['intro']>){
+  return brollAsset(tx,tenantId,brandId,{assetId:selection.assetId,approved:selection.approved,startMs:0,endMs:selection.durationMs,sourceStartMs:selection.sourceStartMs});
+}
+async function projectBookends(tx:Transaction,project:StoredVideo){
+  const clips=await tx.select().from(videoBookends).where(and(eq(videoBookends.tenantId,project.tenantId),eq(videoBookends.projectId,project.id)));
+  return Promise.all(clips.map(async clip=>{
+    if(!clip.approved)throw new DomainError('CONFLICT',409);
+    const selection={assetId:clip.assetId,sourceStartMs:clip.sourceStartMs,durationMs:clip.durationMs,approved:true as const};
+    return {slot:clip.slot,selection,asset:await bookendAsset(tx,project.tenantId,project.brandId,selection)};
+  }));
+}
 export async function validateVideo(tx:Transaction,project:StoredVideo,policies:ConsentPolicy[]){
   if(project.lifecycle!=='ACTIVE')throw new DomainError('NOT_FOUND',404);
+  // Completed renders own their mixed audio; deleting a source only blocks pending work.
+  if(project.stage!=='READY'){await projectMusic(tx,project);await projectBroll(tx,project);await projectBookends(tx,project);}
   if(project.consent.requirements.some(requirement=>!policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash)))throw new DomainError('CONSENT_REQUIRED',403);
   await requireConsent(tx,project.tenantId,project.consent.subjectId,project.consent.requirements);
   const [look]=await tx.select({look:avatarLooks,avatar:avatars}).from(avatarLooks).innerJoin(avatars,and(eq(avatars.tenantId,avatarLooks.tenantId),eq(avatars.id,avatarLooks.avatarId))).where(and(eq(avatarLooks.tenantId,project.tenantId),eq(avatarLooks.id,project.lookId),eq(avatars.brandId,project.brandId)));
@@ -41,6 +93,9 @@ export class VideoRepository {
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
       const [existing]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,input.idempotencyKey)));
       if(existing){if(existing.type!=='GENERATE_VIDEO'||existing.inputHash!==inputHash||existing.requestedBy!==userId)throw new DomainError('CONFLICT',409);return {id:existing.id,status:existing.status};}
+      for(const slot of ['intro','outro'] as const){const clip=input.bookends?.[slot];if(clip)await bookendAsset(tx,tenantId,brandId,clip);}
+      const selections=videoBrollSelections(input);await brollAssets(tx,tenantId,brandId,selections);
+      if(input.backgroundMusic)await musicAsset(tx,tenantId,brandId,input.backgroundMusic.assetId);
       const [script]=await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId),eq(scripts.id,input.scriptId)));
       if(!script)throw new DomainError('NOT_FOUND',404);
       if(script.currentVersion!==input.scriptVersion||script.approvedVersion!==input.scriptVersion)throw new DomainError('CONFLICT',409);
@@ -54,7 +109,11 @@ export class VideoRepository {
       await requireConsent(tx,tenantId,consent.subjectId,consent.requirements);
       const [policy]=await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,'GENERATE_VIDEO'));
       if(!policy||policy.unit!=='VIDEO_SECONDS'||policy.amount>180)throw new DomainError('CONFIGURATION_REQUIRED',503);
-      const budget=videoReservationSeconds(script.duration,policy.amount);
+      const bookendMs=(input.bookends?.intro?.durationMs??0)+(input.bookends?.outro?.durationMs??0);
+      if(bookendMs&&script.duration*1000+bookendMs>policy.amount*1000)throw new DomainError('INVALID_INPUT');
+      const budget=videoReservationSeconds(script.duration,policy.amount,bookendMs);
+      if(selections.some(selection=>selection.endMs>budget*1000-bookendMs))throw new DomainError('INVALID_INPUT');
+      if(input.backgroundMusic&&!musicFadesFit(input.backgroundMusic,budget*1000-bookendMs))throw new DomainError('INVALID_INPUT');
       const reservation=await reserveInTransaction(tx,tenantId,policy.unit,budget,`job:${input.idempotencyKey}`,correlationId);
       let captionReservationId:string|null=null;
       if(input.captionMode==='AUTO'){
@@ -68,12 +127,18 @@ export class VideoRepository {
       const text=[version.content.hook,version.content.context,version.content.core,version.content.proof,version.content.cta].join('\n\n');
       if(text.length>20000)throw new DomainError('INVALID_INPUT');
       await tx.insert(videoProjects).values({id:projectId,tenantId,brandId,jobId,scriptId:script.id,scriptVersion:input.scriptVersion,lookId:owned.look.id,voiceId:voice.id,captionMode:input.captionMode,captionLanguage:input.captionLanguage,captionProvider:captionConfig?.provider,captionModel:captionConfig?.model,captionReservationId,scriptText:text,title:version.content.hook.slice(0,200),platform:script.platform,plannedDuration:script.duration,avatarReference:owned.look.reference,voiceReference:voice.reference,consent:{subjectId:consent.subjectId,requirements:consent.requirements},options:videoProcessingSchema.parse({orientation:input.orientation,resolution:input.resolution,fit:input.fit,...(input.watermark?{watermark:input.watermark}:{}),...(input.cover?{cover:input.cover}:{})}),maxDurationSeconds:budget,provider,originalKey:`${prefix}/original.mp4`,finalKey:`${prefix}/final.mp4`,coverKey:`${prefix}/cover.jpg`});
+      for(const slot of ['intro','outro'] as const){const clip=input.bookends?.[slot];if(clip)await tx.insert(videoBookends).values({tenantId,projectId,slot,...clip});}
+      if(selections.length)await tx.insert(brollSegments).values(selections.map((selection,position)=>({tenantId,projectId,position,...selection})));
+      if(input.backgroundMusic)await tx.insert(videoMusic).values({tenantId,projectId,...input.backgroundMusic});
       await tx.insert(videoTransitions).values({tenantId,projectId,revision:0,toStage:'VIDEO_REQUESTED',correlationId});await tx.insert(outbox).values({tenantId,jobId});
       await tx.insert(auditLogs).values({tenantId,userId,action:'VIDEO_QUEUED',resourceId:projectId,correlationId,metadata:{jobId,scriptVersion:input.scriptVersion,maxVideoSeconds:budget}});return {id:job!.id,status:job!.status};
     });
   }
   async list(userId:string,tenantId:string,brandId:string){
-    return this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);return tx.select({id:videoProjects.id,jobId:videoProjects.jobId,title:videoProjects.title,scriptId:videoProjects.scriptId,scriptVersion:videoProjects.scriptVersion,lookId:videoProjects.lookId,voiceId:videoProjects.voiceId,stage:videoProjects.stage,captionMode:videoProjects.captionMode,captionMutationState:videoProjects.captionMutationState,lifecycle:videoProjects.lifecycle,deleteError:videoProjects.deleteError,coverVersion:videoProjects.coverVersion,coverRevision:videoProjects.coverRevision,options:videoProjects.options,provider:videoProjects.provider,durationMs:videoProjects.durationMs,approvedAt:videoProjects.approvedAt,createdAt:videoProjects.createdAt,jobStatus:jobs.status,errorCode:jobs.errorCode}).from(videoProjects).innerJoin(jobs,and(eq(jobs.tenantId,videoProjects.tenantId),eq(jobs.id,videoProjects.jobId))).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.brandId,brandId),sql`${videoProjects.lifecycle} <> 'DELETED'`)).orderBy(desc(videoProjects.createdAt)).limit(50);});
+    return this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);const projects=await tx.select({id:videoProjects.id,jobId:videoProjects.jobId,title:videoProjects.title,scriptId:videoProjects.scriptId,scriptVersion:videoProjects.scriptVersion,lookId:videoProjects.lookId,voiceId:videoProjects.voiceId,stage:videoProjects.stage,captionMode:videoProjects.captionMode,captionMutationState:videoProjects.captionMutationState,lifecycle:videoProjects.lifecycle,deleteError:videoProjects.deleteError,coverVersion:videoProjects.coverVersion,coverRevision:videoProjects.coverRevision,options:videoProjects.options,provider:videoProjects.provider,durationMs:videoProjects.durationMs,approvedAt:videoProjects.approvedAt,createdAt:videoProjects.createdAt,jobStatus:jobs.status,errorCode:jobs.errorCode,backgroundMusic:{assetId:videoMusic.assetId,volumePercent:videoMusic.volumePercent,fadeInMs:videoMusic.fadeInMs,fadeOutMs:videoMusic.fadeOutMs}}).from(videoProjects).innerJoin(jobs,and(eq(jobs.tenantId,videoProjects.tenantId),eq(jobs.id,videoProjects.jobId))).leftJoin(videoMusic,and(eq(videoMusic.tenantId,videoProjects.tenantId),eq(videoMusic.projectId,videoProjects.id))).where(and(eq(videoProjects.tenantId,tenantId),eq(videoProjects.brandId,brandId),sql`${videoProjects.lifecycle} <> 'DELETED'`)).orderBy(desc(videoProjects.createdAt)).limit(50);
+      const clips=projects.length?await tx.select({projectId:videoBookends.projectId,slot:videoBookends.slot,assetId:videoBookends.assetId,sourceStartMs:videoBookends.sourceStartMs,durationMs:videoBookends.durationMs}).from(videoBookends).where(and(eq(videoBookends.tenantId,tenantId),inArray(videoBookends.projectId,projects.map(project=>project.id)))):[];
+      const inserts=projects.length?await tx.select({fadeMs:brollSegments.fadeMs,projectId:brollSegments.projectId,assetId:brollSegments.assetId,startMs:brollSegments.startMs,endMs:brollSegments.endMs,sourceStartMs:brollSegments.sourceStartMs,approved:brollSegments.approved}).from(brollSegments).where(and(eq(brollSegments.tenantId,tenantId),inArray(brollSegments.projectId,projects.map(project=>project.id)))).orderBy(asc(brollSegments.position)):[];
+      return projects.map(project=>{const brollClips=inserts.filter(clip=>clip.projectId===project.id).map(({projectId:_projectId,fadeMs,...clip})=>({...clip,...(fadeMs?{fadeMs}:{})}));const music=project.backgroundMusic;return {...project,backgroundMusic:music?{assetId:music.assetId,volumePercent:music.volumePercent,...(music.fadeInMs?{fadeInMs:music.fadeInMs}:{}),...(music.fadeOutMs?{fadeOutMs:music.fadeOutMs}:{})}:null,broll:brollClips.length===1?brollClips[0]!:null,brollClips,bookends:clips.filter(clip=>clip.projectId===project.id).map(({projectId:_projectId,...clip})=>clip)};});});
   }
   async claim(tenantId:string,id:string){
     return this.db.transaction(async tx=>{
@@ -95,6 +160,27 @@ export class VideoRepository {
       if(project.stage==='VOICE_PREPARING')project=await transition(tx,project,'AVATAR_RENDERING',job.correlationId);
       if(markSubmitting&&!project.reference)await tx.update(videoProjects).set({firstSubmittedAt:project.firstSubmittedAt??new Date(),mutationState:project.firstSubmittedAt?'UNKNOWN':'STARTED'}).where(projectWhere(job.tenantId,project.id));
       return project;
+    });
+  }
+  async backgroundMusic(job:StoredJob,policies:ConsentPolicy[]){
+    return this.db.transaction(async tx=>{
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);
+      await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);
+      await validateVideo(tx,project,policies);return projectMusic(tx,project);
+    });
+  }
+  async broll(job:StoredJob,policies:ConsentPolicy[]){
+    return this.db.transaction(async tx=>{
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);
+      await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);
+      await validateVideo(tx,project,policies);return projectBroll(tx,project);
+    });
+  }
+  async bookends(job:StoredJob,policies:ConsentPolicy[]){
+    return this.db.transaction(async tx=>{
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);
+      await assertMembership(tx,active.requestedBy,job.tenantId,'generate');const project=await projectFor(tx,active);
+      await validateVideo(tx,project,policies);return projectBookends(tx,project);
     });
   }
   async submitted(job:StoredJob,reference:ProviderReference){
@@ -255,6 +341,9 @@ export class VideoRepository {
       const lease={deleteLeaseToken:null,deleteLeaseExpiresAt:null};
       if(!succeeded){await tx.update(videoProjects).set({...lease,deleteError:'PROVIDER_UNAVAILABLE',deleteAfter:new Date(Date.now()+Math.min(3600_000,5000*2**Math.min(active.deleteAttempts,10)))}).where(projectWhere(project.tenantId,project.id));return;}
       const tombstone={provider:project.provider,externalId:'deleted',internalId:project.id,metadata:{}};
+      await tx.delete(brollSegments).where(and(eq(brollSegments.tenantId,project.tenantId),eq(brollSegments.projectId,project.id)));
+      await tx.delete(videoBookends).where(and(eq(videoBookends.tenantId,project.tenantId),eq(videoBookends.projectId,project.id)));
+      await tx.delete(videoMusic).where(and(eq(videoMusic.tenantId,project.tenantId),eq(videoMusic.projectId,project.id)));
       await tx.update(videoProjects).set({...lease,lifecycle:'DELETED',deletedAt:new Date(),deleteError:null,scriptText:'',title:'Удалённое видео',reference:null,avatarReference:tombstone,voiceReference:tombstone,options:videoProcessingSchema.parse({orientation:active.options.orientation,resolution:active.options.resolution,fit:active.options.fit})}).where(projectWhere(project.tenantId,project.id));
       await tx.update(covers).set({status:'DELETED',design:null,leaseToken:null,leaseExpiresAt:null}).where(and(eq(covers.tenantId,project.tenantId),eq(covers.projectId,project.id)));
       await tx.update(captions).set({segments:[]}).where(and(eq(captions.tenantId,project.tenantId),eq(captions.projectId,project.id)));

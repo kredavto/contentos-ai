@@ -11,3 +11,7 @@ export * from './telegram';
 export * from './telegram-publishing';
 export * from './yookassa';
 export * from './images';
+
+export * from './media-preparation';
+export * from './youtube';
+export * from './mock-youtube';

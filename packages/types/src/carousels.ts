@@ -9,5 +9,15 @@ export const carouselSchema=z.object({
   design:z.object({format:z.enum(['SQUARE','PORTRAIT']),font:z.enum(['SANS','SERIF']),backgroundColor:color,textColor:color,accentColor:color}).strict(),
 }).strict();
 export type CarouselOutput=z.infer<typeof carouselSchema>;
-export const carouselEditSchema=z.object({revision:z.number().int().positive(),content:carouselSchema.nullable()}).strict();
+export const carouselLifecycleSchema=z.object({revision:z.number().int().positive(),lifecycleRevision:z.number().int().nonnegative(),archived:z.boolean()}).strict();
+export type CarouselLifecycle=z.infer<typeof carouselLifecycleSchema>;
+export const carouselEditSchema=z.object({lifecycleRevision:z.number().int().nonnegative().default(0),revision:z.number().int().positive(),content:carouselSchema.nullable()}).strict();
 export function carouselPublicationText(content:Pick<CarouselOutput,'caption'|'hashtags'>){return content.caption+(content.hashtags.length?'\n\n'+content.hashtags.map(tag=>`#${tag}`).join(' '):'');}
+
+const exportCounter=z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).pipe(z.number().int().nonnegative());
+export const carouselExportQuerySchema=z.object({revision:exportCounter.refine(value=>value>0),lifecycleRevision:exportCounter}).strict();
+export type CarouselExportRevision=z.infer<typeof carouselExportQuerySchema>;
+
+/** Keyset cursor over immutable positive PostgreSQL integer version numbers. */
+export const carouselHistoryQuerySchema=z.object({before:exportCounter.pipe(z.number().int().min(1).max(2147483647)).optional()}).strict();
+export type CarouselHistoryQuery=z.infer<typeof carouselHistoryQuerySchema>;

@@ -49,3 +49,12 @@ export * from './repositories/funnels';
 
 export * from './repositories/covers';
 export * from './repositories/images';
+
+export * from './repositories/library-media';
+export * from './repositories/youtube-oauth';
+
+export * from './repositories/youtube-uploads';
+
+export * from './repositories/publication-analytics';
+
+export * from './repositories/youtube-resolutions';

@@ -1,4 +1,6 @@
 import sharp from 'sharp';
+import {readFile} from 'node:fs/promises';
+import {unzipSync} from 'fflate';
 import { test, expect } from '@playwright/test';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { createDatabase, BrandRepository, LedgerRepository } from '../../packages/db/src/index';
@@ -28,6 +30,7 @@ test('Carousel studio generates, versions, approves and copies into calendar',as
     const overview=(await (await page.request.get(`${endpoint}/content`)).json()).data;
     const carousel=overview.carousels[0];expect(overview.usage.balances.AI_CREDITS.available).toBe(6);
     await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);
+    await expect(page.getByRole('button',{name:'Скачать карусель ZIP',exact:true})).toBeDisabled();
     await page.getByLabel('Заголовок слайда 1',{exact:true}).fill('Практика каждый день');
     await page.getByRole('button',{name:'Слайд 1 вниз',exact:true}).click();
     await expect(page.getByLabel('Заголовок слайда 2',{exact:true})).toHaveValue('Практика каждый день');
@@ -41,6 +44,31 @@ test('Carousel studio generates, versions, approves and copies into calendar',as
     await page.getByRole('button',{name:'Скачать слайд 1 PNG',exact:true}).click();
     const download=await downloadPromise,path=testInfo.outputPath('carousel-slide.png');await download.saveAs(path);
     const metadata=await sharp(path).metadata();expect(metadata.width).toBe(1080);expect(metadata.height).toBe(1350);
+    async function downloadArchive(count:number,height:number,name:string){
+      const event=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать карусель ZIP',exact:true}).click();
+      const result=await event;expect(result.suggestedFilename()).toMatch(/^carousel-[0-9a-f-]+-v\d+\.zip$/);
+      const file=testInfo.outputPath(name);await result.saveAs(file);const entries=unzipSync(await readFile(file));
+      expect(Object.keys(entries)).toEqual([...Array.from({length:count},(_,i)=>`slide-${String(i+1).padStart(2,'0')}.png`),'caption.txt']);
+      for(let i=1;i<=count;i++){const image=await sharp(entries[`slide-${String(i).padStart(2,'0')}.png`]!).metadata();expect(image.width).toBe(1080);expect(image.height).toBe(height);}
+      expect(new TextDecoder().decode(entries['caption.txt'])).toBe(await page.getByLabel('Подпись для копирования',{exact:true}).inputValue());
+      return entries;
+    }
+    const zipped=await downloadArchive(carousel.content.slides.length,1350,'carousel-portrait.zip');
+    expect(Buffer.from(zipped['slide-01.png']!)).toEqual(await readFile(path));
+    // Archive the source during rendering: the final server check must prevent the download.
+    let exportChecks=0,unexpectedDownload=false;const onDownload=()=>{unexpectedDownload=true;};page.on('download',onDownload);
+    const exportRoute=`**/carousels/${carousel.id}/export?**`;
+    await page.route(exportRoute,async route=>{
+      exportChecks++;
+      if(exportChecks===2){const response=await page.request.put(`${endpoint}/carousels/${carousel.id}/archive`,{headers:{origin:baseURL!},data:{revision:2,lifecycleRevision:0,archived:true}});expect(response.status()).toBe(200);}
+      await route.continue();
+    });
+    await page.getByRole('button',{name:'Скачать карусель ZIP',exact:true}).click();
+    await expect(page.locator('p[role="alert"]')).toBeVisible();expect(exportChecks).toBe(2);expect(unexpectedDownload).toBe(false);
+    page.off('download',onDownload);await page.unroute(exportRoute);
+    expect((await page.request.put(`${endpoint}/carousels/${carousel.id}/archive`,{headers:{origin:baseURL!},data:{revision:2,lifecycleRevision:1,archived:false}})).status()).toBe(200);
+    await page.reload();await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);
+    await page.getByRole('button',{name:'Одобрить карусель',exact:true}).click();
 
     await expect(page.getByRole('heading',{name:'Карусель v2 · Одобрена',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'История карусели',exact:true}).click();
@@ -56,9 +84,73 @@ test('Carousel studio generates, versions, approves and copies into calendar',as
     await expect(page.getByRole('heading',{name:'Карусель v2 · Одобрена',exact:true})).toBeVisible();
     expect((await page.request.put(`${endpoint}/carousels/${carousel.id}`,{data:{revision:2,content:null}})).status()).toBe(403);
     const history=await page.request.get(`${endpoint}/carousels/${carousel.id}`);expect(history.headers()['cache-control']).toBe('no-store');expect((await history.json()).data).toHaveLength(2);
+    expect((await page.request.put(`${endpoint}/carousels/${carousel.id}/archive`,{data:{revision:2,lifecycleRevision:0,archived:true}})).status()).toBe(403);
+    await page.getByRole('button',{name:'В архив каруселей',exact:true}).click();
+    await expect(page.getByText('Карусель перенесена в архив',{exact:true})).toBeVisible();
+    await expect(page.getByLabel('Сохранённая карусель',{exact:true}).locator('option')).toHaveCount(1);
+    await page.getByLabel('Показать архив каруселей',{exact:true}).check();
+    await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);
+    await expect(page.getByLabel('Подпись к карусели',{exact:true})).toHaveAttribute('readonly','');
+    await expect(page.getByRole('button',{name:'Одобрить карусель',exact:true})).toBeDisabled();
+    await expect(page.getByRole('button',{name:'Скачать слайд 1 PNG',exact:true})).toBeDisabled();
+    await expect(page.getByRole('button',{name:'Скачать карусель ZIP',exact:true})).toBeDisabled();
+    await page.getByRole('button',{name:'История карусели',exact:true}).click();
+    await expect(page.getByText('Карусель: версия 1',{exact:true})).toBeVisible();
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:testInfo.outputPath('carousels-archive-mobile.png'),fullPage:true});
+    await page.getByRole('button',{name:'Восстановить карусель',exact:true}).click();
+    await expect(page.getByText('Карусель восстановлена. Одобрите её заново.',{exact:true})).toBeVisible();
+    await page.getByLabel('Показать архив каруселей',{exact:true}).uncheck();
+    await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);
+    await expect(page.getByRole('heading',{name:'Карусель v2',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Скачать слайд 1 PNG',exact:true})).toBeDisabled();
+    expect((await page.request.put(`${endpoint}/carousels/${carousel.id}`,{headers:{origin:baseURL!},data:{revision:2,content:null}})).status()).toBe(409);
+    await page.getByRole('button',{name:'Одобрить карусель',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Карусель v2 · Одобрена',exact:true})).toBeVisible();
+    expect(await database.client`select id from calendar_entries where tenant_id=${tenant}`).toHaveLength(1);
+    await page.getByLabel('Формат слайдов',{exact:true}).selectOption('SQUARE');
+    await expect(page.getByRole('button',{name:'Скачать карусель ZIP',exact:true})).toBeDisabled();
+    for(let i=carousel.content.slides.length;i<10;i++)await page.getByRole('button',{name:'Добавить слайд',exact:true}).click();
+    await page.getByRole('button',{name:'Сохранить версию карусели',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Карусель v3',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Одобрить карусель',exact:true}).click();
+    await downloadArchive(10,1080,'carousel-square-ten.zip');
     await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('carousels-mobile.png'),fullPage:true});
+    // More than one history page; taking an old version remains an explicit append-only edit.
+    await database.client`insert into carousel_versions(tenant_id,carousel_id,version,content,created_by) select ${tenant},${carousel.id},n,content,${user} from carousel_versions cross join generate_series(4,25) n where carousel_id=${carousel.id} and version=3`;
+    await database.client`update carousels set current_version=25,approved_version=25,approved_by=${user} where id=${carousel.id}`;
+    await page.reload();await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);
+    const historyPage=await page.request.get(`${endpoint}/carousels/${carousel.id}/history`);expect(historyPage.headers()['cache-control']).toBe('no-store');expect((await historyPage.json()).data.items).toHaveLength(20);
+    expect((await page.request.get(`${endpoint}/carousels/${carousel.id}/history?before=0`)).status()).toBe(400);
+    await page.getByRole('button',{name:'История карусели',exact:true}).click();
+    await expect(page.getByText('Загружено версий: 20',{exact:true})).toBeVisible();
+    await expect(page.getByText('Карусель: версия 1',{exact:true})).toHaveCount(0);
+    const olderHistoryRoute=`**/carousels/${carousel.id}/history?before=*`;
+    await page.route(olderHistoryRoute,route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'История временно недоступна'}})}),{times:1});
+    await page.getByRole('button',{name:'Загрузить ранние версии',exact:true}).click();
+    await expect(page.locator('p[role="alert"]')).toHaveText('История временно недоступна');
+    await expect(page.getByText('Загружено версий: 20',{exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Загрузить ранние версии',exact:true}).click();
+    await expect(page.getByText('Загружено версий: 25 · Вся история загружена',{exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Загрузить ранние версии',exact:true})).toHaveCount(0);
+    await page.getByText('Карусель: версия 1',{exact:true}).click();
+    const oldest=page.locator('details').filter({has:page.getByText('Карусель: версия 1',{exact:true})});
+    await expect(oldest.getByText(carousel.content.slides[0].heading,{exact:true})).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await oldest.screenshot({path:testInfo.outputPath('carousel-history-mobile.png')});
+    await oldest.getByRole('button',{name:'Взять за основу v1',exact:true}).click();
+    await expect(page.getByLabel('Подпись к карусели',{exact:true})).toHaveValue(carousel.content.caption);
+    await expect(page.getByRole('button',{name:'Скачать карусель ZIP',exact:true})).toBeDisabled();
+    await page.getByRole('button',{name:'Сохранить версию карусели',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Карусель v26',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Скачать карусель ZIP',exact:true})).toBeDisabled();
+    expect((await database.client`select count(*)::int as count from carousel_versions where carousel_id=${carousel.id}`)[0]?.count).toBe(26);
+    await expect(page.getByText('Загружено версий: 25 · Вся история загружена',{exact:true})).toHaveCount(0);
     await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
     await page.reload();await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);await expect(page.getByLabel('Подпись к карусели',{exact:true})).toHaveAttribute('readonly','');
+    await expect(page.getByRole('button',{name:'В архив каруселей',exact:true})).toHaveCount(0);
+    expect((await page.request.put(`${endpoint}/carousels/${carousel.id}/archive`,{headers:{origin:baseURL!},data:{revision:2,lifecycleRevision:2,archived:true}})).status()).toBe(403);
     expect((await page.request.put(`${endpoint}/carousels/${carousel.id}`,{headers:{origin:baseURL!},data:{revision:2,content:{...carousel.content,caption:'Denied'}}})).status()).toBe(403);
     expect(errors).toEqual([]);
   }finally{await database.client`delete from sessions where user_id=${user}`;}

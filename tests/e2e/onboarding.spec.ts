@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import {readFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 test('register, verify email, create organization and resume 15-step onboarding', async ({ page, request }) => {
   test.setTimeout(420_000); // Includes the scheduled send and persisted analytics round-trip.
   const email = `browser-${randomUUID()}@example.test`;
@@ -116,6 +119,16 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/media-mobile.png',fullPage:true});
+  // Upload an actual short audio track through the same UI used by the customer.
+  const musicBytes=Buffer.alloc(44+16000);musicBytes.write('RIFF');musicBytes.writeUInt32LE(musicBytes.length-8,4);musicBytes.write('WAVEfmt ',8);musicBytes.writeUInt32LE(16,16);musicBytes.writeUInt16LE(1,20);musicBytes.writeUInt16LE(1,22);musicBytes.writeUInt32LE(16000,24);musicBytes.writeUInt32LE(32000,28);musicBytes.writeUInt16LE(2,32);musicBytes.writeUInt16LE(16,34);musicBytes.write('data',36);musicBytes.writeUInt32LE(16000,40);
+  for(let sample=0;sample<8000;sample++)musicBytes.writeInt16LE(Math.round(6000*Math.sin(2*Math.PI*880*sample/16000)),44+sample*2);
+  const musicForm=page.getByRole('form',{name:'Загрузка аудио и видео'});
+  await musicForm.getByLabel('Аудио или видео',{exact:true}).setInputFiles({name:'Фоновая дорожка.wav',mimeType:'audio/wav',buffer:musicBytes});
+  await musicForm.getByRole('button',{name:'Загрузить аудио или видео'}).click();
+  await expect(page.getByRole('article',{name:'Фоновая дорожка.wav'}).getByText('Готово',{exact:true})).toBeVisible({timeout:60000});
+  await musicForm.getByLabel('Аудио или видео',{exact:true}).setInputFiles({name:'Вставка.mp4',mimeType:'video/mp4',buffer:await readFile(join(tmpdir(),'contentos-e2e-video.mp4'))});
+  await musicForm.getByRole('button',{name:'Загрузить аудио или видео'}).click();
+  await expect(page.getByRole('article',{name:'Вставка.mp4'}).getByText('Готово',{exact:true})).toBeVisible({timeout:60000});
   await page.getByRole('button',{name:'Согласия',exact:true}).click();
   for(const type of ['OWN_LIKENESS','CROSS_BORDER_PROCESSING']){
     await page.getByLabel('Разрешение',{exact:true}).selectOption(type);
@@ -144,6 +157,64 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByRole('button',{name:'Видео',exact:true}).click();
   await page.getByLabel('Одобренный сценарий',{exact:true}).selectOption({label:'Мой проверенный заголовок · v2'});
   await page.getByLabel('Образ аватара',{exact:true}).selectOption({index:1});
+  for(const label of ['Intro','Outro']){
+    await expect(page.getByLabel(`${label} из медиатеки`,{exact:true})).toHaveValue('');
+    await page.getByLabel(`${label} из медиатеки`,{exact:true}).selectOption({label:'Вставка.mp4'});
+    const approve=page.getByLabel(`Подтверждаю ${label} и выбранный фрагмент`,{exact:true});
+    await expect(approve).not.toBeChecked();await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+    await page.getByLabel(`${label}: начало фрагмента, сек.`,{exact:true}).fill('0.1');
+    await page.getByLabel(`${label}: длительность, сек.`,{exact:true}).fill('0.4');await approve.check();
+    await page.getByLabel(`${label}: длительность, сек.`,{exact:true}).fill('0.3');await expect(approve).not.toBeChecked();await approve.check();
+  }
+  await expect(page.getByLabel('B-roll из медиатеки',{exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Добавить B-roll',exact:true}).click();
+  await expect(page.getByLabel('B-roll из медиатеки',{exact:true})).toHaveValue('');
+  await page.getByLabel('B-roll из медиатеки',{exact:true}).selectOption({label:'Вставка.mp4'});
+  const approveBroll=page.getByLabel('Подтверждаю выбранную вставку и её интервал',{exact:true});
+  await expect(approveBroll).not.toBeChecked();
+  await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+  await page.getByLabel('Начало вставки, сек.',{exact:true}).fill('0.2');
+  await page.getByLabel('Конец вставки, сек.',{exact:true}).fill('0.7');
+  await page.getByLabel('Начало фрагмента в исходнике, сек.',{exact:true}).fill('0.1');
+  await approveBroll.check();
+  await page.getByLabel('Конец вставки, сек.',{exact:true}).fill('0.6');
+  await expect(approveBroll).not.toBeChecked();await approveBroll.check();
+  const firstBroll=page.getByRole('group',{name:'Вставка 1',exact:true});
+  const firstFade=firstBroll.getByLabel('Плавное появление и исчезновение',{exact:true});
+  await expect(firstFade).not.toBeChecked();await firstFade.check();await expect(approveBroll).not.toBeChecked();
+  await firstBroll.getByLabel('Длительность каждого перехода, сек.',{exact:true}).fill('0.3');await approveBroll.check();
+  await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+  await firstBroll.getByLabel('Длительность каждого перехода, сек.',{exact:true}).fill('0.1');await expect(approveBroll).not.toBeChecked();await approveBroll.check();
+  await page.getByRole('button',{name:'Добавить B-roll',exact:true}).click();
+  const secondBroll=page.getByRole('group',{name:'Вставка 2',exact:true});
+  await secondBroll.getByLabel('B-roll из медиатеки',{exact:true}).selectOption({label:'Вставка.mp4'});
+  await secondBroll.getByLabel('Начало вставки, сек.',{exact:true}).fill('0.5');
+  await secondBroll.getByLabel('Конец вставки, сек.',{exact:true}).fill('0.9');
+  await secondBroll.getByLabel('Начало фрагмента в исходнике, сек.',{exact:true}).fill('0.1');
+  const approveSecond=secondBroll.getByLabel('Подтверждаю выбранную вставку и её интервал',{exact:true});
+  await approveSecond.check();await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+  await secondBroll.getByLabel('Начало вставки, сек.',{exact:true}).fill('0.6');await expect(approveSecond).not.toBeChecked();await approveSecond.check();
+  await secondBroll.getByLabel('Плавное появление и исчезновение',{exact:true}).check();await expect(approveSecond).not.toBeChecked();await approveSecond.check();
+  for(let i=0;i<3;i++)await page.getByRole('button',{name:'Добавить B-roll',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Добавить B-roll',exact:true})).toBeDisabled();
+  for(let i=0;i<3;i++)await page.getByRole('button',{name:'Удалить вставку 3',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeEnabled();
+  await expect(approveSecond).toBeChecked();
+  await expect(page.getByLabel('Фоновая музыка',{exact:true})).toHaveValue('');
+  await page.getByLabel('Фоновая музыка',{exact:true}).selectOption({label:'Фоновая дорожка.wav'});
+  const volume=page.getByLabel('Громкость музыки',{exact:true});await expect(volume).toHaveValue('15');
+  for(let i=0;i<3;i++)await volume.press('ArrowLeft');
+  await expect(volume).toHaveValue('12');
+  const musicFadeIn=page.getByLabel('Нарастание музыки, сек.',{exact:true}),musicFadeOut=page.getByLabel('Затухание музыки, сек.',{exact:true});
+  await expect(musicFadeIn).toHaveValue('0');await expect(musicFadeOut).toHaveValue('0');
+  await musicFadeIn.fill('5.1');await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+  await musicFadeIn.fill('');await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+  await musicFadeIn.fill('0.2');await musicFadeOut.fill('0.3');
+  await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeEnabled();
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/video-composition-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
   await page.getByLabel('Субтитры',{exact:true}).selectOption('AUTO');
   await expect(page.getByLabel('Добавить водяной знак',{exact:true})).not.toBeChecked();
   await page.getByLabel('Добавить водяной знак',{exact:true}).check();
@@ -158,6 +229,11 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.getByLabel('Расположение заголовка',{exact:true}).selectOption('TOP');
   await page.getByRole('button',{name:'Создать видео',exact:true}).click();
   const videoCard=page.locator('article').filter({has:page.getByRole('heading',{name:'Мой проверенный заголовок',exact:true})});
+  await expect(videoCard.getByText('Intro · 0.3 сек.',{exact:true})).toBeVisible();
+  await expect(videoCard.getByText('Outro · 0.3 сек.',{exact:true})).toBeVisible();
+  await expect(videoCard.getByText('B-roll 1 · 0.2–0.6 сек. · переходы по 0.1 сек.',{exact:true})).toBeVisible();
+  await expect(videoCard.getByText('B-roll 2 · 0.6–0.9 сек. · переходы по 0.1 сек.',{exact:true})).toBeVisible();
+  await expect(videoCard.getByText('Фоновая музыка · громкость 12% · нарастание 0.2 сек. · затухание 0.3 сек.',{exact:true})).toBeVisible();
   await expect(videoCard.getByText('Водяной знак: Мой бренд · 60%',{exact:true})).toBeVisible();
   await expect(videoCard.getByRole('button',{name:'Редактировать субтитры',exact:true})).toBeVisible({timeout:90000});
   await videoCard.getByRole('button',{name:'Редактировать субтитры',exact:true}).click();
@@ -180,7 +256,8 @@ test('register, verify email, create organization and resume 15-step onboarding'
   const posterResponse=await request.get(poster!);expect(posterResponse.ok()).toBe(true);
   const coverMetadata=await sharp(await posterResponse.body()).metadata();expect(coverMetadata.width).toBe(720);expect(coverMetadata.height).toBe(1280);
   await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).videoWidth)).toBe(720);
-  await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).duration)).toBeGreaterThan(.8);
+  await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).duration)).toBeGreaterThan(1.5);
+  await expect.poll(()=>video.evaluate(element=>(element as HTMLVideoElement).duration)).toBeLessThan(1.8);
   await videoCard.getByRole('button',{name:'Одобрить видео',exact:true}).click();
   await expect(videoCard.getByText('Одобрено',{exact:true})).toBeVisible();
   await videoCard.getByRole('button',{name:'Редактировать обложку',exact:true}).click();
@@ -211,7 +288,7 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await expect(videoCard.getByText('Одобрено',{exact:true})).toBeVisible();
 
   await videoCard.getByRole('button',{name:'История обработки',exact:true}).click();
-  await expect(videoCard.getByText('B-roll — отключено',{exact:true})).toBeVisible();
+  await expect(videoCard.getByText('B-roll',{exact:true})).toBeVisible();
   await page.screenshot({path:'test-results/videos-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);

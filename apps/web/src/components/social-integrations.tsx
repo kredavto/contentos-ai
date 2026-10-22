@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import type {SocialService} from '@contentos/core';
 import {api} from '../lib/api-client';
+import {YouTubeConnections} from './youtube-connections';
 type Overview=Awaited<ReturnType<SocialService['overview']>>;
 const labels={PENDING:'Проверяется',CONNECTED:'Подключено',LIMITED:'Недостаточно прав',ACTIVE:'Готово',TOKEN_EXPIRED:'Токен недействителен',REVOKED:'Отключено',ERROR:'Ошибка проверки'};
 export function SocialIntegrations({base,canManage}:{base:string;canManage:boolean}){
@@ -25,13 +26,14 @@ export function SocialIntegrations({base,canManage}:{base:string;canManage:boole
       <p className="muted">Токен хранится в зашифрованном виде и не возвращается в браузер после сохранения.</p>
       <div className="studio-actions"><button className="button primary" disabled={pending||!data?.configuration.ready}>{replace?'Проверить новый токен':'Проверить и подключить'}</button>{replace?<button type="button" className="button secondary" disabled={pending} onClick={()=>{setReplace(null);setToken('');}}>Отмена замены</button>:null}</div>
     </form>:null}
-    {data&&!data.connections.length?<div className="panel empty">Пока нет подключённых каналов.</div>:null}
-    <div className="plan-grid">{data?.connections.map(connection=><article className="panel stack" key={connection.id}><span className="badge">{labels[connection.status]}</span><h3>{connection.name}</h3>{connection.username?<p>@{connection.username}</p>:null}<p className="muted">{connection.provider==='mock-telegram'?'Демонстрационный Telegram':'Telegram'} · {connection.lastCheckedAt?`Проверено ${new Date(connection.lastCheckedAt).toLocaleString('ru')}`:'Ещё не проверялось'}</p>
+    {data&&!data.connections.some(row=>row.provider!=='youtube')?<div className="panel empty">Пока нет подключённых каналов.</div>:null}
+    <div className="plan-grid">{data?.connections.filter(row=>row.provider!=='youtube').map(connection=><article className="panel stack" key={connection.id}><span className="badge">{labels[connection.status]}</span><h3>{connection.name}</h3>{connection.username?<p>@{connection.username}</p>:null}<p className="muted">{connection.provider==='mock-telegram'?'Демонстрационный Telegram':'Telegram'} · {connection.lastCheckedAt?`Проверено ${new Date(connection.lastCheckedAt).toLocaleString('ru')}`:'Ещё не проверялось'}</p>
       <p className="muted">{connection.privacy==='PUBLIC'?'Публичный канал':'Приватный канал'} · Комментарии {connection.commentsEnabled?'включены':'выключены'}</p>
       {connection.status==='LIMITED'?<p className="notice warning">Проверьте, что бот — администратор канала и может публиковать сообщения. После изменения прав повторите проверку.</p>:null}
       {connection.status==='TOKEN_EXPIRED'?<p className="notice warning">Укажите действующий токен этого бота или другого бота с доступом к тому же каналу.</p>:null}
       {canManage?<div className="studio-actions"><button className="button secondary" disabled={pending||!data.configuration.ready||connection.status==='REVOKED'} onClick={()=>void perform(async()=>{await api(`${base}/social/${connection.id}/refresh`,'POST',{revision:connection.revision});setNotice('Права подключения проверены');})}>Проверить права</button><button className="button secondary" disabled={pending||!data.configuration.ready} onClick={()=>{setReplace(connection);setToken('');}}>Обновить токен</button>{connection.status!=='REVOKED'?<button className="text-button" disabled={pending} onClick={()=>setDisconnect(connection.id)}>Отключить канал</button>:null}</div>:null}
       {disconnect===connection.id?<div className="notice warning"><p>Отключение удалит сохранённый токен из CONTENTOS AI. Сам бот останется в Telegram-канале.</p><div className="studio-actions"><button className="button primary" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/social/${connection.id}/disconnect`,'POST',{revision:connection.revision});setDisconnect(null);if(replace?.id===connection.id){setReplace(null);setToken('');}setNotice('Канал отключён');})}>Подтвердить отключение</button><button className="button secondary" disabled={pending} onClick={()=>setDisconnect(null)}>Отмена</button></div></div>:null}
     </article>)}</div>
+    <YouTubeConnections base={base} canManage={canManage}/>
   </section>;
 }

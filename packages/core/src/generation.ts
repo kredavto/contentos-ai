@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { JobRepository, BrandRepository, LedgerRepository, ContentRepository } from '@contentos/db';
-import { DomainError, generationRequestSchema, carouselEditSchema, postEditSchema, scriptSchema, type GenerationInput } from '@contentos/types';
+import { DomainError, postHistoryQuerySchema, generationRequestSchema, carouselHistoryQuerySchema, carouselLifecycleSchema, carouselExportQuerySchema, carouselEditSchema, postEditSchema, scriptSchema, type GenerationInput } from '@contentos/types';
 const id = z.uuid();
 export class GenerationService {
   constructor(private readonly jobs:JobRepository,private readonly brands:BrandRepository,private readonly ledger:LedgerRepository,private readonly content:ContentRepository,private readonly configuration:{provider:string;model:string;ready:boolean;analyticsAI?:boolean}) {}
@@ -31,8 +31,12 @@ export class GenerationService {
     return {id:job.id,status:job.status};
   }
   postHistory(userId:string,tenantId:string,brandId:string,postId:string) { return this.content.postHistory(userId,id.parse(tenantId),id.parse(brandId),id.parse(postId)); }
+  postHistoryPage(userId:string,tenantId:string,brandId:string,postId:string,raw:unknown){return this.content.postHistoryPage(userId,id.parse(tenantId),id.parse(brandId),id.parse(postId),postHistoryQuerySchema.parse(raw));}
   editPost(userId:string,tenantId:string,brandId:string,postId:string,raw:unknown,correlationId:string) { return this.content.editPost(userId,id.parse(tenantId),id.parse(brandId),id.parse(postId),postEditSchema.parse(raw),correlationId); }
   carouselHistory(userId:string,tenantId:string,brandId:string,carouselId:string) { return this.content.carouselHistory(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId)); }
+  carouselHistoryPage(userId:string,tenantId:string,brandId:string,carouselId:string,raw:unknown){return this.content.carouselHistoryPage(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId),carouselHistoryQuerySchema.parse(raw));}
+  authorizeCarouselExport(userId:string,tenantId:string,brandId:string,carouselId:string,raw:unknown){return this.content.authorizeCarouselExport(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId),carouselExportQuerySchema.parse(raw));}
+  setCarouselArchived(userId:string,tenantId:string,brandId:string,carouselId:string,raw:unknown,correlationId:string){return this.content.setCarouselArchived(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId),carouselLifecycleSchema.parse(raw),correlationId);}
   editCarousel(userId:string,tenantId:string,brandId:string,carouselId:string,raw:unknown,correlationId:string) { return this.content.editCarousel(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId),carouselEditSchema.parse(raw),correlationId); }
   grantTrial(userId:string,tenantId:string,correlationId:string) { return this.ledger.grantTrial(userId,id.parse(tenantId),correlationId); }
   history(userId:string,tenantId:string,brandId:string,scriptId:string) {return this.content.history(userId,id.parse(tenantId),id.parse(brandId),id.parse(scriptId));}

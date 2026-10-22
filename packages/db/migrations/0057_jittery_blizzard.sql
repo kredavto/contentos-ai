@@ -1,0 +1,3 @@
+ALTER TABLE "carousels" ADD COLUMN "archived_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "carousels" ADD COLUMN "lifecycle_revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "carousels" ADD CONSTRAINT "carousels_lifecycle_valid" CHECK ("carousels"."lifecycle_revision">=0 and ("carousels"."archived_at" is null or ("carousels"."approved_version" is null and "carousels"."approved_by" is null)));

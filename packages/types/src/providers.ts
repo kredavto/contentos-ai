@@ -49,9 +49,10 @@ export interface VideoProvider {
   status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; downloadUrl?: string; errorCode?: string }>;
 }
 export interface CaptionSegment { start: number; end: number; text: string }
+export interface VideoBrollInput { fadeMs?:number;bytes:Uint8Array;startMs:number;endMs:number;sourceStartMs:number }
 export interface VideoProcessingProvider {
   prepareAudio(bytes:Uint8Array,context:OperationContext):Promise<{bytes:Uint8Array;durationSeconds:number}>;
-  process(input:{bytes:Uint8Array;options:import('./video-processing').VideoProcessingOptions;onStage?:(stage:'CAPTIONS_GENERATING'|'BROLL_PROCESSING'|'COVER_GENERATING'|'QC',details:Record<string,unknown>)=>Promise<void>},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
+  process(input:{bytes:Uint8Array;maximumDurationSeconds?:number;bookends?:Partial<Record<'intro'|'outro',{bytes:Uint8Array;sourceStartMs:number;durationMs:number}>>;broll?:VideoBrollInput;brollClips?:VideoBrollInput[];backgroundMusic?:{bytes:Uint8Array;volumePercent:number;fadeInMs?:number;fadeOutMs?:number};options:import('./video-processing').VideoProcessingOptions;onStage?:(stage:'CAPTIONS_GENERATING'|'BROLL_PROCESSING'|'COVER_GENERATING'|'QC',details:Record<string,unknown>)=>Promise<void>},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
 }
 export interface CaptionProvider {
   transcribe(input: { bytes: Uint8Array; mimeType: string; language: string }, context: OperationContext): Promise<CaptionSegment[]>;
@@ -80,6 +81,11 @@ export interface StorageProvider {
   put(key: string, bytes: Uint8Array, mimeType: string, context: OperationContext): Promise<void>;
   signedDownload(key: string, expiresSeconds: number, context: OperationContext): Promise<string>;
   delete(key: string, context: OperationContext): Promise<void>;
+}
+/** Exact, bounded reads of one immutable object version for resumable uploads. */
+export interface RangeStorageProvider extends StorageProvider {
+  inspectObject(key:string,context:OperationContext):Promise<{bytes:number;etag:string;mimeType:string|null}>;
+  getRange(key:string,input:{offset:number;length:number;totalBytes:number;etag:string},context:OperationContext):Promise<Uint8Array>;
 }
 export interface EmailProvider {
   send(input: { recipient: string; subject: string; text: string }, context: OperationContext): Promise<ProviderReference>;

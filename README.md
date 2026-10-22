@@ -32,6 +32,8 @@ pnpm test
 pnpm build
 ```
 
+For a disposable environment with PostgreSQL, Redis and FFmpeg, run `pnpm test:local`. Add `--e2e tests/e2e/onboarding.spec.ts` for the production-build browser MVP. Add `--recovery` before `--e2e` to rehearse PostgreSQL backup/restore with data and integrity checks. See [local verification](docs/local-verification.md) for prerequisites and cleanup behavior and [recovery scope](docs/database-recovery.md).
+
 For database integration and browser tests, use a dedicated PostgreSQL database ending in `_test`. Never point tests at real customer data. Create it in local Docker, then:
 
 ```sh

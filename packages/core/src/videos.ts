@@ -106,7 +106,27 @@ export class VideoProcessor {
         }else await this.repository.captionDraft(job,avatarConsentPolicies(),[]);
         return;
       }
-      const final=await this.processing.process({bytes:original,options:project.options,onStage:async(stage,details)=>{await this.repository.prepare(job,avatarConsentPolicies());await this.repository.stage(job,stage,details);}},context);
+      const bookends:NonNullable<Parameters<VideoProcessingProvider['process']>[0]['bookends']>={};
+      for(const clip of await this.repository.bookends(job,avatarConsentPolicies())){
+        const bytes=await this.storage.get(clip.asset.storageKey!,clip.asset.bytes!,context);
+        if(bytes.byteLength!==clip.asset.bytes)throw new DomainError('INVALID_MEDIA',422);
+        bookends[clip.slot]={bytes,sourceStartMs:clip.selection.sourceStartMs,durationMs:clip.selection.durationMs};
+      }
+      const brollClips:NonNullable<Parameters<VideoProcessingProvider['process']>[0]['brollClips']>=[];
+      for(const segment of await this.repository.broll(job,avatarConsentPolicies())){
+        const bytes=await this.storage.get(segment.asset.storageKey!,segment.asset.bytes!,context);
+        if(bytes.byteLength!==segment.asset.bytes)throw new DomainError('INVALID_MEDIA',422);
+        brollClips.push({bytes,...(segment.selection.fadeMs?{fadeMs:segment.selection.fadeMs}:{}),startMs:segment.selection.startMs,endMs:segment.selection.endMs,sourceStartMs:segment.selection.sourceStartMs});
+      }
+      const music=await this.repository.backgroundMusic(job,avatarConsentPolicies());
+      let backgroundMusic:Parameters<VideoProcessingProvider['process']>[0]['backgroundMusic'];
+      if(music){
+        const bytes=await this.storage.get(music.asset.storageKey!,music.asset.bytes!,context);
+        if(bytes.byteLength!==music.asset.bytes)throw new DomainError('INVALID_MEDIA',422);
+        backgroundMusic={bytes,volumePercent:music.volumePercent,...(music.fadeInMs?{fadeInMs:music.fadeInMs}:{}),...(music.fadeOutMs?{fadeOutMs:music.fadeOutMs}:{})};
+      }
+      await this.repository.prepare(job,avatarConsentPolicies());
+      const final=await this.processing.process({bytes:original,maximumDurationSeconds:project.maxDurationSeconds,bookends,...(brollClips.length===1?{broll:brollClips[0]}:brollClips.length?{brollClips}:{}),backgroundMusic,options:project.options,onStage:async(stage,details)=>{await this.repository.prepare(job,avatarConsentPolicies());await this.repository.stage(job,stage,details);}},context);
       await this.repository.prepare(job,avatarConsentPolicies());
       await this.storage.put(project.finalKey,final.bytes,'video/mp4',context);
       await this.storage.put(project.coverKey,final.thumbnail,'image/jpeg',context);

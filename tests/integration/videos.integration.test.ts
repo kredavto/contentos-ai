@@ -1,7 +1,7 @@
-import {randomUUID,randomBytes} from 'node:crypto';
+import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {LibraryMediaRepository,CoverRepository,createDatabase,PublishingRepository,SocialRepository,CalendarRepository,AvatarRepository,VideoRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {CalendarService} from '../../packages/core/src/calendar';
@@ -32,6 +32,16 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     await database.client`insert into scripts(id,tenant_id,brand_id,content_item_id,current_version,approved_version,approved_by,platform,duration) values(${scriptId},${tenantId},${brandId},${contentId},1,1,${userId},'YOUTUBE',30)`;
     await database.client`insert into script_versions(tenant_id,script_id,version,content,created_by) values(${tenantId},${scriptId},1,${JSON.stringify({hook:'Hook',context:'Context',core:'Core',proof:'Proof',cta:'CTA',factCheckNotes:[]})}::jsonb,${userId})`;
     return {scriptId,scriptVersion:1,lookId,orientation:'9:16' as const,resolution:'720p' as const,fit:'crop' as const,watermark:{text:'Мой бренд',position:'TOP_RIGHT' as const,opacity:60},cover:{framePercent:50,headline:'Обложка проекта',background:'FRAME' as const,font:'BOLD' as const,layout:'BOTTOM' as const,textColor:'#ffffff',backgroundColor:'#182338'},idempotencyKey:randomUUID()};
+  }
+  async function musicAsset(assetTenant=tenantId,assetBrand=brandId){
+    const id=randomUUID(),bytes=Buffer.from('normalized-music-fixture'),key=`${assetTenant}/library/${id}/1.mp3`;
+    await database.client`insert into library_media(id,tenant_id,brand_id,uploaded_by,name,provider,status,source_key,source_mime,source_bytes,source_sha256,upload_expires_at,storage_key,mime_type,bytes,duration_ms,has_audio,input_hash,idempotency_key,correlation_id) values(${id},${assetTenant},${assetBrand},${userId},'Music fixture','s3','READY',${`${assetTenant}/uploads/${id}/source`},'audio/mpeg',${bytes.length},${createHash('sha256').update(bytes).digest('hex')},now()+interval '5 minutes',${key},'audio/mpeg',${bytes.length},1000,true,${'a'.repeat(64)},${randomUUID()},${correlationId})`;
+    objects.set(key,bytes);return {assetId:id,key,bytes};
+  }
+  async function brollAsset(assetTenant=tenantId,assetBrand=brandId){
+    const asset=await musicAsset(assetTenant,assetBrand),key=`${assetTenant}/library/${asset.assetId}/1.mp4`;
+    await database.client`update library_media set source_mime='video/mp4',mime_type='video/mp4',width=320,height=240,has_audio=false,duration_ms=2000,storage_key=${key} where id=${asset.assetId}`;
+    objects.delete(asset.key);objects.set(key,asset.bytes);return {...asset,key};
   }
   beforeAll(async()=>{
     await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${userId},${`video-${userId}@example.test`},'unusable','Owner',now()),(${viewerId},${`video-${viewerId}@example.test`},'unusable','Viewer',now())`;
@@ -276,6 +286,272 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect(objects.has(`${tenantId}/videos/${project.id}/covers/${cancelled.id}.jpg`)).toBe(false);
     const [state]=await database.client`select c.status,v.delete_after from covers c join video_projects v on c.project_id=v.id where c.id=${cancelled.id}`;expect(state!.status).toBe('CANCELLED');expect(new Date(state!.delete_after).getTime()).toBeGreaterThan(Date.now()+240000);
     expect((await ledger.overview(userId,tenantId)).balances.AI_CREDITS.available).toBe(before-1);
+  });
+  it('validates music ownership, readiness, volume and idempotency before reserving video seconds',async()=>{
+    const music=await musicAsset(),input={...await request(),backgroundMusic:{assetId:music.assetId,volumePercent:15}};
+    const before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    for(const volumePercent of [0,31,1.5])await expect(async()=>service.create(userId,tenantId,brandId,{...input,backgroundMusic:{...input.backgroundMusic,volumePercent}},correlationId)).rejects.toThrow();
+    await expect(service.create(viewerId,tenantId,brandId,input,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(service.create(userId,tenantId,brandId,{...input,backgroundMusic:{assetId:randomUUID(),volumePercent:15}},correlationId)).rejects.toThrow('NOT_FOUND');
+    const otherBrand=randomUUID();await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${otherBrand},${tenantId},${workspaceId},'Other music brand')`;
+    await database.client`update library_media set brand_id=${otherBrand} where id=${music.assetId}`;
+    await expect(service.create(userId,tenantId,brandId,input,correlationId)).rejects.toThrow('NOT_FOUND');
+    await database.client`update library_media set brand_id=${brandId},status='UPLOADING' where id=${music.assetId}`;
+    await expect(service.create(userId,tenantId,brandId,input,correlationId)).rejects.toThrow('CONFLICT');
+    await database.client`update library_media set status='READY' where id=${music.assetId}`;
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before);
+    const otherTenant=randomUUID(),otherWorkspace=randomUUID(),foreignBrand=randomUUID();
+    await database.client`insert into organizations(id,name) values(${otherTenant},'Foreign music tenant')`;
+    await database.client`insert into workspaces(id,tenant_id,name) values(${otherWorkspace},${otherTenant},'Foreign')`;
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${foreignBrand},${otherTenant},${otherWorkspace},'Foreign')`;
+    const foreignMusic=await musicAsset(otherTenant,foreignBrand);
+    await expect(service.create(userId,tenantId,brandId,{...input,backgroundMusic:{assetId:foreignMusic.assetId,volumePercent:15}},correlationId)).rejects.toThrow('NOT_FOUND');
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);
+    expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    await expect(service.create(userId,tenantId,brandId,{...input,backgroundMusic:{...input.backgroundMusic,volumePercent:20}},correlationId)).rejects.toThrow('CONFLICT');
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    expect(project.backgroundMusic).toEqual(input.backgroundMusic);
+    await expect(database.client`update video_music set tenant_id=${randomUUID()} where project_id=${project.id}`).rejects.toThrow();
+    await expect(database.client`update video_music set asset_id=${foreignMusic.assetId} where project_id=${project.id}`).rejects.toThrow();
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+  });
+  it('persists music fades, rejects invalid values before reservation and detects changed settings on replay',async()=>{
+    const music=await musicAsset(),input={...await request(),backgroundMusic:{assetId:music.assetId,volumePercent:15,fadeInMs:300,fadeOutMs:400}};
+    const before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    for(const fadeInMs of [0,99,5001,100.5])await expect(async()=>service.create(userId,tenantId,brandId,{...input,backgroundMusic:{...input.backgroundMusic,fadeInMs}},correlationId)).rejects.toThrow();
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before);
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);
+    expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    for(const change of [{fadeInMs:400},{fadeOutMs:500}])await expect(service.create(userId,tenantId,brandId,{...input,backgroundMusic:{...input.backgroundMusic,...change}},correlationId)).rejects.toThrow('CONFLICT');
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    expect(project.backgroundMusic).toEqual(input.backgroundMusic);
+    for(const value of [-1,99,5001]){
+      await expect(database.client`update video_music set fade_in_ms=${value} where project_id=${project.id}`).rejects.toThrow();
+      await expect(database.client`update video_music set fade_out_ms=${value} where project_id=${project.id}`).rejects.toThrow();
+    }
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+  });
+  it('preserves selected music through caption review and local retries, then keeps the final render after source deletion',async()=>{
+    const music=await musicAsset(),input={...await request(),captionMode:'MANUAL',backgroundMusic:{assetId:music.assetId,volumePercent:12,fadeInMs:300,fadeOutMs:400}};
+    const job=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    await service.confirmCaptions(userId,tenantId,brandId,project.id,{revision:0},correlationId);
+    let runs=0;
+    const mixed:VideoProcessingProvider={...processing,process:async input=>{
+      expect(input.backgroundMusic?.fadeInMs).toBe(300);expect(input.backgroundMusic?.fadeOutMs).toBe(400);expect(input.backgroundMusic?.volumePercent).toBe(12);expect(input.backgroundMusic?.bytes).toEqual(music.bytes);
+      if(++runs===1)throw new DomainError('PROVIDER_UNAVAILABLE',503);return processing.process(input,{tenantId,internalId:job.id,idempotencyKey:job.id,correlationId,signal:new AbortController().signal});
+    }};
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},storage,mixed,true);
+    await due(job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RETRY');
+    await due(job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(submissions-before).toBe(1);
+    await new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,music.assetId,correlationId);
+    await expect(service.download(userId,tenantId,brandId,project.id,correlationId)).resolves.toHaveProperty('videoUrl');
+    expect(await database.client`select id from usage_ledger where reservation_id=${(await row(job.id)).reservation_id} and type='CAPTURE'`).toHaveLength(1);
+  });
+  it.each(['before-submit','after-music-read','after-final-write'] as const)('fences deleted music %s and releases the reservation',async phase=>{
+    const music=await musicAsset(),job=await service.create(userId,tenantId,brandId,{...await request(),backgroundMusic:{assetId:music.assetId,volumePercent:15,fadeInMs:300,fadeOutMs:400}},correlationId);
+    const before=submissions;let rendered=false;
+    const remove=()=>new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,music.assetId,correlationId);
+    if(phase==='before-submit')await remove();else {await due(job.id);await processor.run(tenantId,job.id);}
+    const deletingStorage:StorageProvider={...storage,get:async(key,max,context)=>{const bytes=await storage.get(key,max,context);if(phase==='after-music-read'&&key===music.key)await remove();return bytes;},put:async(key,bytes,mime,context)=>{await storage.put(key,bytes,mime,context);if(phase==='after-final-write'&&key.endsWith('/final.mp4'))await remove();}};
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},deletingStorage,{...processing,process:async(input,context)=>{rendered=true;return processing.process(input,context);}},true);
+    await due(job.id);await worker.run(tenantId,job.id);const result=await row(job.id);
+    expect(result.status).toBe('FAILED');expect(result.error_code).toBe('CONFLICT');expect(rendered).toBe(phase==='after-final-write');expect(submissions-before).toBe(phase==='before-submit'?0:1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='RELEASE'`).toHaveLength(1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='CAPTURE'`).toHaveLength(0);
+  });
+  it('requires approved, valid, same-brand B-roll and protects tenant foreign keys without reserving on rejection',async()=>{
+    const clip=await brollAsset(),selection={assetId:clip.assetId,startMs:200,endMs:1000,sourceStartMs:100,approved:true},input={...await request(),broll:selection};
+    const before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    for(const patch of [{approved:false},{startMs:1100},{endMs:201},{sourceStartMs:1500},{startMs:60000,endMs:61000}])await expect(async()=>service.create(userId,tenantId,brandId,{...input,broll:{...selection,...patch}},correlationId)).rejects.toThrow();
+    await expect(service.create(viewerId,tenantId,brandId,input,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    const audio=await musicAsset();await expect(service.create(userId,tenantId,brandId,{...input,broll:{...selection,assetId:audio.assetId}},correlationId)).rejects.toThrow('CONFLICT');
+    const otherBrand=randomUUID();await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${otherBrand},${tenantId},${workspaceId},'Other B-roll brand')`;
+    const otherClip=await brollAsset(tenantId,otherBrand);
+    await expect(service.create(userId,tenantId,brandId,{...input,broll:{...selection,assetId:otherClip.assetId}},correlationId)).rejects.toThrow('NOT_FOUND');
+    const otherTenant=randomUUID(),otherWorkspace=randomUUID(),foreignBrand=randomUUID();
+    await database.client`insert into organizations(id,name) values(${otherTenant},'Foreign B-roll tenant')`;
+    await database.client`insert into workspaces(id,tenant_id,name) values(${otherWorkspace},${otherTenant},'Foreign')`;
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${foreignBrand},${otherTenant},${otherWorkspace},'Foreign')`;
+    const foreign=await brollAsset(otherTenant,foreignBrand);
+    await expect(service.create(userId,tenantId,brandId,{...input,broll:{...selection,assetId:foreign.assetId}},correlationId)).rejects.toThrow('NOT_FOUND');
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before);
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);
+    expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    await expect(service.create(userId,tenantId,brandId,{...input,broll:{...selection,startMs:300}},correlationId)).rejects.toThrow('CONFLICT');
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;expect(project.broll).toEqual(selection);
+    await expect(database.client`update broll_segments set asset_id=${foreign.assetId} where project_id=${project.id}`).rejects.toThrow();
+    await expect(database.client`update broll_segments set approved=false where project_id=${project.id}`).rejects.toThrow();
+    await expect(database.client`update broll_segments set end_ms=start_ms where project_id=${project.id}`).rejects.toThrow();
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+  });
+  it('retains B-roll through caption review/retry and keeps completed renders independent of the source',async()=>{
+    const clip=await brollAsset(),broll={assetId:clip.assetId,startMs:200,endMs:1000,sourceStartMs:100,approved:true},job=await service.create(userId,tenantId,brandId,{...await request(),captionMode:'MANUAL',broll},correlationId),before=submissions;
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    await service.confirmCaptions(userId,tenantId,brandId,project.id,{revision:0},correlationId);
+    let runs=0;
+    const local:VideoProcessingProvider={...processing,process:async(input,context)=>{
+      expect(input.broll).toEqual({bytes:clip.bytes,startMs:200,endMs:1000,sourceStartMs:100});
+      if(++runs===1)throw new DomainError('PROVIDER_UNAVAILABLE',503);return processing.process(input,context);
+    }};
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},storage,local,true);
+    await due(job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RETRY');
+    await due(job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(submissions-before).toBe(1);
+    expect((await service.overview(userId,tenantId,brandId)).projects.find(item=>item.id===project.id)?.broll).toEqual(broll);
+    await new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,clip.assetId,correlationId);
+    await expect(service.download(userId,tenantId,brandId,project.id,correlationId)).resolves.toHaveProperty('videoUrl');
+    expect(await database.client`select id from usage_ledger where reservation_id=${(await row(job.id)).reservation_id} and type='CAPTURE'`).toHaveLength(1);
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+    await database.client`update video_projects set delete_after=now() where tenant_id=${tenantId} and lifecycle='DELETE_PENDING'`;
+    for(let i=0;i<20&&await service.cleanupOne();i++){ /* Drain this fixture provider's bounded pending deletions. */ }
+    expect(await database.client`select id from broll_segments where project_id=${project.id}`).toHaveLength(0);
+  });
+  it.each(['before-submit','after-broll-read','after-final-write'] as const)('fences deleted B-roll %s and releases video seconds',async phase=>{
+    const clip=await brollAsset(),job=await service.create(userId,tenantId,brandId,{...await request(),broll:{assetId:clip.assetId,startMs:200,endMs:1000,sourceStartMs:100,approved:true}},correlationId),before=submissions;
+    let rendered=false;const remove=()=>new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,clip.assetId,correlationId);
+    if(phase==='before-submit')await remove();else{await due(job.id);await processor.run(tenantId,job.id);}
+    const deletingStorage:StorageProvider={...storage,get:async(key,max,context)=>{const bytes=await storage.get(key,max,context);if(phase==='after-broll-read'&&key===clip.key)await remove();return bytes;},put:async(key,bytes,mime,context)=>{await storage.put(key,bytes,mime,context);if(phase==='after-final-write'&&key.endsWith('/final.mp4'))await remove();}};
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},deletingStorage,{...processing,process:async(input,context)=>{rendered=true;return processing.process(input,context);}},true);
+    await due(job.id);await worker.run(tenantId,job.id);const result=await row(job.id);
+    expect(result.status).toBe('FAILED');expect(result.error_code).toBe('CONFLICT');expect(rendered).toBe(phase==='after-final-write');expect(submissions-before).toBe(phase==='before-submit'?0:1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='RELEASE'`).toHaveLength(1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='CAPTURE'`).toHaveLength(0);
+  });
+  it('validates bookends, tenant boundaries and explicit approval before reserving, with durable idempotency',async()=>{
+    const clip=await brollAsset(),selection={assetId:clip.assetId,sourceStartMs:100,durationMs:700,approved:true},input={...await request(),bookends:{intro:selection}};
+    const before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    for(const patch of [{approved:false},{durationMs:0},{durationMs:30001},{sourceStartMs:1900},{sourceStartMs:-1}])await expect(async()=>service.create(userId,tenantId,brandId,{...input,bookends:{intro:{...selection,...patch}}},correlationId)).rejects.toThrow();
+    await expect(async()=>service.create(userId,tenantId,brandId,{...input,bookends:{}},correlationId)).rejects.toThrow();
+    await expect(service.create(viewerId,tenantId,brandId,input,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    const audio=await musicAsset();await expect(service.create(userId,tenantId,brandId,{...input,bookends:{intro:{...selection,assetId:audio.assetId}}},correlationId)).rejects.toThrow('CONFLICT');
+    const otherBrand=randomUUID();await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${otherBrand},${tenantId},${workspaceId},'Other bookend brand')`;
+    const other=await brollAsset(tenantId,otherBrand);await expect(service.create(userId,tenantId,brandId,{...input,bookends:{intro:{...selection,assetId:other.assetId}}},correlationId)).rejects.toThrow('NOT_FOUND');
+    const foreignTenant=randomUUID(),foreignWorkspace=randomUUID(),foreignBrand=randomUUID();
+    await database.client`insert into organizations(id,name) values(${foreignTenant},'Foreign bookend tenant')`;
+    await database.client`insert into workspaces(id,tenant_id,name) values(${foreignWorkspace},${foreignTenant},'Foreign')`;
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${foreignBrand},${foreignTenant},${foreignWorkspace},'Foreign')`;
+    const foreign=await brollAsset(foreignTenant,foreignBrand);
+    await expect(service.create(userId,tenantId,brandId,{...input,bookends:{outro:{...selection,assetId:foreign.assetId}}},correlationId)).rejects.toThrow('NOT_FOUND');
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before);
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    await expect(service.create(userId,tenantId,brandId,{...input,bookends:{outro:selection}},correlationId)).rejects.toThrow('CONFLICT');
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    expect(project.bookends).toEqual([{slot:'intro',assetId:clip.assetId,sourceStartMs:100,durationMs:700}]);
+    await expect(database.client`update video_bookends set asset_id=${foreign.assetId} where project_id=${project.id}`).rejects.toThrow();
+    await expect(database.client`update video_bookends set approved=false where project_id=${project.id}`).rejects.toThrow();
+    await expect(database.client`update video_bookends set slot='middle' where project_id=${project.id}`).rejects.toThrow();
+    await expect(database.client`update video_bookends set duration_ms=30001 where project_id=${project.id}`).rejects.toThrow();
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+  });
+  it('reserves bookend duration, persists both clips across caption review/retry and captures the final duration once',async()=>{
+    const clip=await brollAsset(),input={...await request(),captionMode:'MANUAL',bookends:{intro:{assetId:clip.assetId,sourceStartMs:100,durationMs:700,approved:true},outro:{assetId:clip.assetId,sourceStartMs:500,durationMs:900,approved:true}}};
+    const job=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;
+    const [reservation]=await database.client`select amount from usage_reservations where id=${(await row(job.id)).reservation_id}`;expect(reservation?.amount).toBe(62);
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    expect((await service.captionReview(userId,tenantId,brandId,project.id,correlationId)).durationSeconds).toBe(11.2);
+    await service.confirmCaptions(userId,tenantId,brandId,project.id,{revision:0},correlationId);
+    let runs=0;
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},storage,{...processing,process:async(input,context)=>{
+      expect(input.maximumDurationSeconds).toBe(62);expect(input.bookends).toEqual({intro:{bytes:clip.bytes,sourceStartMs:100,durationMs:700},outro:{bytes:clip.bytes,sourceStartMs:500,durationMs:900}});
+      if(++runs===1)throw new DomainError('PROVIDER_UNAVAILABLE',503);return {...await processing.process(input,context),durationSeconds:12.8};
+    }},true);
+    await due(job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RETRY');
+    await due(job.id);await worker.run(tenantId,job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(submissions-before).toBe(1);
+    const captures=await database.client`select amount from usage_ledger where reservation_id=${(await row(job.id)).reservation_id} and type='CAPTURE'`;expect(captures).toHaveLength(1);expect(Math.abs(captures[0]!.amount)).toBe(13);
+    await new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,clip.assetId,correlationId);
+    await expect(service.download(userId,tenantId,brandId,project.id,correlationId)).resolves.toHaveProperty('videoUrl');
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+    await database.client`update video_projects set delete_after=now() where tenant_id=${tenantId} and lifecycle='DELETE_PENDING'`;
+    for(let i=0;i<20&&await service.cleanupOne();i++){ /* Drain bounded fixture deletions. */ }
+    expect(await database.client`select id from video_bookends where project_id=${project.id}`).toHaveLength(0);
+  });
+  it.each(['before-submit','after-read','after-final-write'] as const)('fences a deleted bookend %s and releases the reservation without capture',async phase=>{
+    const clip=await brollAsset(),job=await service.create(userId,tenantId,brandId,{...await request(),bookends:{outro:{assetId:clip.assetId,sourceStartMs:0,durationMs:1000,approved:true}}},correlationId),before=submissions;
+    let rendered=false;const remove=()=>new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,clip.assetId,correlationId);
+    if(phase==='before-submit')await remove();else{await due(job.id);await processor.run(tenantId,job.id);}
+    const deletingStorage:StorageProvider={...storage,get:async(key,max,context)=>{const bytes=await storage.get(key,max,context);if(phase==='after-read'&&key===clip.key)await remove();return bytes;},put:async(key,bytes,mime,context)=>{await storage.put(key,bytes,mime,context);if(phase==='after-final-write'&&key.endsWith('/final.mp4'))await remove();}};
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},deletingStorage,{...processing,process:async(input,context)=>{rendered=true;return processing.process(input,context);}},true);
+    await due(job.id);await worker.run(tenantId,job.id);const result=await row(job.id);
+    expect(result.status).toBe('FAILED');expect(result.error_code).toBe('CONFLICT');expect(rendered).toBe(phase==='after-final-write');expect(submissions-before).toBe(phase==='before-submit'?0:1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='RELEASE'`).toHaveLength(1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='CAPTURE'`).toHaveLength(0);
+  });
+  it('validates every B-roll selection before reserving and stores one ordered list without duplicate projects',async()=>{
+    const first=await brollAsset(),second=await brollAsset(),selections=[{assetId:first.assetId,startMs:100,endMs:500,sourceStartMs:0,approved:true},{assetId:second.assetId,startMs:500,endMs:900,sourceStartMs:100,approved:true}],input={...await request(),brollClips:selections};
+    const before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    for(const clips of [[],[selections[1],selections[0]],[selections[0],{...selections[1],startMs:400}],[selections[0],{...selections[1],approved:false}],[selections[0],{...selections[1],sourceStartMs:1900}],Array.from({length:6},(_,i)=>({...selections[0],startMs:i*100,endMs:(i+1)*100}))])await expect(async()=>service.create(userId,tenantId,brandId,{...input,brollClips:clips},correlationId)).rejects.toThrow();
+    await expect(service.create(viewerId,tenantId,brandId,input,correlationId)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(async()=>service.create(userId,tenantId,brandId,{...input,broll:selections[0]},correlationId)).rejects.toThrow();
+    const otherBrand=randomUUID();await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${otherBrand},${tenantId},${workspaceId},'Other montage brand')`;
+    const other=await brollAsset(tenantId,otherBrand);
+    await expect(service.create(userId,tenantId,brandId,{...input,brollClips:[selections[0],{...selections[1],assetId:other.assetId}]},correlationId)).rejects.toThrow('NOT_FOUND');
+    const foreignTenant=randomUUID(),foreignWorkspace=randomUUID(),foreignBrand=randomUUID();
+    await database.client`insert into organizations(id,name) values(${foreignTenant},'Foreign montage tenant')`;
+    await database.client`insert into workspaces(id,tenant_id,name) values(${foreignWorkspace},${foreignTenant},'Foreign')`;
+    await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${foreignBrand},${foreignTenant},${foreignWorkspace},'Foreign')`;
+    const foreign=await brollAsset(foreignTenant,foreignBrand);
+    await expect(service.create(userId,tenantId,brandId,{...input,brollClips:[selections[0],{...selections[1],assetId:foreign.assetId}]},correlationId)).rejects.toThrow('NOT_FOUND');
+    await database.client`update library_media set bytes=${60*1024*1024} where id=${first.assetId}`;
+    await expect(service.create(userId,tenantId,brandId,{...input,brollClips:Array.from({length:5},(_,i)=>({...selections[0],startMs:i*100,endMs:(i+1)*100}))},correlationId)).rejects.toThrow('INVALID_INPUT');
+    await database.client`update library_media set bytes=${first.bytes.length} where id=${first.assetId}`;
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before);
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    await expect(service.create(userId,tenantId,brandId,{...input,brollClips:[selections[0],{...selections[1],sourceStartMs:200}]},correlationId)).rejects.toThrow('CONFLICT');
+    const projects=(await service.overview(userId,tenantId,brandId)).projects.filter(item=>item.jobId===job.id);expect(projects).toHaveLength(1);const project=projects[0]!;
+    expect(project.brollClips).toEqual(selections);expect(project.broll).toBeNull();
+    expect((await database.client`select position from broll_segments where project_id=${project.id} order by position`).map(row=>row.position)).toEqual([0,1]);
+    await expect(database.client`update broll_segments set position=0 where project_id=${project.id} and position=1`).rejects.toThrow();
+    await expect(database.client`update broll_segments set position=5 where project_id=${project.id} and position=1`).rejects.toThrow();
+    await expect(database.client`update broll_segments set asset_id=${foreign.assetId} where project_id=${project.id} and position=1`).rejects.toThrow();
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+  });
+  it('retains all B-roll selections through caption review and retry, captures once and cleans every segment',async()=>{
+    const first=await brollAsset(),second=await brollAsset(),selections=[{assetId:first.assetId,startMs:100,endMs:500,sourceStartMs:0,fadeMs:200,approved:true},{assetId:second.assetId,startMs:600,endMs:1000,sourceStartMs:100,fadeMs:100,approved:true}];
+    const job=await service.create(userId,tenantId,brandId,{...await request(),captionMode:'MANUAL',brollClips:selections},correlationId),before=submissions;
+    await due(job.id);await processor.run(tenantId,job.id);await due(job.id);await processor.run(tenantId,job.id);
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    await service.confirmCaptions(userId,tenantId,brandId,project.id,{revision:0},correlationId);let runs=0;
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},storage,{...processing,process:async(input,context)=>{
+      expect(input.broll).toBeUndefined();expect(input.brollClips).toEqual([{bytes:first.bytes,startMs:100,endMs:500,sourceStartMs:0,fadeMs:200},{bytes:second.bytes,startMs:600,endMs:1000,sourceStartMs:100,fadeMs:100}]);
+      expect(input.maximumDurationSeconds).toBe(60);if(++runs===1)throw new DomainError('PROVIDER_UNAVAILABLE',503);return processing.process(input,context);
+    }},true);
+    await due(job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('RETRY');
+    await due(job.id);await worker.run(tenantId,job.id);await worker.run(tenantId,job.id);expect((await row(job.id)).status).toBe('SUCCEEDED');expect(submissions-before).toBe(1);
+    expect((await service.overview(userId,tenantId,brandId)).projects.find(item=>item.id===project.id)?.brollClips).toEqual(selections);
+    await new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,second.assetId,correlationId);
+    await expect(service.download(userId,tenantId,brandId,project.id,correlationId)).resolves.toHaveProperty('videoUrl');
+    expect(await database.client`select id from usage_ledger where reservation_id=${(await row(job.id)).reservation_id} and type='CAPTURE'`).toHaveLength(1);
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
+    await database.client`update video_projects set delete_after=now() where tenant_id=${tenantId} and lifecycle='DELETE_PENDING'`;
+    for(let i=0;i<20&&await service.cleanupOne();i++){ /* Drain bounded fixture deletions. */ }
+    expect(await database.client`select id from broll_segments where project_id=${project.id}`).toHaveLength(0);
+  });
+  it.each(['before-submit','after-second-read','after-final-write'] as const)('fences deletion of the second B-roll clip %s',async phase=>{
+    const first=await brollAsset(),second=await brollAsset(),job=await service.create(userId,tenantId,brandId,{...await request(),brollClips:[{assetId:first.assetId,startMs:100,endMs:500,sourceStartMs:0,fadeMs:200,approved:true},{assetId:second.assetId,startMs:600,endMs:1000,sourceStartMs:0,fadeMs:100,approved:true}]},correlationId),before=submissions;
+    let rendered=false;const remove=()=>new LibraryMediaRepository(database.db).requestDeletion(userId,tenantId,brandId,second.assetId,correlationId);
+    if(phase==='before-submit')await remove();else{await due(job.id);await processor.run(tenantId,job.id);}
+    const deletingStorage:StorageProvider={...storage,get:async(key,max,context)=>{const bytes=await storage.get(key,max,context);if(phase==='after-second-read'&&key===second.key)await remove();return bytes;},put:async(key,bytes,mime,context)=>{await storage.put(key,bytes,mime,context);if(phase==='after-final-write'&&key.endsWith('/final.mp4'))await remove();}};
+    const worker=new VideoProcessor(database.db,{name:providerName,provider},deletingStorage,{...processing,process:async(input,context)=>{rendered=true;return processing.process(input,context);}},true);
+    await due(job.id);await worker.run(tenantId,job.id);const result=await row(job.id);
+    expect(result.status).toBe('FAILED');expect(result.error_code).toBe('CONFLICT');expect(rendered).toBe(phase==='after-final-write');expect(submissions-before).toBe(phase==='before-submit'?0:1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='RELEASE'`).toHaveLength(1);
+    expect(await database.client`select id from usage_ledger where reservation_id=${result.reservation_id} and type='CAPTURE'`).toHaveLength(0);
+  });
+  it('validates fade bounds before reservation and persists transitions in legacy selection identity and database constraints',async()=>{
+    const clip=await brollAsset(),selection={assetId:clip.assetId,startMs:100,endMs:700,sourceStartMs:100,fadeMs:200,approved:true},input={...await request(),broll:selection};
+    const before=(await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS;
+    for(const fadeMs of [0,-1,99,301,2001,100.5])await expect(async()=>service.create(userId,tenantId,brandId,{...input,broll:{...selection,fadeMs}},correlationId)).rejects.toThrow();
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before);
+    const job=await service.create(userId,tenantId,brandId,input,correlationId);expect((await service.create(userId,tenantId,brandId,input,correlationId)).id).toBe(job.id);
+    await expect(service.create(userId,tenantId,brandId,{...input,broll:{...selection,fadeMs:100}},correlationId)).rejects.toThrow('CONFLICT');
+    const project=(await service.overview(userId,tenantId,brandId)).projects.find(item=>item.jobId===job.id)!;
+    expect(project.broll).toEqual(selection);expect(project.brollClips).toEqual([selection]);
+    for(const fadeMs of [-1,99,301,2001])await expect(database.client`update broll_segments set fade_ms=${fadeMs} where project_id=${project.id}`).rejects.toThrow();
+    expect((await database.client`select fade_ms from broll_segments where project_id=${project.id}`)[0]?.fade_ms).toBe(200);
+    await service.delete(userId,tenantId,brandId,project.id,correlationId);
   });
   it('blocks stale approved scripts and revoked consent before remote submission',async()=>{
     const input=await request(),stale=await service.create(userId,tenantId,brandId,input,correlationId),before=submissions;

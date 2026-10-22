@@ -1,0 +1,3 @@
+ALTER TABLE "video_music" ADD COLUMN "fade_in_ms" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "video_music" ADD COLUMN "fade_out_ms" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "video_music" ADD CONSTRAINT "video_music_fades_valid" CHECK (("video_music"."fade_in_ms"=0 or "video_music"."fade_in_ms" between 100 and 5000) and ("video_music"."fade_out_ms"=0 or "video_music"."fade_out_ms" between 100 and 5000));

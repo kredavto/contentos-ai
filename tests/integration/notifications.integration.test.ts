@@ -36,10 +36,68 @@ describe.skipIf(!url)('durable role-scoped notifications',()=>{
     expect((await service.list(f.owner,f.tenantId,{})).items).toHaveLength(0);await expect(service.markRead(f.owner,f.tenantId,{id:item.id})).rejects.toThrow('NOT_FOUND');
     await expect(database.client`update notifications set type='JOB_FAILED' where id=${item.id}`).rejects.toThrow('Notification identity');
   });
+  it('marks only the requested snapshot and preserves first-read timestamps on retry',async()=>{
+    const f=await fixture();
+    await database.client`insert into notifications(tenant_id,user_id,source_key,type,audience,resource_id) select ${f.tenantId},${f.owner},'batch:'||n,'JOB_FAILED','ALL',${randomUUID()} from generate_series(1,51) n`;
+    const first=await service.list(f.owner,f.tenantId,{}),ids=first.items.map(item=>item.id);
+    const already=await service.markRead(f.owner,f.tenantId,{id:ids[0]});
+    const late=randomUUID();await database.client`insert into notifications(id,tenant_id,user_id,source_key,type,audience,resource_id) values(${late},${f.tenantId},${f.owner},${late},'JOB_FAILED','ALL',${randomUUID()})`;
+    const result=await service.markReadBatch(f.owner,f.tenantId,{ids});expect(result.items).toHaveLength(50);expect(result.unread).toBe(2);
+    expect(result.items.find(item=>item.id===ids[0])?.readAt).toEqual(already.readAt);
+    const replay=await service.markReadBatch(f.owner,f.tenantId,{ids:[...ids].reverse()});
+    expect(new Map(replay.items.map(item=>[item.id,item.readAt]))).toEqual(new Map(result.items.map(item=>[item.id,item.readAt])));expect(replay.unread).toBe(2);
+    expect((await database.client`select read_at from notifications where id=${late}`)[0]?.read_at).toBeNull();
+  });
+  it('rejects a mixed unauthorized batch atomically and rechecks current roles and accounts',async()=>{
+    const f=await fixture();await f.pay();await repository.projectBatch(f.tenantId);
+    const own=(await service.list(f.owner,f.tenantId,{})).items[0]!,other=(await service.list(f.otherOwner,f.tenantId,{})).items[0]!;
+    for(const id of [other.id,randomUUID()])await expect(service.markReadBatch(f.owner,f.tenantId,{ids:[own.id,id]})).rejects.toThrow('NOT_FOUND');
+    expect((await service.list(f.owner,f.tenantId,{})).unread).toBe(1);
+    const foreign=await fixture();await database.client`insert into organization_members(tenant_id,user_id,role) values(${foreign.tenantId},${f.owner},'OWNER')`;
+    await expect(service.markReadBatch(f.owner,foreign.tenantId,{ids:[own.id]})).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${f.tenantId} and user_id=${f.owner}`;
+    await expect(service.markReadBatch(f.owner,f.tenantId,{ids:[own.id]})).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='OWNER' where tenant_id=${f.tenantId} and user_id=${f.owner}`;
+    await database.client`update users set disabled_at=now() where id=${f.owner}`;
+    await expect(service.markReadBatch(f.owner,f.tenantId,{ids:[own.id]})).rejects.toThrow('NOT_FOUND');
+    expect((await database.client`select read_at from notifications where id=${own.id}`)[0]?.read_at).toBeNull();
+  });
+  it('serializes overlapping batches without deadlocks or changing the first read time',async()=>{
+    const f=await fixture();await database.client`insert into notifications(tenant_id,user_id,source_key,type,audience,resource_id) select ${f.tenantId},${f.viewer},'overlap:'||n,'JOB_FAILED','ALL',${randomUUID()} from generate_series(1,3) n`;
+    const ids=(await service.list(f.viewer,f.tenantId,{})).items.map(item=>item.id);
+    const results=await Promise.all([service.markReadBatch(f.viewer,f.tenantId,{ids}),service.markReadBatch(f.viewer,f.tenantId,{ids:[...ids].reverse()})]);
+    expect(results.every(result=>result.unread===0)).toBe(true);
+    expect(new Map(results[0]!.items.map(item=>[item.id,item.readAt]))).toEqual(new Map(results[1]!.items.map(item=>[item.id,item.readAt])));
+  });
   it('paginates identical database timestamps without skipping or repeating rows',async()=>{
     const f=await fixture();await database.client`insert into notifications(tenant_id,user_id,source_key,type,audience,resource_id) select ${f.tenantId},${f.owner},'fixture:'||n,'JOB_FAILED','ALL',${randomUUID()} from generate_series(1,121) n`;
     const first=await service.list(f.owner,f.tenantId,{}),second=await service.list(f.owner,f.tenantId,{cursor:first.nextCursor}),third=await service.list(f.owner,f.tenantId,{cursor:second.nextCursor});
     expect([first.items.length,second.items.length,third.items.length]).toEqual([50,50,21]);expect(new Set([...first.items,...second.items,...third.items].map(item=>item.id)).size).toBe(121);expect(third.nextCursor).toBeNull();expect(first.unread).toBe(121);
+  });
+  it('paginates unread events past read rows and accepts a cursor after marking its page read',async()=>{
+    const f=await fixture();await database.client`insert into notifications(tenant_id,user_id,source_key,type,audience,resource_id) select ${f.tenantId},${f.owner},'filtered:'||n,'JOB_FAILED','ALL',${randomUUID()} from generate_series(1,121) n`;
+    const newest=await service.list(f.owner,f.tenantId,{});await service.markReadBatch(f.owner,f.tenantId,{ids:newest.items.map(item=>item.id)});
+    const first=await service.list(f.owner,f.tenantId,{status:'UNREAD'});expect(first.items).toHaveLength(50);expect(first.unread).toBe(71);expect(first.items.every(item=>!item.readAt)).toBe(true);
+    expect(first.items.some(item=>newest.items.some(read=>read.id===item.id))).toBe(false);
+    await service.markReadBatch(f.owner,f.tenantId,{ids:first.items.map(item=>item.id)});
+    const late=randomUUID();await database.client`insert into notifications(id,tenant_id,user_id,source_key,type,audience,resource_id) values(${late},${f.tenantId},${f.owner},${late},'JOB_FAILED','ALL',${randomUUID()})`;
+    const second=await service.list(f.owner,f.tenantId,{status:'UNREAD',cursor:first.nextCursor});expect(second.items).toHaveLength(21);expect(second.nextCursor).toBeNull();expect(second.unread).toBe(22);
+    expect(new Set([...first.items,...second.items].map(item=>item.id)).size).toBe(71);expect(second.items.some(item=>item.id===late)).toBe(false);
+    await service.markReadBatch(f.owner,f.tenantId,{ids:second.items.map(item=>item.id)});
+    const refreshed=await service.list(f.owner,f.tenantId,{status:'UNREAD'});expect(refreshed.items.map(item=>item.id)).toEqual([late]);
+    await service.markRead(f.owner,f.tenantId,{id:late});expect((await service.list(f.owner,f.tenantId,{status:'UNREAD'})).items).toEqual([]);
+    expect((await service.list(f.owner,f.tenantId,{})).items).toHaveLength(50);
+  });
+  it('rejects unread cursors from other recipients, tenants and no-longer-visible audiences',async()=>{
+    const f=await fixture();await f.pay();await repository.projectBatch(f.tenantId);const own=(await service.list(f.owner,f.tenantId,{})).items[0]!;
+    await expect(service.list(f.otherOwner,f.tenantId,{status:'UNREAD',cursor:own.id})).rejects.toThrow('NOT_FOUND');
+    const other=await fixture();await database.client`insert into organization_members(tenant_id,user_id,role) values(${other.tenantId},${f.owner},'OWNER')`;
+    await expect(service.list(f.owner,other.tenantId,{status:'UNREAD',cursor:own.id})).rejects.toThrow('NOT_FOUND');
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${f.tenantId} and user_id=${f.owner}`;
+    expect((await service.list(f.owner,f.tenantId,{status:'UNREAD'})).unread).toBe(0);
+    await expect(service.list(f.owner,f.tenantId,{status:'UNREAD',cursor:own.id})).rejects.toThrow('NOT_FOUND');
+    await database.client`delete from organization_members where tenant_id=${f.tenantId} and user_id=${f.owner}`;
+    await expect(service.list(f.owner,f.tenantId,{status:'UNREAD'})).rejects.toThrow('NOT_FOUND');
   });
   it('reports a definitive payment rejection once and avoids classifying unsent cancellation as failure',async()=>{
     const f=await fixture(),order=await f.buy(),tasks=new PaymentTaskRepository(database.db),claimed=await tasks.claim(f.tenantId,order.id);await tasks.prepare(f.tenantId,order.id,claimed!.leaseToken!,merchant);await tasks.fail(f.tenantId,order.id,claimed!.leaseToken!,true);
