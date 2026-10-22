@@ -115,7 +115,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 97 | UNIT ECONOMICS DASHBOARD | See TECH_SPEC.md §97; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 98 | AUDIT LOG | See TECH_SPEC.md §98; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 99 | FEATURE FLAGS | See TECH_SPEC.md §99; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 100 | BYOK | See TECH_SPEC.md §100; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 100 | BYOK | Scoped encrypted storage, owner/Expert/Agency checks, revision fencing and revoke; see provider-key-storage.md. API/UI, provider validation/routing and live verification remain. | PARTIAL |
 | 101 | SECURITY | See TECH_SPEC.md §101; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 102 | TENANT ISOLATION | See TECH_SPEC.md §102; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 103 | FILE UPLOAD SECURITY | See TECH_SPEC.md §103; current implementation evidence must be inspected | AUDIT_REQUIRED |
