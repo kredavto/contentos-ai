@@ -20,7 +20,7 @@ export const notificationPreferences=pgTable('notification_preferences',{
   id:uuid('id').primaryKey().defaultRandom(),tenantId:uuid('tenant_id').notNull(),userId:uuid('user_id').notNull(),
   emailEnabled:boolean('email_enabled').notNull().default(false),revision:uuid('revision').notNull().defaultRandom(),
   enabledAt:timestamp('enabled_at',{withTimezone:true}),updatedAt:timestamp('updated_at',{withTimezone:true}).notNull().defaultNow(),
-},t=>[unique('notification_preferences_recipient_uq').on(t.tenantId,t.userId),
+},t=>[index('notification_preferences_user_idx').on(t.userId),unique('notification_preferences_recipient_uq').on(t.tenantId,t.userId),
   foreignKey({columns:[t.tenantId,t.userId],foreignColumns:[organizationMembers.tenantId,organizationMembers.userId]}).onDelete('cascade'),
   check('notification_preferences_enabled_valid',sql`${t.emailEnabled}=(${t.enabledAt} is not null)`),
 ]);
@@ -32,6 +32,9 @@ export const notificationEmailDeliveries=pgTable('notification_email_deliveries'
   leaseToken:uuid('lease_token'),leaseUntil:timestamp('lease_until',{withTimezone:true}),submittedAt:timestamp('submitted_at',{withTimezone:true}),
   errorCode:text('error_code'),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),completedAt:timestamp('completed_at',{withTimezone:true}),
 },t=>[foreignKey({columns:[t.tenantId,t.userId,t.notificationId],foreignColumns:[notifications.tenantId,notifications.userId,notifications.id]}).onDelete('cascade'),
+  index('notification_email_user_created_idx').on(t.userId,t.createdAt,t.id),
+  index('notification_email_tenant_created_idx').on(t.tenantId,t.createdAt,t.id),
+  index('notification_email_created_idx').on(t.createdAt,t.id),
   index('notification_email_due_idx').on(t.status,t.nextAttemptAt),
   check('notification_email_status_valid',sql`${t.status} in ('PENDING','SENDING','SENT','FAILED','CANCELED','RECONCILIATION')`),
   check('notification_email_attempt_valid',sql`${t.attempt} between 0 and 8`),

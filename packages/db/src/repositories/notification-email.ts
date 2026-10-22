@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {and,eq,sql} from 'drizzle-orm';
+import {and,eq,inArray,sql} from 'drizzle-orm';
 import type {Database} from '../index';
 import {notificationEmailDeliveries as deliveries,notifications,notificationPreferences,users,auditLogs} from '../schema';
 // SQL aliases are confined to the two eligibility subqueries below.
@@ -12,6 +12,15 @@ export class NotificationEmailRepository {
     return this.db.transaction(async tx=>{
       const rows=await tx.select({notificationId:notifications.id,tenantId:notifications.tenantId,userId:notifications.userId,preferenceRevision:notificationPreferences.revision}).from(notifications).innerJoin(notificationPreferences,and(eq(notificationPreferences.tenantId,notifications.tenantId),eq(notificationPreferences.userId,notifications.userId))).where(and(eq(notificationPreferences.emailEnabled,true),sql`${notifications.createdAt}>=${notificationPreferences.enabledAt}`,sql`not exists (select 1 from notification_email_deliveries d where d.notification_id=${notifications.id})`)).orderBy(notifications.createdAt,notifications.id).limit(100);
       if(rows.length)await tx.insert(deliveries).values(rows).onConflictDoNothing();return rows.length;
+    });
+  }
+  async cleanup(){
+    return this.db.transaction(async tx=>{
+      const rows=await tx.select({id:deliveries.id}).from(deliveries).where(and(
+        sql`(${deliveries.status}='PENDING' or (${deliveries.status}='SENDING' and ${deliveries.submittedAt} is null))`,sql`not (${eligible})`
+      )).orderBy(deliveries.id).limit(100).for('update',{skipLocked:true});
+      if(rows.length)await tx.update(deliveries).set({status:'CANCELED',leaseToken:null,leaseUntil:null,completedAt:sql`now()`,errorCode:null}).where(inArray(deliveries.id,rows.map(row=>row.id)));
+      return rows.length;
     });
   }
   async claim(id?:string){

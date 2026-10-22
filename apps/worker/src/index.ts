@@ -198,7 +198,7 @@ const notificationTimer=setInterval(()=>{
 },5000);
 let mailing=false;
 let emailTask:Promise<unknown>=Promise.resolve();
-const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).then(()=>notificationEmailRepository.projectBatch()).then(()=>notificationEmailProcessor.runOnce()).catch(error=>operationalError('email_worker_error','INTERNAL_ERROR',error)).finally(()=>{mailing=false;});},2000);
+const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=emailRepository.cleanup().then(()=>emailProcessor.runOnce()).then(()=>notificationEmailRepository.cleanup()).then(()=>notificationEmailRepository.projectBatch()).then(()=>notificationEmailProcessor.runOnce()).catch(error=>operationalError('email_worker_error','INTERNAL_ERROR',error)).finally(()=>{mailing=false;});},2000);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;

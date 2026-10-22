@@ -69,6 +69,22 @@ describe.skipIf(!url)('platform operator permissions, projections and support ac
     expect((await service.list(operator, { category: 'jobs', tenantId: randomUUID() }, correlation)).rows).toEqual([]);
     expect((await service.list(operator, { category: 'failed_jobs', tenantId: tenant }, correlation)).rows).toEqual([]);
   });
+  it('exposes only safe notification delivery metadata and paginates exact database timestamps',async()=>{
+    const ids:string[]=[];
+    for(let i=0;i<5;i++){
+      const notification=randomUUID(),delivery=randomUUID();ids.push(delivery);
+      await database.client`insert into notifications(id,tenant_id,user_id,source_key,type,audience,resource_id) values(${notification},${tenant},${target},${notification},'LIMIT_WARNING','OWNERS',${notification})`;
+      await database.client`insert into notification_email_deliveries(id,tenant_id,user_id,notification_id,preference_revision,status,error_code,completed_at,created_at) values(${delivery},${tenant},${target},${notification},${randomUUID()},'RECONCILIATION','DELIVERY_UNCERTAIN',now(),'2030-01-01T00:00:00.123456Z')`;
+    }
+    const first=await service.list(operator,{category:'notification_email_reconciliation',tenantId:tenant,limit:2},correlation);
+    const second=await service.list(operator,{category:'notification_email_reconciliation',tenantId:tenant,limit:2,...first.next},correlation);
+    const third=await service.list(operator,{category:'notification_email_reconciliation',tenantId:tenant,limit:2,...second.next},correlation);
+    const rows=[...first.rows,...second.rows,...third.rows];expect(rows).toHaveLength(5);expect(new Set(rows.map(row=>row.id))).toEqual(new Set(ids));expect(third.next).toBeNull();
+    for(const row of rows){expect(row.status).toBe('RECONCILIATION');for(const key of ['email','recipient','text','subject','leaseToken','preferenceRevision'])expect(row).not.toHaveProperty(key);}
+    expect((await service.list(operator,{category:'notification_email',tenantId:randomUUID()},correlation)).rows).toEqual([]);
+    await expect(service.list(target,{category:'notification_email',tenantId:tenant},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    expect(await database.client`select id from audit_logs where user_id=${operator} and action='ADMIN_DATA_READ' and metadata->>'category'='notification_email_reconciliation'`).toHaveLength(4);
+  });
   it('revokes sessions atomically and never replays against later logins', async () => {
     for (let i = 0; i < 3; i++) await database.client`insert into sessions(user_id,token_hash,expires_at) values(${target},${randomUUID()},now()+interval '1 hour')`;
     const input = { userId: target, reason: 'SECURITY_INCIDENT', ticket: 'INCIDENT-42', idempotencyKey: randomUUID() };

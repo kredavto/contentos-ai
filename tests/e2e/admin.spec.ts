@@ -37,6 +37,14 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await expect(page.getByRole('table').getByText(`${target}@example.test`, { exact: true })).toBeVisible();
     const safe = await page.request.get(`/api/admin/data?category=users&userId=${target}`); expect(await safe.text()).not.toContain('password-sentinel');
     expect((await page.request.post('/api/admin/revoke-sessions', { data: { userId: target, reason: 'USER_REQUEST', ticket: 'BROWSER-1', idempotencyKey: randomUUID() } })).status()).toBe(403);
+    const notification=randomUUID(),delivery=randomUUID();
+    await database.client`insert into notifications(id,tenant_id,user_id,source_key,type,audience,resource_id) values(${notification},${tenant},${target},${notification},'LIMIT_WARNING','OWNERS',${notification})`;
+    await database.client`insert into notification_email_deliveries(id,tenant_id,user_id,notification_id,preference_revision,status,error_code,completed_at) values(${delivery},${tenant},${target},${notification},${randomUUID()},'RECONCILIATION','DELIVERY_UNCERTAIN',now())`;
+    await page.getByLabel('Раздел администрирования',{exact:true}).selectOption('notification_email_reconciliation');
+    await page.getByLabel('ID организации (необязательно)',{exact:true}).fill(tenant);await page.getByRole('button',{name:'Обновить с начала',exact:true}).click();
+    await expect(page.getByRole('table').getByText(delivery,{exact:true})).toBeVisible();
+    await expect(page.getByText('Автоматический повтор заблокирован',{exact:false})).toBeVisible();
+    expect((await ordinaryPage.request.get(`/api/admin/data?category=notification_email&tenantId=${tenant}`)).status()).toBe(403);
     await page.screenshot({ path: testInfo.outputPath('admin-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

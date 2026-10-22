@@ -53,6 +53,27 @@ describe.skipIf(!url)('opt-in notification email',()=>{
     if(change==='removed')await database.client`delete from organization_members where tenant_id=${f.tenant} and user_id=${f.user}`;
     expect(await queue.begin(id,claimed!.leaseToken!)).toBeNull();
   });
+  it('cleans revoked backlog in bounded concurrent batches without touching valid deliveries',async()=>{
+    while(await queue.cleanup()){/* Clear invalid fixtures from preceding tests. */}
+    const f=await fixture(),active=await fixture(),state=await f.enable();await active.enable();
+    await database.client`insert into notifications(tenant_id,user_id,source_key,type,audience,resource_id) select ${f.tenant},${f.user},'cleanup:'||${f.tenant}||':'||n,'LIMIT_WARNING','OWNERS',${randomUUID()} from generate_series(1,205) n`;
+    for(let batch=0;batch<4;batch++)await queue.projectBatch();
+    const valid=await active.delivery(await active.notice());
+    await preferences.update(f.user,f.tenant,{emailEnabled:false,revision:state.revision},randomUUID());
+    const batches=await Promise.all([queue.cleanup(),queue.cleanup()]);expect(batches.sort()).toEqual([100,100]);expect(await queue.cleanup()).toBe(5);expect(await queue.cleanup()).toBe(0);
+    expect((await database.client`select count(*)::int as n from notification_email_deliveries where tenant_id=${f.tenant} and status='CANCELED'`)[0]?.n).toBe(205);
+    expect(await processor.runOnce(valid)).toBe(true);
+  });
+  it('cancels unsubmitted leases immediately but preserves submitted uncertainty after opt-out',async()=>{
+    const f=await fixture(),state=await f.enable(),unsent=await f.delivery(await f.notice()),submitted=await f.delivery(await f.notice());
+    const before=await queue.claim(unsent),during=await queue.claim(submitted);await queue.begin(submitted,during!.leaseToken!);
+    await preferences.update(f.user,f.tenant,{emailEnabled:false,revision:state.revision},randomUUID());
+    expect(await queue.cleanup()).toBe(1);expect(await queue.begin(unsent,before!.leaseToken!)).toBeNull();
+    expect((await database.client`select status from notification_email_deliveries where id=${submitted}`)[0]?.status).toBe('SENDING');
+    await database.client`update notification_email_deliveries set lease_until=now()-interval '1 second' where id=${submitted}`;
+    expect(await queue.cleanup()).toBe(0);expect(await queue.claim(submitted)).toBeNull();
+    expect((await database.client`select status from notification_email_deliveries where id=${submitted}`)[0]?.status).toBe('RECONCILIATION');
+  });
   it('recovers an unsubmitted expired claim, fences its former owner and enforces recipient foreign keys',async()=>{
     const f=await fixture();await f.enable();const notification=await f.notice(),id=await f.delivery(notification),old=await queue.claim(id);
     await database.client`update notification_email_deliveries set lease_until=now()-interval '1 second' where id=${id}`;
