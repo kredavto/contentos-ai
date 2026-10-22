@@ -1,18 +1,27 @@
 import type {ErrorReporter} from '@contentos/types';
 import {reportError} from './error-reporting';
+import {videoFromKey} from '@contentos/providers';
+import {CredentialVault} from './credential-vault';
+import type {EncryptedCredential} from '@contentos/types';
 import {z} from 'zod';
 import {VideoRepository,JobRepository,AICallRepository,type Database} from '@contentos/db';
 import {DomainError,ProviderRequestError,videoRequestSchema,videoApprovalSchema,videoDimensions,captionEditSchema,captionConfirmSchema,type CaptionProvider,type VideoProvider,type VideoProcessingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
 import {avatarConsentPolicies} from './avatars';
 export type VideoConnection={provider:VideoProvider;name:string}|null;
 export type CaptionConnection={provider:CaptionProvider;name:string;model:string}|null;
+export type VideoByok={vault:CredentialVault|null;provider?:(key:string)=>VideoProvider};
+function boundConnection(key:{id:string;tenantId:string;brandId:string;provider:string;credential:EncryptedCredential|null},byok?:VideoByok){
+ if(!byok?.vault||!key.credential||key.provider!=='heygen')throw new DomainError('CONFIGURATION_REQUIRED',503);
+ const plaintext=byok.vault.decrypt(key.credential,{kind:'PROVIDER_KEY',tenantId:key.tenantId,brandId:key.brandId,connectionId:key.id,provider:'heygen'});
+ return {name:'heygen',provider:(byok.provider??videoFromKey)(plaintext)};
+}
 const uuid=z.uuid();
 export class VideoService {
-  constructor(private readonly repository:VideoRepository,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null){}
+  constructor(private readonly repository:VideoRepository,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null,private readonly byok?:VideoByok){}
   async overview(userId:string,tenantId:string,brandId:string){return {projects:await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId)),configuration:{ready:this.enabled&&!!this.connection&&!!this.storage,provider:this.connection?.name??'disabled',captionsReady:!!this.captionConnection}};}
   create(userId:string,tenantId:string,brandId:string,input:unknown,correlationId:string){
-    if(!this.enabled||!this.connection||!this.storage)throw new DomainError('CONFIGURATION_REQUIRED',503);
-    return this.repository.enqueue(userId,uuid.parse(tenantId),uuid.parse(brandId),videoRequestSchema.parse(input),avatarConsentPolicies(),this.connection.name,correlationId,this.captionConnection?{provider:this.captionConnection.name,model:this.captionConnection.model}:null);
+    if(!this.enabled||(!this.connection&&!this.byok?.vault)||!this.storage)throw new DomainError('CONFIGURATION_REQUIRED',503);
+    return this.repository.enqueue(userId,uuid.parse(tenantId),uuid.parse(brandId),videoRequestSchema.parse(input),avatarConsentPolicies(),this.connection?.name??null,correlationId,this.captionConnection?{provider:this.captionConnection.name,model:this.captionConnection.model}:null,!!this.byok?.vault);
   }
   async download(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){
     const project=await this.repository.ready(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies());
@@ -34,12 +43,14 @@ export class VideoService {
   delete(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.delete(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),correlationId);}
   resume(userId:string,tenantId:string,brandId:string,id:string,correlationId:string){return this.repository.resume(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id),avatarConsentPolicies(),correlationId);}
   async cleanupOne(){
-    if(!this.connection||!this.storage)return false;
-    const project=await this.repository.claimDeletion(this.connection.name);if(!project)return false;
+    if(!this.storage)return false;
+    let project=this.connection?await this.repository.claimDeletion(this.connection.name):null;
+    if(!project&&this.byok)project=await this.repository.claimDeletion('heygen',true);
+    if(!project)return false;
     const context:OperationContext={tenantId:project.tenantId,internalId:project.id,idempotencyKey:project.id,correlationId:project.deleteCorrelationId!,signal:AbortSignal.timeout(240_000)};
     let succeeded=false;
     try{
-      if(project.reference)await this.connection.provider.delete(project.reference,context);
+      if(project.reference){const connection=project.providerKeyId?boundConnection(await this.repository.deletionKey(project),this.byok):this.connection;if(!connection)throw new DomainError('CONFIGURATION_REQUIRED',503);await connection.provider.delete(project.reference,context);}
       // At most 50 cover versions plus original media: bounded parallel deletes
       // keep the whole cleanup within its lease even on a slow object store.
       const keys=new Set([project.originalKey,project.finalKey,project.coverKey,`${project.tenantId}/videos/${project.id}/cover.jpg`,...(await this.repository.coverKeys(project.tenantId,project.id)).map(row=>row.key)]);
@@ -54,21 +65,23 @@ export class VideoService {
 export class VideoProcessor {
   private readonly repository:VideoRepository;
   private readonly jobs:JobRepository;
-  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null,private readonly errors?:ErrorReporter){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
+  constructor(private readonly db:Database,private readonly connection:VideoConnection,private readonly storage:StorageProvider|null,private readonly processing:VideoProcessingProvider|null,private readonly enabled:boolean,private readonly captionConnection:CaptionConnection=null,private readonly errors?:ErrorReporter,private readonly byok?:VideoByok){this.repository=new VideoRepository(db);this.jobs=new JobRepository(db);}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job?.leaseToken)return;
     const abort=new AbortController(),context:OperationContext={tenantId,internalId:id,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal:abort.signal};
     const heartbeat=setInterval(()=>{void this.jobs.heartbeat(tenantId,id,job.leaseToken!).then(owned=>{if(!owned)abort.abort();}).catch(()=>abort.abort());},30_000);
     const calls=new AICallRepository(this.db,job);let polling=false;
     try{
-      if(!this.connection||this.connection.name!==job.provider||!this.storage||!this.processing)throw new DomainError('CONFIGURATION_REQUIRED',503);
+      if(!this.storage||!this.processing)throw new DomainError('CONFIGURATION_REQUIRED',503);
       let project=await this.repository.prepare(job,avatarConsentPolicies());
+      const key=await this.repository.executionKey(job),connection=key?boundConnection(key,this.byok):this.connection;
+      if(!connection||connection.name!==job.provider)throw new DomainError('CONFIGURATION_REQUIRED',503);
       if(!project.reference){
         if(!this.enabled)throw new DomainError('CONFIGURATION_REQUIRED',503);
         await calls.started(1,job.provider,'avatar-video');
         project=await this.repository.prepare(job,avatarConsentPolicies(),true);abort.signal.throwIfAborted();
         const start=Date.now();let reference;
-        try{reference=await this.connection.provider.submit({script:project.scriptText,avatar:project.avatarReference,voice:project.voiceReference,...videoDimensions(project.options.orientation,project.options.resolution)},context);}
+        try{reference=await connection.provider.submit({script:project.scriptText,avatar:project.avatarReference,voice:project.voiceReference,...videoDimensions(project.options.orientation,project.options.resolution)},context);}
         catch(error){await calls.failed(1,error instanceof ProviderRequestError&&error.definitiveRejection?error.code:'PROVIDER_UNAVAILABLE',Date.now()-start);throw error;}
         await this.repository.submitted(job,reference);
         await calls.succeeded(1,{json:reference,usage:{model:'avatar-video',inputUnits:project.scriptText.length,outputUnits:1,costMicrounits:null,currency:'USD'}},Date.now()-start);
@@ -78,12 +91,12 @@ export class VideoProcessor {
       if(project.originalStoredAt)original=await this.storage.get(project.originalKey,256*1024*1024,context);
       else{
         polling=true;
-        const result=await this.connection.provider.status(project.reference,context);polling=false;
+        const result=await connection.provider.status(project.reference,context);polling=false;
         if(result.status==='FAILED'){reportError(this.errors,new DomainError('PROVIDER_REJECTED'),{correlationId:job.correlationId,jobId:id});await this.repository.fail(job,'PROVIDER_REJECTED');return;}
         if(result.status==='PROCESSING'){await this.repository.wait(job);return;}
         if(!result.downloadUrl)throw new DomainError('RECONCILIATION_REQUIRED',409);
         await this.repository.prepare(job,avatarConsentPolicies());
-        original=await this.connection.provider.download(result.downloadUrl,context);
+        original=await connection.provider.download(result.downloadUrl,context);
         await this.storage.put(project.originalKey,original,'video/mp4',context);
         project=await this.repository.storeOriginal(job,avatarConsentPolicies());
       }

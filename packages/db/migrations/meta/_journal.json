@@ -554,6 +554,13 @@
       "when": 1792705896683,
       "tag": "0078_open_triton",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1792707061041,
+      "tag": "0079_rich_ego",
+      "breakpoints": true
     }
   ]
 }

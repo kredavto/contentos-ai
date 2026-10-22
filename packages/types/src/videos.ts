@@ -1,3 +1,4 @@
+import {providerKeyReferenceSchema} from './provider-keys';
 import {z} from 'zod';
 import {coverDesignSchema} from './covers';
 import {captionSegmentsSchema,videoWatermarkSchema} from './video-processing';
@@ -19,7 +20,7 @@ export const musicFadesFit=(music:{fadeInMs?:number;fadeOutMs?:number},durationM
 export const videoRequestSchema=z.object({bookends:videoBookendsSchema.optional(),broll:brollSelectionSchema.optional(),brollClips:brollSelectionsSchema.optional(),backgroundMusic:backgroundMusicSchema.optional(),watermark:videoWatermarkSchema.optional(),cover:coverDesignSchema.optional(),scriptId:z.uuid(),scriptVersion:z.number().int().positive(),lookId:z.uuid(),orientation:z.enum(['9:16','1:1','16:9']),resolution:z.enum(['720p','1080p']),fit:z.enum(['crop','contain']).default('crop'),captionMode:z.enum(['NONE','MANUAL','AUTO']).default('NONE'),captionLanguage:z.string().regex(/^[a-z]{2}$/).default('ru'),idempotencyKey:z.uuid()}).strict().refine(value=>!(value.broll&&value.brollClips),{message:'Use either broll or brollClips'});
 export type VideoRequest=z.infer<typeof videoRequestSchema>;
 export const videoBrollSelections=(input:Pick<VideoRequest,'broll'|'brollClips'>)=>input.brollClips??(input.broll?[input.broll]:[]);
-export const videoJobInputSchema=z.object({projectId:z.uuid()}).strict();
+export const videoJobInputSchema=z.object({projectId:z.uuid(),connection:providerKeyReferenceSchema.optional()}).strict();
 export type VideoJobInput=z.infer<typeof videoJobInputSchema>;
 export const videoReservationSeconds=(plannedDuration:number,maximum:number,bookendMs=0)=>Math.min(maximum,Math.max(15,plannedDuration*2)+Math.ceil(bookendMs/1000));
 export const captionEditSchema=z.object({revision:z.number().int().nonnegative(),segments:captionSegmentsSchema,style:z.enum(['clean','bold'])}).strict();
