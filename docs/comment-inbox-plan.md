@@ -25,3 +25,11 @@ Add an explicit optional comments permission request in the connection flow, per
 - Tests: tenant/role isolation, external identity mismatch, replay/deduplication, edits, bounded pagination, credential revocation races, unknown send outcome, approval invalidation, all safety categories, injection-like comment text and browser flow. CI uses synthetic providers; live acceptance is separate.
 
 No provider request using a user credential or comment publication occurred during this audit. OpenAI-backed drafting remains subject to the pending credential setup decision. Other social providers remain in the full project scope.
+
+## Provider adapter foundation (2026-10-24, not yet an inbox)
+
+A typed YouTube read adapter now loads bounded thread/reply pages with plainText, opaque encoded cursors, fixed official endpoints, no redirects/retries/writes and a 1 MiB response cap. Thread reads first verify the video/channel, including empty pages. Reply reads require a parent already bound to a verified publication by the future repository; each returned parent/channel is checked. Duplicate identities, repeated cursors, malformed timestamps, oversized text/pages and mismatched associations are rejected without partial output. Author identity may be unavailable and is represented as null. Inline replies are not treated as complete. No author-profile URLs or provider-private textOriginal fields are returned.
+
+Disabled comments, missing objects, expired tokens, quotas and network failure remain explicit typed errors. The existing provider transport keeps its prior response limits for other endpoints. Focused tests passed 23 cases across the new comment adapter and existing YouTube contracts using synthetic HTTP responses; no user credential or live Google call was made. Workspace/test typechecks and lint also passed in the isolated worktree. Full integration remains pending.
+
+This foundation does not implement comment storage, synchronization jobs, UI, expanded OAuth consent, sentiment, drafts, approvals or sends. Existing connections still cannot be advertised as comments-ready. Full §§81–83 remain open.

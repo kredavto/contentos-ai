@@ -50,3 +50,15 @@ export interface YouTubeStatisticsProvider {
 /** Operator confirms only a remote identity already persisted by the upload worker. */
 export const youtubeResolutionSchema=z.object({tenantId:z.uuid(),jobId:z.uuid(),expectedRevision:z.number().int().min(0).max(2147483646),ticket:z.string().trim().regex(/^[A-Za-z0-9_-]{3,80}$/),idempotencyKey:z.uuid()}).strict();
 export type YouTubeResolutionInput=z.infer<typeof youtubeResolutionSchema>;
+
+export const youtubeCommentsScope='https://www.googleapis.com/auth/youtube.force-ssl';
+export const youtubeCommentIdSchema=z.string().regex(/^[A-Za-z0-9_.-]{1,256}$/);
+export const youtubeCommentCursorSchema=z.string().min(1).max(4096).refine(value=>!/[\p{Cc}\p{White_Space}]/u.test(value));
+export type YouTubeComment={externalId:string;parentExternalId:string|null;authorExternalId:string|null;authorName:string|null;text:string;publishedAt:string;updatedAt:string};
+export type YouTubeCommentThread={externalId:string;comment:YouTubeComment;replyCount:number;canReply:boolean;isPublic:boolean};
+export type YouTubeCommentPage<T>={reference:ProviderReference;observedAt:string;nextCursor:string|null;items:T[]};
+export interface YouTubeCommentsProvider {
+  commentThreads(accessToken:string,videoId:string,channelId:string,cursor:string|null,context:OperationContext):Promise<YouTubeCommentPage<YouTubeCommentThread>>;
+  /** The caller must bind parentId to a previously verified publication/thread. */
+  commentReplies(accessToken:string,parentId:string,channelId:string,cursor:string|null,context:OperationContext):Promise<YouTubeCommentPage<YouTubeComment>>;
+}

@@ -1,6 +1,7 @@
+import {youtubeThreadPageSchema,youtubeReplyPageSchema,normalizedYouTubeComment} from './youtube-comments';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {DomainError,ProviderRequestError,normalizedMetricsSchema,type YouTubeStatisticsProvider,oauthTokenSchema,youtubeChannelIdSchema,youtubeVideoIdSchema,youtubeMetadataSchema,youtubeTokensSchema,type YouTubeAuthorizationProvider,type YouTubePublishingProvider,type YouTubeMetadata,type YouTubeTokens,type YouTubeVideo,type YouTubeUploadResult,type OperationContext,type ErrorCode} from '@contentos/types';
+import {DomainError,ProviderRequestError,youtubeCommentIdSchema,youtubeCommentCursorSchema,type YouTubeCommentsProvider,normalizedMetricsSchema,type YouTubeStatisticsProvider,oauthTokenSchema,youtubeChannelIdSchema,youtubeVideoIdSchema,youtubeMetadataSchema,youtubeTokensSchema,type YouTubeAuthorizationProvider,type YouTubePublishingProvider,type YouTubeMetadata,type YouTubeTokens,type YouTubeVideo,type YouTubeUploadResult,type OperationContext,type ErrorCode} from '@contentos/types';
 
 export const youtubeScopes=['https://www.googleapis.com/auth/youtube.upload','https://www.googleapis.com/auth/youtube.readonly'] as const;
 const api='https://www.googleapis.com/youtube/v3';
@@ -30,19 +31,19 @@ export class YouTubeRequestError extends ProviderRequestError{
   constructor(code:ErrorCode,status:number,definitive:boolean,readonly retryAfterSeconds:number|null=null){super(code,status,definitive);}
 }
 function invalidResponse(mutation:boolean){return new YouTubeRequestError(mutation?'RECONCILIATION_REQUIRED':'PROVIDER_REJECTED',mutation?409:502,false);}
-async function json(response:Response,mutation:boolean):Promise<unknown>{
+async function json(response:Response,mutation:boolean,maxBytes=256000):Promise<unknown>{
   try{
     const reader=response.body?.getReader();if(!reader)throw invalidResponse(mutation);
     const chunks:Uint8Array[]=[];let length=0;
-    try{for(;;){const next=await reader.read();if(next.done)break;length+=next.value.length;if(length>256000)throw invalidResponse(mutation);chunks.push(next.value);}}
+    try{for(;;){const next=await reader.read();if(next.done)break;length+=next.value.length;if(length>maxBytes)throw invalidResponse(mutation);chunks.push(next.value);}}
     finally{await reader.cancel();}
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   }catch{throw invalidResponse(mutation);}
 }
-async function decode<T>(schema:z.ZodType<T>,response:Response,mutation=false):Promise<T>{const parsed=schema.safeParse(await json(response,mutation));if(!parsed.success)throw invalidResponse(mutation);return parsed.data;}
+async function decode<T>(schema:z.ZodType<T>,response:Response,mutation=false,maxBytes=256000):Promise<T>{const parsed=schema.safeParse(await json(response,mutation,maxBytes));if(!parsed.success)throw invalidResponse(mutation);return parsed.data;}
 
 /** Official Google endpoints only; no retry, redirects, credential logging or implicit publish. */
-export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePublishingProvider,YouTubeStatisticsProvider{
+export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePublishingProvider,YouTubeStatisticsProvider,YouTubeCommentsProvider{
   private readonly redirectUri:string;
   constructor(private readonly options:{clientId:string;clientSecret:string;redirectUri:string},private readonly transport:typeof fetch=fetch){
     try{
@@ -66,7 +67,7 @@ export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePubl
       const definitive=(error.success&&error.data.error.code===status&&[400,401,403,404,409,429].includes(status))||(url===tokenUrl&&oauth.success&&[400,401,403].includes(status));
       if(!definitive)throw invalidResponse(mutation);
       const reasons=error.success?error.data.error.errors?.map(row=>row.reason)??[]:[];
-      const code:ErrorCode=oauth.success&&['invalid_client','unauthorized_client'].includes(oauth.data.error)?'CONFIGURATION_REQUIRED':status===401||(oauth.success&&oauth.data.error==='invalid_grant')?'SOCIAL_TOKEN_EXPIRED':status===429||reasons.some(reason=>['quotaExceeded','rateLimitExceeded','userRateLimitExceeded','uploadLimitExceeded'].includes(reason))?'RATE_LIMITED':status===403?'NOT_AUTHORIZED':'PROVIDER_REJECTED';
+      const code:ErrorCode=operation.startsWith('comment_')&&reasons.includes('commentsDisabled')?'COMMENTS_DISABLED':operation.startsWith('comment_')&&status===404?'NOT_FOUND':oauth.success&&['invalid_client','unauthorized_client'].includes(oauth.data.error)?'CONFIGURATION_REQUIRED':status===401||(oauth.success&&oauth.data.error==='invalid_grant')?'SOCIAL_TOKEN_EXPIRED':status===429||reasons.some(reason=>['quotaExceeded','rateLimitExceeded','userRateLimitExceeded','uploadLimitExceeded'].includes(reason))?'RATE_LIMITED':status===403?'NOT_AUTHORIZED':'PROVIDER_REJECTED';
       throw new YouTubeRequestError(code,code==='RATE_LIMITED'?429:code==='CONFIGURATION_REQUIRED'?503:409,true,retryAfter(response.headers.get('retry-after')));
     }catch(error){if(error instanceof DomainError)throw error;throw new YouTubeRequestError(mutation?'RECONCILIATION_REQUIRED':'PROVIDER_UNAVAILABLE',mutation?409:503,false);}
     finally{console.log(JSON.stringify({event:'provider_request',provider:'youtube',operation,requestId:context.correlationId,jobId:context.internalId,status,durationMs:Date.now()-started}));}
@@ -156,6 +157,26 @@ export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePubl
     const row=body.items[0];if(!row)return null;
     if(row.id!==videoId||row.snippet.channelId!==channelId)throw new DomainError('NOT_AUTHORIZED',403);
     return {reference:{provider:'youtube',internalId:context.internalId,externalId:row.id,metadata:{kind:'video-statistics'}},observedAt:new Date().toISOString(),metrics:normalizedMetricsSchema.parse({views:row.statistics?.viewCount??null,likes:row.statistics?.likeCount??null,comments:row.statistics?.commentCount??null})};
+  }
+  async commentThreads(accessToken:string,videoId:string,channelId:string,cursor:string|null,context:OperationContext){
+    input(youtubeVideoIdSchema,videoId);input(youtubeChannelIdSchema,channelId);if(cursor!==null)input(youtubeCommentCursorSchema,cursor);
+    // Verify the channel even when the comment page is empty.
+    const target=await decode(z.object({items:z.array(z.object({id:youtubeVideoIdSchema,snippet:z.object({channelId:youtubeChannelIdSchema})})).max(1)}),await this.request(`${api}/videos?part=snippet&id=${videoId}`,{headers:this.headers(accessToken)},context,'comment_target'));
+    if(!target.items.length)throw new DomainError('NOT_FOUND',404);
+    if(target.items[0]!.id!==videoId||target.items[0]!.snippet.channelId!==channelId)throw invalidResponse(false);
+    const query=new URLSearchParams({part:'snippet',videoId,maxResults:'20',order:'time',textFormat:'plainText',moderationStatus:'published',...(cursor?{pageToken:cursor}:{})});
+    const page=await decode(youtubeThreadPageSchema,await this.request(`${api}/commentThreads?${query}`,{headers:this.headers(accessToken)},context,'comment_threads'),false,1048576);
+    if((cursor!==null&&page.nextPageToken===cursor)||new Set(page.items.map(row=>row.id)).size!==page.items.length||new Set(page.items.map(row=>row.snippet.topLevelComment.id)).size!==page.items.length)throw invalidResponse(false);
+    for(const row of page.items)if(row.snippet.channelId!==channelId||row.snippet.videoId!==videoId||row.snippet.topLevelComment.snippet.channelId!==channelId||row.snippet.topLevelComment.snippet.parentId!==undefined)throw invalidResponse(false);
+    return {reference:{provider:'youtube',internalId:context.internalId,externalId:videoId,metadata:{kind:'comment-threads',channelId}},observedAt:new Date().toISOString(),nextCursor:page.nextPageToken??null,items:page.items.map(row=>({externalId:row.id,comment:normalizedYouTubeComment(row.snippet.topLevelComment),replyCount:row.snippet.totalReplyCount,canReply:row.snippet.canReply,isPublic:row.snippet.isPublic}))};
+  }
+  async commentReplies(accessToken:string,parentId:string,channelId:string,cursor:string|null,context:OperationContext){
+    input(youtubeCommentIdSchema,parentId);input(youtubeChannelIdSchema,channelId);if(cursor!==null)input(youtubeCommentCursorSchema,cursor);
+    const query=new URLSearchParams({part:'snippet',parentId,maxResults:'20',textFormat:'plainText',...(cursor?{pageToken:cursor}:{})});
+    const page=await decode(youtubeReplyPageSchema,await this.request(`${api}/comments?${query}`,{headers:this.headers(accessToken)},context,'comment_replies'),false,1048576);
+    if((cursor!==null&&page.nextPageToken===cursor)||new Set(page.items.map(row=>row.id)).size!==page.items.length)throw invalidResponse(false);
+    for(const row of page.items)if(row.snippet.channelId!==channelId||row.snippet.parentId!==parentId||row.id===parentId)throw invalidResponse(false);
+    return {reference:{provider:'youtube',internalId:context.internalId,externalId:parentId,metadata:{kind:'comment-replies',channelId}},observedAt:new Date().toISOString(),nextCursor:page.nextPageToken??null,items:page.items.map(normalizedYouTubeComment)};
   }
   async thumbnail(accessToken:string,videoId:string,value:{bytes:Uint8Array;mimeType:'image/png'|'image/jpeg'},context:OperationContext){
     input(youtubeVideoIdSchema,videoId);input(z.enum(['image/png','image/jpeg']),value.mimeType);
