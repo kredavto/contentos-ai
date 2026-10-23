@@ -37,6 +37,21 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await expect(page.getByRole('table').getByText(`${target}@example.test`, { exact: true })).toBeVisible();
     const safe = await page.request.get(`/api/admin/data?category=users&userId=${target}`); expect(await safe.text()).not.toContain('password-sentinel');
     expect((await page.request.post('/api/admin/revoke-sessions', { data: { userId: target, reason: 'USER_REQUEST', ticket: 'BROWSER-1', idempotencyKey: randomUUID() } })).status()).toBe(403);
+    const deletion=randomUUID();
+    await database.client`insert into account_deletion_requests(id,user_id,request_key) values(${deletion},${target},${randomUUID()})`;
+    expect((await ordinaryPage.request.get(`/api/admin/deletion-requests/${deletion}`)).status()).toBe(403);
+    const inspection=await page.request.get(`/api/admin/deletion-requests/${deletion}`);expect(inspection.status()).toBe(200);expect(inspection.headers()['cache-control']).toBe('no-store');expect(await inspection.text()).not.toContain('password-sentinel');
+    await page.getByLabel('Раздел администрирования',{exact:true}).selectOption('deletion_requests');
+    const review=page.getByRole('region',{name:'Проверка запроса удаления'});
+    await review.getByLabel('Запрос для проверки',{exact:true}).selectOption(deletion);
+    await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();
+    await expect(review.getByRole('status')).toContainText('ожидает обработки');
+    await expect(review.getByText('Сначала требуется решить вопрос владения организациями.',{exact:false})).toBeVisible();
+    await expect(review.getByText('Автоматическое удаление пока не подключено.',{exact:false})).toBeVisible();
+    await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await review.screenshot({path:testInfo.outputPath('deletion-review-mobile.png')});await page.setViewportSize({width:1280,height:900});
+    await database.client`update account_deletion_requests set status='CANCELLED',cancelled_at=now(),revision=${randomUUID()} where id=${deletion}`;
+    await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();await expect(review.getByRole('status')).toContainText('отменён');
+    expect((await database.client`select disabled_at from users where id=${target}`)[0]?.disabled_at).toBeNull();
     const notification=randomUUID(),delivery=randomUUID();
     await database.client`insert into notifications(id,tenant_id,user_id,source_key,type,audience,resource_id) values(${notification},${tenant},${target},${notification},'LIMIT_WARNING','OWNERS',${notification})`;
     await database.client`insert into notification_email_deliveries(id,tenant_id,user_id,notification_id,preference_revision,status,error_code,completed_at) values(${delivery},${tenant},${target},${notification},${randomUUID()},'RECONCILIATION','DELIVERY_UNCERTAIN',now())`;
@@ -69,6 +84,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await ordinary.close();
     await database.client`delete from platform_actions where actor_id=${operator}`;
     await database.client`delete from organizations where id=${tenant}`;
+    await database.client`delete from account_deletion_requests where user_id=${target}`;
     for (const user of [operator, target]) await database.client`delete from users where id=${user}`;
   }
 });

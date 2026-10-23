@@ -41,7 +41,7 @@ export const jobs = pgTable('jobs', {
   errorCode: text('error_code'), errorMessage: text('error_message'), leaseToken: uuid('lease_token'), leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(), correlationId: uuid('correlation_id').notNull(),
   result: jsonb('result').$type<{ internalId: string; version: number }>(), createdAt: createdAt(), startedAt: timestamp('started_at', { withTimezone: true }), finishedAt: timestamp('finished_at', { withTimezone: true }),
-}, t => [unique('jobs_tenant_id_uq').on(t.tenantId, t.id), unique('jobs_idempotency_uq').on(t.tenantId, t.idempotencyKey), index('jobs_dispatch_idx').on(t.status, t.nextAttemptAt), index('jobs_created_tenant_idx').on(t.createdAt, t.tenantId),
+}, t => [index('jobs_requester_status_idx').on(t.requestedBy,t.status), unique('jobs_tenant_id_uq').on(t.tenantId, t.id), unique('jobs_idempotency_uq').on(t.tenantId, t.idempotencyKey), index('jobs_dispatch_idx').on(t.status, t.nextAttemptAt), index('jobs_created_tenant_idx').on(t.createdAt, t.tenantId),
   foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }),
   foreignKey({ columns: [t.tenantId, t.reservationId], foreignColumns: [usageReservations.tenantId, usageReservations.id] }),
   check('jobs_progress_valid', sql`${t.progress} between 0 and 100`), check('jobs_attempt_valid', sql`${t.attempt} >= 0 and ${t.maxAttempts} between 1 and 10`),

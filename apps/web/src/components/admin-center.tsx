@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { adminCategories, adminListSchema, adminRevokeSessionsSchema, type AdminCategory } from '@contentos/types';
 import { api } from '../lib/api-client';
 import {YouTubeResolution} from './youtube-resolution';
+import {AdminDeletionReview} from './admin-deletion-review';
 import { AdminFinance } from './admin-finance';
 import { AdminPricing } from './admin-pricing';
 const labels: Record<AdminCategory, string> = { publishing: 'Публикации: задания', publishing_reconciliation: 'Публикации: сверка', publication_analytics: 'Метрики публикаций: задания', users: 'Пользователи', organizations: 'Организации', jobs: 'Задания', failed_jobs: 'Ошибки и сверка заданий', subscriptions: 'Периоды подписок', plans: 'Версии тарифов', usage: 'Учёт ресурсов', webhooks: 'Webhook-события', social: 'Социальные подключения', costs: 'Расходы AI', feature_flags: 'Флаги организаций', audit: 'Аудит', email: 'Доставка писем', notification_email: 'Почтовые уведомления', notification_email_reconciliation: 'Почтовые уведомления: сверка', payment_tasks: 'Платёжные задания', actions: 'Действия поддержки', deletion_requests: 'Запросы удаления аккаунтов' };
@@ -51,6 +52,7 @@ export function AdminCenter() {
         {page?.rows.length ? <div className="admin-table-scroll" tabIndex={0} aria-label="Таблица операционных данных"><table><thead><tr>{Object.keys(page.rows[0]!).map(key => <th key={key}>{columns[key] ?? key}</th>)}</tr></thead><tbody>{page.rows.map(row => <tr key={String(row.id)}>{Object.entries(row).map(([key, value]) => <td key={key}>{value === null ? key === 'costMicrounits' ? 'Неизвестно' : '—' : typeof value === 'boolean' ? value ? 'Да' : 'Нет' : String(value)}</td>)}</tr>)}</tbody></table></div> : null}
         {page?.next ? <button className="button secondary" disabled={pending || loading || filter !== appliedFilter} onClick={() => void load(category, page.next)}>Следующая страница</button> : null}
       </section>
+      {category==='deletion_requests'&&page?<AdminDeletionReview key={page.rows.map(row=>row.id).join(':')} requestIds={page.rows.map(row=>String(row.id))}/>:null}
       <AdminFinance />
       {category==='publishing_reconciliation'&&access.role==='ADMIN'?<YouTubeResolution ready={access.configuration.some(item=>item.name==='Сверка YouTube'&&item.status==='CONFIGURED')} onResolved={()=>void load(category,null,appliedFilter)}/>:null}
       <AdminPricing />

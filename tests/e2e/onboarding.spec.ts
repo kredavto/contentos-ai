@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 test('register, verify email, create organization and resume 15-step onboarding', async ({ page, request }) => {
-  test.setTimeout(420_000); // Includes the scheduled send and persisted analytics round-trip.
+  test.setTimeout(720_000); // Real compound FFmpeg renders plus scheduled send and analytics on a shared host.
   const email = `browser-${randomUUID()}@example.test`;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -247,7 +247,8 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.screenshot({path:'test-results/captions-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
   await page.getByRole('button',{name:'Запустить финальный рендер',exact:true}).click();
-  await expect(videoCard.getByText('Готово',{exact:true})).toBeVisible({timeout:60000});
+  // Compound media processing can exceed 60s; individual production FFmpeg calls are bounded at 180s.
+  await expect(videoCard.getByText('Готово',{exact:true})).toBeVisible({timeout:240000});
   await videoCard.getByRole('button',{name:'Смотреть видео',exact:true}).click();
   const video=page.getByLabel('Готовый ролик',{exact:true});
   await expect(video).toBeVisible();

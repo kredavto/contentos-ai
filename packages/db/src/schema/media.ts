@@ -12,7 +12,7 @@ export const mediaAssets = pgTable('media_assets', {
   leaseToken: uuid('lease_token'), leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   deleteAttempts: integer('delete_attempts').notNull().default(0), deleteAfter: timestamp('delete_after', { withTimezone: true }), errorCode: text('error_code'),
   correlationId: uuid('correlation_id').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(), deletedAt: timestamp('deleted_at', { withTimezone: true }),
-}, t => [unique('media_tenant_id_uq').on(t.tenantId, t.id), unique('media_upload_intent_uq').on(t.tenantId, t.idempotencyKey),
+}, t => [index('media_uploader_status_idx').on(t.uploadedBy,t.status), unique('media_tenant_id_uq').on(t.tenantId, t.id), unique('media_upload_intent_uq').on(t.tenantId, t.idempotencyKey),
   index('media_brand_idx').on(t.tenantId, t.brandId, t.createdAt), index('media_cleanup_idx').on(t.status, t.deleteAfter),
   foreignKey({columns:[t.tenantId,t.brandId],foreignColumns:[brands.tenantId,brands.id]}),
   check('media_status_valid', sql`${t.status} in ('UPLOADING','READY','DELETE_PENDING','DELETED')`),

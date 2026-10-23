@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated 2026-10-19.
+Updated 2026-10-24.
 
 Estimated full-project coverage: **≈61%** (97/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
 
@@ -16,10 +16,10 @@ This is an implementation inventory, not a claim that the full specification is 
 - Atomic shared PostgreSQL rate limits, exact-Origin mutation checks, bounded JSON bodies, safe normalized API errors and correlation IDs.
 - Persisted organizations/members/workspaces/brands. Role guards and tenant-scoped repository transactions; composite tenant foreign keys and database role/state constraints.
 - Resumable 15-step onboarding, optimistic revisions, normalized Brand Brain rows, explicit completion and completed summary. A profile/voice editor is implemented with transactional role checks and optimistic revisions; all 13 structured collections now have an editor with stable IDs and archiving. See [profile editing](brand-profile.md).
-- Database schema: 97 public tables with sixty SQL migrations (0000–0059). Initial migration's index-before-FK ordering was repaired before its first successful application; subsequent migrations are additive.
+- Database schema: 81 additive SQL migrations (0000–0080), applied and verified in disposable local tests. This does not confirm their application to production. Initial migration's index-before-FK ordering was repaired before its first successful application.
 - Typed provider contracts for all requested provider categories; SMTP and OpenAI Responses adapters are implemented; OpenAI has contract tests but no live paid call.
-- Local PostgreSQL 17, Redis 7 and Mailpit Compose stack is running. Separate PostgreSQL 16 container was used for initial integration/E2E development.
-- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Remote CI passed all stages, including database and browser tests, for UTM commit 484783e (run 38087186098). Newer funnel changes are locally verified and awaiting remote CI.
+- Local testing provisions isolated PostgreSQL/Redis/media services and removes owned resources on exit. The earlier development Compose stack is not evidence of currently running production infrastructure.
+- CI workflow runs migrations, all typechecks, lint, unit/integration tests, production build and Playwright E2E. Latest confirmed remote CI: editor BYOK voice catalog commit d02ba9d, run 39870070572, completed successfully. Current uncommitted changes are not covered by that remote result.
 
 ## Generation slice implemented
 
@@ -1156,3 +1156,23 @@ Final client portal acceptance passed: migrations through 0070, TypeScript inclu
 - Browser coverage extends the owner scenario with an editor, disabled shared catalog, exact connection/cursor payloads across multiple pages, source switching, absent owner panel and revocation blocking. Network reads are stubbed; the server integration test independently checks BYOK readiness without a platform connection or vault. No real credential or provider generation is used.
 - Initial full run passed types, lint and production build (34.748 seconds); 647 tests passed and four existing compound FFmpeg cases hit the default 30-second timeout under host load. Those cases now have a scoped 120-second budget without changing media assertions or production timeouts. Final full regression passed: migrations through 0079, workspace/test types, lint, cached unchanged production build, all 651 tests in 91 files (259.89 seconds), and all three Chrome MVP/access-control/key-management scenarios (6.2 minutes). Editor catalog mobile screenshot inspected; owned disposable resources removed and running-container list checked empty.
 - OpenAI work remains pending the user's credential decision; no key was created. Previous video commit 91fbc8d passed GitHub CI (39864613185), as did studio selection commit 8909b2b (39866740114). Server infrastructure, SMTP, key rebinding, private voices and full account erasure remain incomplete.
+
+
+## Account deletion dependency inspection (2026-10-24)
+
+- The pre-existing operator request list now has a read-only dependency inspection panel and GET endpoint. Current verified/enabled platform SUPPORT/ADMIN access is checked before request lookup; tenant ownership alone is insufficient. Successful reads are audited without inventory payloads. Requests, accounts, jobs and resources are not mutated.
+- A repeatable-read snapshot returns decimal-string actor-linked counts for memberships/ownership, sessions, generation/reconciliation, uploaded media, created social/BYOK connections, consent/renewal evidence and pending email. Projections omit credentials, key suffixes, job/file payloads and personal content; a five-second query timeout fails explicitly. Migration 0080 adds four actor/status indexes.
+- The UI makes cancelled requests and ownership dependencies visible and explains the limits: uploader/acceptor/creator identity is not proof of likeness/resource ownership, and zero counts are not authorization to erase. Actual asynchronous erasure remains unfinished; scope confirmation, request authorization, resource mapping, remote cleanup/reconciliation and PII anonymization are tracked in account-deletion-review.md. Earlier copy did not authorize automatic processing of existing requests.
+- Previous verification attempt: migrations through 0080, workspace/test types, lint, production build (65.679 seconds), and all 655 tests in 92 files (527.64 seconds) passed. Chrome passed both operator scenarios and the access-control scenario; the full MVP scenario failed waiting 60 seconds for final media processing while the UI still showed B-roll (3/4 passed, 9.8 minutes). This is not a successful full acceptance run; diagnose and rerun before pushing this slice. The operator mobile screenshot was inspected without overflow. No real account or external resource was changed.
+- Earlier regression exposed an application/database clock mismatch in YouTube resolution freshness. The service now uses PostgreSQL observation-start time, preserving the strict 60-second freshness boundary. A new test advances the application clock by five minutes and verifies successful reconciliation while future-dated evidence remains rejected. This fix is covered by the 655-test run above. Earlier failed runs and corrections included a missing fixture key status, deletion-request fixture cleanup, and a scoped media-fixture setup timeout; production timeouts were not changed.
+
+## Acceptance retry and infrastructure check (2026-10-24)
+
+- Previous full MVP browser check stopped during B-roll processing after its 60-second final-render wait. Production FFmpeg already permits up to 180 seconds per operation. The compound final-render assertion now allows 240 seconds and the complete scenario 720 seconds; rendering assertions and production behavior are unchanged. Test worker structured stdout is captured for diagnosis. A fresh full acceptance run is in progress.
+- Read-only NL check: 2 CPUs, 3915 MiB RAM, 658 MiB available, 3977/4095 MiB swap used, 6.2 GiB root disk free (88% used). The resource upgrade is not visible; no remote services were changed. Infrastructure limits block deployment there, not independent development.
+
+- Acceptance retry completed with 651/655 tests passing in 731.71 seconds; four compound FFmpeg cases hit their 30-second test timeout, while their logged renders completed successfully. Remaining 91 files passed; Playwright was not started. Those B-roll/intro/outro test definitions now have a scoped 120-second allowance consistent with neighboring compound media cases, with every assertion retained and no production timeout change. Owned resources were removed. Fresh full regression is required.
+
+## Final account deletion inspection acceptance (2026-10-24)
+
+Migrations through 0080, workspace/test types, lint, unchanged cached production build, all 655 tests in 92 files (142.35 seconds), and all four Chrome operator/MVP/access-control scenarios (4.4 minutes) passed. The worker log confirms successful final FFmpeg rendering, and the full browser chain continued through publication/analytics and cleanup. The new operator UI mobile screenshot was inspected earlier; unchanged UI passed again. Runner exited successfully and removed owned disposable services. No paid provider operation or NL-server mutation occurred. This completes dependency inspection only: actual account erasure, production infrastructure and the remaining original specification are still incomplete. Overall coverage remains 97/160 (approximately 61%).

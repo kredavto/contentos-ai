@@ -1,3 +1,4 @@
+import {AdminPrivacyRepository} from './admin-privacy';
 import { createHash } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, isNotNull, sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -15,6 +16,7 @@ export async function assertPlatformOperator(tx: Transaction, userId: string) {
 }
 export class AdminRepository {
   constructor(private readonly db: Database) {}
+  inspectDeletion(userId:string,requestId:string,correlationId:string){return new AdminPrivacyRepository(this.db).inspect(userId,requestId,correlationId);}
   identity(userId: string) { return this.db.transaction(tx => assertPlatformOperator(tx, userId)); }
   async access(userId: string, correlationId: string) {
     return this.db.transaction(async tx => {

@@ -17,7 +17,8 @@ export class YouTubeResolutionService{
     // Refresh and provider reads happen outside the transaction; all authority is checked again at commit.
     const video=await this.provider.video(access.accessToken,target.videoId,target.channelId,context);
     context.signal.throwIfAborted();if(!video)throw new DomainError('RECONCILIATION_REQUIRED',409);
-    return this.repository.complete(actorId,input,video,new Date(),this.policies(),correlationId,execution);
+    // Use the database clock sampled before the remote read, conservatively bounding the whole observation.
+    return this.repository.complete(actorId,input,video,target.verificationStartedAt,this.policies(),correlationId,execution);
   }
 }
 

@@ -22,13 +22,14 @@ it('rejects relative executable paths and invalid runtime MIME values before sta
 describe.skipIf(!ffmpeg||!ffprobe)('real audio/video preparation',()=>{
   let directory='',wav:Buffer,mp3:Buffer,video:Buffer,silent:Buffer;
   const processor=new FFmpegMediaPreparation(ffmpeg??'/missing/ffmpeg',ffprobe??'/missing/ffprobe');
+  // Four real media fixtures can exceed the default hook budget on shared Docker hosts.
   beforeAll(async()=>{
     directory=await mkdtemp(join(tmpdir(),'contentos-preparation-test-'));
     const audio=['-f','lavfi','-i','sine=frequency=440:duration=0.6'];
     for(const [name,codec] of [['source.wav','pcm_s16le'],['source.mp3','libmp3lame']])await exec(ffmpeg!,['-nostdin','-v','error',...audio,'-c:a',codec!,'-metadata','title=PRIVATE SOURCE TITLE',join(directory,name!)]);
     for(const sound of [false,true])await exec(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=blue:s=2560x1440:r=24:d=0.6',...(sound?audio:[]),'-map','0:v:0',...(sound?['-map','1:a:0']:[]),'-c:v','libx264','-threads','1','-pix_fmt','yuv420p',...(sound?['-c:a','aac','-shortest']:[]),'-metadata','title=PRIVATE SOURCE TITLE','-movflags','+faststart',join(directory,sound?'source.mp4':'silent.mp4')]);
     [wav,mp3,video,silent]=await Promise.all(['source.wav','source.mp3','source.mp4','silent.mp4'].map(name=>readFile(join(directory,name)))) as [Buffer,Buffer,Buffer,Buffer];
-  });
+  },120_000);
   afterAll(async()=>{await rm(directory,{recursive:true,force:true});});
   it.each(['audio/wav','audio/mpeg'] as const)('decodes %s, strips private metadata and returns real stereo MP3',async mimeType=>{
     const input=mimeType==='audio/wav'?wav:mp3,original=Buffer.from(input),result=await processor.prepare({bytes:input,mimeType},context());

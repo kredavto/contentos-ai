@@ -561,6 +561,13 @@
       "when": 1792707061041,
       "tag": "0079_rich_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1792710831722,
+      "tag": "0080_first_maximus",
+      "breakpoints": true
     }
   ]
 }

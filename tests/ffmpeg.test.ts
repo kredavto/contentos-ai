@@ -150,7 +150,7 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     const tone=(frequency:number)=>{let real=0,imaginary=0;for(let i=14400;i<19200;i++){const sample=decoded.stdout.readFloatLE(i*4),phase=2*Math.PI*frequency*i/48000;real+=sample*Math.cos(phase);imaginary+=sample*Math.sin(phase);}return 2*Math.hypot(real,imaginary)/4800;};
     expect(tone(440)).toBeGreaterThan(.04);expect(tone(1760)).toBeLessThan(tone(440)*.02);
     if(withMusic)expect(tone(880)).toBeGreaterThan(.002);
-  });
+  },120_000); // Compound real-media render, decodes and validation probes on a shared Docker host.
   it('rejects B-roll outside the real video timeline or source excerpt and rejects non-video bytes',async()=>{
     const options=videoProcessingSchema.parse({resolution:'720p'});
     for(const timing of [{startMs:0,endMs:1200,sourceStartMs:0},{startMs:0,endMs:500,sourceStartMs:800}])await expect(processor.process({bytes,broll:{bytes,...timing},options},context())).rejects.toThrow('INVALID_INPUT');
@@ -179,14 +179,14 @@ describe.skipIf(!ffmpeg||!ffprobe)('real FFmpeg media processing',()=>{
     expect(tone(440,.95)).toBeGreaterThan(.04);expect(tone(880,.95)).toBeGreaterThan(.002);expect(tone(1760,.95)).toBeLessThan(.001);
     for(const frequency of [440,880,1760])expect(tone(frequency,1.9)).toBeLessThan(.001);
     const coverPixel=await sharp(output.thumbnail).extract({left:10,top:10,width:1,height:1}).raw().toBuffer();expect(coverPixel[2]).toBeGreaterThan(220);
-  });
+  },120_000); // Compound real-media render, decodes and validation probes on a shared Docker host.
   it.each(['intro','outro'] as const)('supports a standalone %s and rejects unavailable excerpts or insufficient duration budget',async slot=>{
     const options=videoProcessingSchema.parse({orientation:'1:1',resolution:'720p'}),clip={bytes,sourceStartMs:200,durationMs:400};
     const output=await processor.process({bytes,bookends:{[slot]:clip},options},context());expect(Math.abs(output.durationSeconds-1.4)).toBeLessThan(.1);
     await expect(processor.process({bytes,bookends:{[slot]:{...clip,sourceStartMs:900}},options},context())).rejects.toThrow('INVALID_INPUT');
     await expect(processor.process({bytes,maximumDurationSeconds:1,bookends:{[slot]:clip},options},context())).rejects.toThrow('INVALID_INPUT');
     await expect(processor.process({bytes,bookends:{[slot]:{...clip,bytes:Buffer.from('#EXTM3U\nhttps://example.test/private')}},options},context())).rejects.toThrow('INVALID_MEDIA');
-  });
+  },120_000); // Compound real-media render, decodes and validation probes on a shared Docker host.
   it('renders five adjacent inserts with source offsets, music, captions and bookends without changing the main duration',async()=>{
     const clipFile=join(directory,'multi-broll.mp4'),musicFile=join(directory,'multi-broll.mp3');
     await promisify(execFile)(ffmpeg!,['-nostdin','-v','error','-f','lavfi','-i','color=c=blue:s=320x240:r=30:d=1','-f','lavfi','-i','sine=frequency=1760:duration=1','-vf',"drawbox=x=0:y=0:w=iw:h=ih:color=yellow:t=fill:enable='gte(t,0.4)'",'-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac',clipFile]);

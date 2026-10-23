@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {beforeAll,describe,expect,it} from 'vitest';
+import {beforeAll,describe,expect,it,vi} from 'vitest';
 import {YouTubeResolutionRepository,AdminRepository,PublicationAnalyticsRepository,AnalyticsRepository,CalendarRepository,PublishingRepository,YouTubeUploadRepository} from '../../packages/db/src/index';
 import * as s from '../../packages/db/src/schema';
 import {seedDevelopment,demoIds} from '../../packages/db/src/development-seed';
@@ -226,6 +226,21 @@ describe.skipIf(!url)('durable YouTube upload checkpoints',()=>{
     const cover=await begun(true);await repo.saveSession(cover,session(cover.id));await repo.acknowledge(cover,{state:'COMPLETE',video:remote(cover.id)});await repo.processed(cover,remote(cover.id),policies);await repo.reconcile(cover);
     const [pendingCover]=await database.client`select revision from youtube_uploads where job_id=${cover.id}`;
     await expect(resolutions.prepare(actor,{...input,jobId:cover.id,expectedRevision:Number(pendingCover!.revision),idempotencyKey:randomUUID()},policies,correlation)).rejects.toThrow('RECONCILIATION_REQUIRED');
+  });
+  it('uses database observation time when the application clock is ahead',async()=>{
+    const resolutions=new YouTubeResolutionRepository(database.db),actor=randomUUID(),job=await begun();
+    await database.client`insert into users(id,email,password_hash,name,email_verified_at) values(${actor},${actor+'@example.test'},'unusable','Clock fixture',now())`;
+    await database.client`insert into platform_operators(user_id,role) values(${actor},'ADMIN')`;
+    await repo.saveSession(job,session(job.id));await repo.acknowledge(job,{state:'COMPLETE',video:remote(job.id)});await repo.reconcile(job);
+    const [checkpoint]=await database.client`select revision from youtube_uploads where job_id=${job.id}`;
+    const input={tenantId:tenant,jobId:job.id,expectedRevision:Number(checkpoint!.revision),ticket:'CLOCK-1',idempotencyKey:randomUUID()};
+    await expect(resolutions.complete(actor,input,remote(job.id),new Date(Date.now()+300000),policies,correlation)).rejects.toThrow('PROVIDER_REJECTED');
+    const service=new YouTubeResolutionService(resolutions,{accessForPublication:async()=>({accessToken:'synthetic',channelId:channel})},{video:async()=>remote(job.id)},true,()=>policies);
+    vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.now()+300000);
+    try{await service.resolve(actor,input,correlation);}finally{vi.useRealTimers();}
+    expect(await state(job.id)).toBe('PUBLISHED');
+    const [receipt]=await database.client`select verified_at<=clock_timestamp() and verified_at>clock_timestamp()-interval '60 seconds' as fresh from youtube_resolutions where job_id=${job.id}`;
+    expect(receipt?.fresh).toBe(true);
   });
   it('queues fenced resolutions with bounded retries and atomic completion',async()=>{
     const resolutions=new YouTubeResolutionRepository(database.db),actor=randomUUID();

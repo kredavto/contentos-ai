@@ -42,7 +42,9 @@ export class YouTubeResolutionRepository{
       await this.authorize(tx,actorId,input);if(execution)await this.execution(tx,actorId,input,execution);const existing=await this.existing(tx,actorId,input);if(existing)return {completed:existing,target:null};
       const {job,upload,demo}=await this.target(tx,input,policies);
       await tx.insert(auditLogs).values({tenantId:input.tenantId,userId:actorId,action:'ADMIN_YOUTUBE_RESOLUTION_CHECK',resourceId:job.id,correlationId,metadata:{revision:upload.revision,ticket:input.ticket}});
-      return {completed:null,target:{approvedBy:job.approvedBy,brandId:job.brandId,connectionId:job.connectionId,credentialVersion:job.credentialVersion,videoId:upload.videoId!,channelId:upload.channelId,demo}};
+      const [clock]=await tx.select({startedAt:sql<string>`clock_timestamp()::text`}).from(publishingJobs).where(and(eq(publishingJobs.tenantId,job.tenantId),eq(publishingJobs.id,job.id)));
+      if(!clock)throw new DomainError('NOT_FOUND',404);
+      return {completed:null,target:{verificationStartedAt:new Date(clock.startedAt),approvedBy:job.approvedBy,brandId:job.brandId,connectionId:job.connectionId,credentialVersion:job.credentialVersion,videoId:upload.videoId!,channelId:upload.channelId,demo}};
     });
   }
   async complete(actorId:string,raw:YouTubeResolutionInput,video:YouTubeVideo,verifiedAt:Date,policies:ConsentPolicy[],correlationId:string,execution?:YouTubeResolutionExecution){

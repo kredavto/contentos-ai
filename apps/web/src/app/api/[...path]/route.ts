@@ -42,6 +42,7 @@ async function dispatch(request: Request, context: RouteContext) {
     if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
+      if(path[1]==='deletion-requests'&&path[2]&&path.length===3&&request.method==='GET'){await auth.throttle('admin-privacy',user.userId);return ok(await admin.inspectDeletion(user.userId,path[2],correlationId));}
       if(key==='admin/youtube-resolution'&&request.method==='POST'){await auth.throttle('youtube-resolution',user.userId);return ok(await youtubeResolutions.request(user.userId,await readBody(request),correlationId),202);}
       if(key==='admin/youtube-resolution/tasks'&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await youtubeResolutions.tasks(user.userId,query.get('tenantId')??'',query.get('jobId')??'',correlationId));}
       if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));

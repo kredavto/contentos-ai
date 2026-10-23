@@ -17,7 +17,7 @@ export const libraryMedia=pgTable('library_media',{
   createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),finishedAt:timestamp('finished_at',{withTimezone:true}),deletedAt:timestamp('deleted_at',{withTimezone:true}),
 },t=>[
   unique('library_media_tenant_id_uq').on(t.tenantId,t.id),unique('library_media_intent_uq').on(t.tenantId,t.idempotencyKey),
-  index('library_media_brand_idx').on(t.tenantId,t.brandId,t.createdAt),index('library_media_dispatch_idx').on(t.status,t.dispatchAfter),index('library_media_cleanup_idx').on(t.provider,t.cleanupAfter),
+  index('library_media_uploader_status_idx').on(t.uploadedBy,t.status),index('library_media_brand_idx').on(t.tenantId,t.brandId,t.createdAt),index('library_media_dispatch_idx').on(t.status,t.dispatchAfter),index('library_media_cleanup_idx').on(t.provider,t.cleanupAfter),
   foreignKey({columns:[t.tenantId,t.brandId],foreignColumns:[brands.tenantId,brands.id]}),
   check('library_media_status_valid',sql`${t.status} in ('UPLOADING','QUEUED','RUNNING','READY','FAILED','DELETE_PENDING','DELETED')`),
   check('library_media_source_valid',sql`${t.sourceMime} in ('video/mp4','audio/mpeg','audio/wav') and ${t.sourceBytes} between 12 and 67108864 and ${t.sourceSha256} ~ '^[a-f0-9]{64}$' and ${t.inputHash} ~ '^[a-f0-9]{64}$'`),

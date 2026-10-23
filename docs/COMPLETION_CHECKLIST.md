@@ -96,9 +96,9 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 78 | PUBLICATION METRICS | See TECH_SPEC.md §78; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 79 | PERFORMANCE ANALYST | See TECH_SPEC.md §79; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 80 | STRATEGY RECOMMENDATIONS | See TECH_SPEC.md §80; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 81 | COMMENT INBOX | See TECH_SPEC.md §81; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 82 | COMMENT MODES | See TECH_SPEC.md §82; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 83 | AUTO-REPLY SAFETY | See TECH_SPEC.md §83; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 81 | COMMENT INBOX | No social-comment schema, import service or inbox UI found in current packages/apps. Approval comments are internal discussions and do not satisfy this requirement. See comment-inbox-plan.md. | NOT_IMPLEMENTED |
+| 82 | COMMENT MODES | SUGGEST_ONLY / APPROVAL / AUTO_REPLY workflows are absent; default must remain suggest-only when implemented. | NOT_IMPLEMENTED |
+| 83 | AUTO-REPLY SAFETY | No comment triage/reply execution exists. Human escalation, explicit opt-in, current approval and provider outcome reconciliation still require implementation and tests. | NOT_IMPLEMENTED |
 | 84 | BILLING | See TECH_SPEC.md §84; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 85 | PLANS | See TECH_SPEC.md §85; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 86 | PLAN LIMITS | See TECH_SPEC.md §86; current implementation evidence must be inspected | AUDIT_REQUIRED |
@@ -122,9 +122,9 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 104 | SSRF | See TECH_SPEC.md §104; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 105 | SECRETS | See TECH_SPEC.md §105; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 106 | PRIVACY CENTER | See TECH_SPEC.md §106; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 107 | DELETION WORKFLOW | See TECH_SPEC.md §107; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 108 | API CONVENTIONS | See TECH_SPEC.md §108; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 109 | AUTH API | See TECH_SPEC.md §109; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 107 | DELETION WORKFLOW | Request/cancel intake and operator dependency snapshot exist; no automatic erasure. Scope/authorization, staged external cleanup, reconciliation and PII anonymization remain — account-deletion-review.md. | PARTIAL |
+| 108 | API CONVENTIONS | Catch-all currently serves /api, not required /api/v1. Success responses lack meta/error envelope; errors expose correlationId rather than required requestId. See apps/web/src/app/api/[...path]/route.ts and server/api.ts. Versioned contract migration and compatibility tests remain. | PARTIAL |
+| 109 | AUTH API | Authentication flows exist, but required /api/v1/auth/verify-email and /api/v1/auth/session paths differ from current /api/auth/verify and /api/me. Required versioned paths and endpoint-level acceptance remain. | PARTIAL |
 | 110 | ORGANIZATION API | See TECH_SPEC.md §110; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 111 | BRAND API | See TECH_SPEC.md §111; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 112 | BRAND BRAIN API | See TECH_SPEC.md §112; current implementation evidence must be inspected | AUDIT_REQUIRED |
