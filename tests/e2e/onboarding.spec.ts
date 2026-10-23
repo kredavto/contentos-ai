@@ -423,7 +423,7 @@ test('register, verify email, create organization and resume 15-step onboarding'
   await page.screenshot({path:'test-results/analytics-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
 
-  const studioUrl=new URL(page.url()),brainPath=`/api/organizations/${studioUrl.searchParams.get('organization')}/brands/${studioUrl.pathname.split('/')[2]}`;
+  const studioUrl=new URL(page.url()),brainPath=`/api/v1/organizations/${studioUrl.searchParams.get('organization')}/brands/${studioUrl.pathname.split('/')[2]}`;
   const beforeBrainResponse=await page.request.get(brainPath);expect(beforeBrainResponse.ok()).toBe(true);
   const beforeAnalysisBrain=await beforeBrainResponse.json();expect(beforeAnalysisBrain.data.brand.id).toBe(studioUrl.pathname.split('/')[2]);
   const performance=page.getByRole('region',{name:'AI-анализ эффективности',exact:true});
@@ -474,13 +474,13 @@ test('register, verify email, create organization and resume 15-step onboarding'
   expect(sessionCookie?.sameSite).toBe('Lax');
   await page.getByRole('button', { name: 'Выйти из аккаунта', exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get('/api/organizations')).status()).toBe(401);
+  expect((await page.request.get('/api/v1/organizations')).status()).toBe(401);
   expect(errors).toEqual([]);
 });
 test('rejects CSRF and anonymous access without exposing sensitive data', async ({ request }) => {
-  const csrf = await request.post('/api/auth/login', { headers: { origin: 'https://untrusted.example' }, data: { email: 'test@example.test', password: 'test-password' } });
+  const csrf = await request.post('/api/v1/auth/login', { headers: { origin: 'https://untrusted.example' }, data: { email: 'test@example.test', password: 'test-password' } });
   expect(csrf.status()).toBe(403);
-  const anonymous = await request.get('/api/organizations');
+  const anonymous = await request.get('/api/v1/organizations');
   expect(anonymous.status()).toBe(401);
   expect(JSON.stringify(await anonymous.json())).not.toContain('passwordHash');
 });

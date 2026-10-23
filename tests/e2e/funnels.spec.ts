@@ -21,7 +21,7 @@ test('funnel binds content and CTA and preserves manual report corrections',asyn
     const link=await new UtmService(new UtmRepository(database.db)).create(user,tenant,brand,{name:'Сайт курса',destinationUrl:'https://example.com/course',source:'telegram',medium:'social',campaign:'autumn',idempotencyKey:randomUUID()},correlation);
     await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
     const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
-    const endpoint=`/api/organizations/${tenant}/brands/${brand}/funnels`;
+    const endpoint=`/api/v1/organizations/${tenant}/brands/${brand}/funnels`;
     await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=funnels`);
     await expect(page.getByRole('heading',{name:'Воронки',exact:true})).toBeVisible();
     await page.getByLabel('Материал',{exact:true}).selectOption(content);await page.getByLabel('UTM-ссылка',{exact:true}).selectOption(link.id);

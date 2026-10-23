@@ -14,7 +14,7 @@ test('team invitation, role update and explicit ownership transfer',async({page,
   await context.addCookies([{name:'contentos_session',value:ownerToken,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`/team?organization=${tenant}`);await expect(page.getByRole('heading',{name:'Владелец команды',exact:true})).toBeVisible();
-  expect((await page.request.post(`/api/organizations/${tenant}/team/invite`,{data:{email:guestEmail,role:'VIEWER',idempotencyKey:randomUUID()}})).status()).toBe(403);
+  expect((await page.request.post(`/api/v1/organizations/${tenant}/team/invite`,{data:{email:guestEmail,role:'VIEWER',idempotencyKey:randomUUID()}})).status()).toBe(403);
   await page.getByLabel('Email',{exact:true}).fill(guestEmail);await page.getByRole('button',{name:'Создать приглашение'}).click();const link=page.getByLabel('Ссылка приглашения');await expect(link).toBeVisible();const invitation=await link.inputValue();expect(new URL(invitation).search).toBe('');
   const guestContext=await browser.newContext({baseURL});try{
     await guestContext.addCookies([{name:'contentos_session',value:guestToken,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);const guestPage=await guestContext.newPage();await guestPage.goto(invitation);await guestPage.getByRole('button',{name:'Принять приглашение'}).click();await expect(guestPage.getByText('Вы присоединились к организации.')).toBeVisible();expect(guestPage.url()).not.toContain('#');await guestPage.getByRole('link',{name:'Открыть рабочее пространство'}).click();await expect(guestPage.getByLabel('Организация',{exact:true})).toHaveValue(tenant);
@@ -22,7 +22,7 @@ test('team invitation, role update and explicit ownership transfer',async({page,
     await card.getByRole('combobox').selectOption('EDITOR');await card.getByRole('button',{name:'Сохранить роль'}).click();await expect(page.getByRole('button',{name:'Обновить',exact:true})).toBeEnabled();await expect(card.locator('p').filter({hasText:/^Редактор$/})).toBeVisible();
     await page.screenshot({path:testInfo.outputPath('team-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('team-mobile.png'),fullPage:true});
     page.once('dialog',dialog=>dialog.accept());await card.getByRole('button',{name:'Передать владение'}).click();await expect(page.getByRole('button',{name:'Передать владение'})).toHaveCount(0);
-    expect((await page.request.get(`/api/organizations/${tenant}/billing`)).status()).toBe(403);
+    expect((await page.request.get(`/api/v1/organizations/${tenant}/billing`)).status()).toBe(403);
     await guestPage.goto(`/team?organization=${tenant}`);await expect(guestPage.getByRole('button',{name:'Передать владение'})).toBeVisible();
     const owners=await database.client`select user_id from organization_members where tenant_id=${tenant} and role='OWNER'`;expect(owners.map(row=>row.user_id)).toEqual([guest]);
   }finally{await guestContext.close();}

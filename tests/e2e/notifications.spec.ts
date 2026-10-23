@@ -22,9 +22,9 @@ test('notifications persist read state and enforce recipient, role and CSRF boun
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:testInfo.outputPath('notifications-mobile.png'),fullPage:true});
-  const endpoint=`/api/organizations/${tenant}/notifications`;
+  const endpoint=`/api/v1/organizations/${tenant}/notifications`;
   expect((await page.request.post(`${endpoint}/read`,{data:{id:notice}})).status()).toBe(403);
-  expect((await page.request.get(`/api/organizations/${randomUUID()}/notifications`)).status()).toBe(404);
+  expect((await page.request.get(`/api/v1/organizations/${randomUUID()}/notifications`)).status()).toBe(404);
   await page.getByRole('button',{name:'Отметить прочитанным',exact:true}).click();
   await expect(page.getByText('Непрочитано: 0',{exact:true})).toBeVisible();
   await page.reload();await expect(page.getByText('Прочитано',{exact:true})).toBeVisible();
@@ -96,7 +96,7 @@ test('generation and low-resource notices show specific copy and destinations on
   const checkbox=page.getByRole('checkbox',{name:'Получать новые уведомления по email'});
   await expect(checkbox).not.toBeChecked();await checkbox.check();await page.getByRole('button',{name:'Сохранить подписку',exact:true}).click();
   await expect(page.getByText('Подписка сохранена.',{exact:true})).toBeVisible();await page.reload();await expect(checkbox).toBeChecked();
-  const prefUrl=`/api/organizations/${tenant}/notifications/preferences`,preferences=(await (await page.request.get(prefUrl)).json()).data;
+  const prefUrl=`/api/v1/organizations/${tenant}/notifications/preferences`,preferences=(await (await page.request.get(prefUrl)).json()).data;
   const denied=await page.request.put(prefUrl,{headers:{origin:'https://attacker.example'},data:{emailEnabled:false,revision:preferences.revision}});expect(denied.status()).toBe(403);
   const injected=await page.request.put(prefUrl,{headers:{origin:baseURL!},data:{emailEnabled:false,revision:preferences.revision,userId:randomUUID()}});expect(injected.status()).toBe(400);
   await checkbox.uncheck();await page.getByRole('button',{name:'Сохранить подписку',exact:true}).click();await expect(page.getByText('Почтовые уведомления отключены.',{exact:true})).toBeVisible();

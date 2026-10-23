@@ -23,7 +23,7 @@ test('Post writer generates, versions, approves and copies into calendar',async(
     await page.getByLabel('Тема поста',{exact:true}).fill('Бумажные модели');
     await page.getByRole('button',{name:'Создать пост · 2 кр.',exact:true}).click();
     await expect(page.getByLabel('Сохранённый пост',{exact:true}).locator('option')).toHaveCount(2,{timeout:60000});
-    const endpoint=`/api/organizations/${tenant}/brands/${brand}`;
+    const endpoint=`/api/v1/organizations/${tenant}/brands/${brand}`;
     const overview=(await (await page.request.get(`${endpoint}/content`)).json()).data;
     const post=overview.posts[0];expect(overview.usage.balances.AI_CREDITS.available).toBe(8);
     await page.getByLabel('Сохранённый пост',{exact:true}).selectOption(post.id);

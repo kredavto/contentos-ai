@@ -17,7 +17,7 @@ test('agency opt-in, isolated client creation, archive and restore', async ({ pa
     await page.goto(`/clients?organization=${tenant}`);
     await page.getByRole('button', { name: 'Включить режим агентства', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Режим агентства включён' })).toBeVisible();
-    expect((await page.request.post(`/api/organizations/${tenant}/agency/clients`, { data: { kind: 'CREATE', name: 'No origin', timezone: 'UTC', idempotencyKey: randomUUID() } })).status()).toBe(403);
+    expect((await page.request.post(`/api/v1/organizations/${tenant}/agency/clients`, { data: { kind: 'CREATE', name: 'No origin', timezone: 'UTC', idempotencyKey: randomUUID() } })).status()).toBe(403);
     await page.getByLabel('Название нового клиента', { exact: true }).fill('Клиент Север');
     await page.getByRole('button', { name: 'Создать клиента', exact: true }).click();
     const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Клиент Север', exact: true }) });

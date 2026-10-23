@@ -1176,3 +1176,8 @@ Final client portal acceptance passed: migrations through 0070, TypeScript inclu
 ## Final account deletion inspection acceptance (2026-10-24)
 
 Migrations through 0080, workspace/test types, lint, unchanged cached production build, all 655 tests in 92 files (142.35 seconds), and all four Chrome operator/MVP/access-control scenarios (4.4 minutes) passed. The worker log confirms successful final FFmpeg rendering, and the full browser chain continued through publication/analytics and cleanup. The new operator UI mobile screenshot was inspected earlier; unchanged UI passed again. Runner exited successfully and removed owned disposable services. No paid provider operation or NL-server mutation occurred. This completes dependency inspection only: actual account erasure, production infrastructure and the remaining original specification are still incomplete. Overall coverage remains 97/160 (approximately 61%).
+
+## Versioned application API (2026-10-24, in progress)
+
+- Added /api/v1 dispatch through existing authorization boundaries, canonical auth/session and auth/verify-email paths, JSON data/meta/error envelopes and matching request IDs. Legacy application routes remain compatible; external webhook/callback and binary/redirect contracts are preserved.
+- Browser JSON/photo/library requests now use canonical versioned URLs; browser tests target those routes. Focused unit acceptance passed all 12 tests across route/error/webhook files after correcting the monorepo Next headers mock resolution. Workspace/test typechecks and lint also passed in the isolated worktree. Full regression/browser acceptance after integration remains pending; this does not complete every domain API operation in the original specification.

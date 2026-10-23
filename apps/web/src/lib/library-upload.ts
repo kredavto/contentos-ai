@@ -1,3 +1,4 @@
+import {apiUrl} from './api-url';
 import {z} from 'zod';
 
 const resultSchema=z.object({data:z.object({id:z.uuid(),status:z.enum(['UPLOADING','QUEUED','RUNNING','READY','FAILED','DELETE_PENDING','DELETED'])})});
@@ -9,7 +10,7 @@ export function sendLibrarySource(path:string,file:Blob,mimeType:string,signal:A
     const request=new XMLHttpRequest();
     const abort=()=>request.abort();
     const cleanup=()=>signal.removeEventListener('abort',abort);
-    request.open('POST',`/api/${path}`);request.timeout=90_000;
+    request.open('POST',apiUrl(path));request.timeout=90_000;
     request.setRequestHeader('Content-Type',mimeType);
     request.upload.onprogress=event=>{if(event.lengthComputable)onProgress(Math.min(100,Math.round(event.loaded/event.total*100)));};
     request.onerror=request.ontimeout=()=>{cleanup();reject(new Error('Связь прервалась. Повторите загрузку: повторный запрос не создаст дубликат.'));};

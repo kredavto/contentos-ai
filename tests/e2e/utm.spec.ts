@@ -21,7 +21,7 @@ test('UTM links preview, persist, copy and archive in the brand studio', async (
     await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
     await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:baseURL!});
     const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
-    const endpoint=`/api/organizations/${tenant}/brands/${brand}/utm`;
+    const endpoint=`/api/v1/organizations/${tenant}/brands/${brand}/utm`;
     await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=utm`);
     await expect(page.getByRole('heading',{name:'UTM-ссылки',exact:true})).toBeVisible();
     await page.getByLabel('Название ссылки',{exact:true}).fill('Осенний запуск');

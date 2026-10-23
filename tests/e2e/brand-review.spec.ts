@@ -36,7 +36,7 @@ test('Brand Guardian reviews an immutable script through the actual worker',asyn
     await expect(page.getByText('После этой проверки сценарий или правила бренда изменились. Запустите новую проверку.',{exact:true})).toBeVisible();
     await page.reload();await page.getByLabel('Сценарий',{exact:true}).selectOption(script);
     await expect(page.getByRole('heading',{name:'Проверка сценария v1 · бренд v1',exact:true})).toBeVisible();
-    const endpoint=`/api/organizations/${tenant}/brands/${brand}`;
+    const endpoint=`/api/v1/organizations/${tenant}/brands/${brand}`;
     expect((await page.request.post(`${endpoint}/jobs`,{data:{}})).status()).toBe(403);
     const response=await page.request.get(`${endpoint}/content`);expect(response.headers()['cache-control']).toBe('no-store');
     const overview=(await response.json()).data;expect(overview.scripts[0].approvedVersion).toBeNull();expect(overview.usage.balances.AI_CREDITS.available).toBe(8);

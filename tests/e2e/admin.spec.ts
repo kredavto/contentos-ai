@@ -22,7 +22,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   try {
     const ordinaryPage = await ordinary.newPage();
-    expect((await ordinaryPage.request.get('/api/admin/data?category=users')).status()).toBe(403);
+    expect((await ordinaryPage.request.get('/api/v1/admin/data?category=users')).status()).toBe(403);
     await ordinaryPage.goto(`/dashboard?organization=${tenant}`);
     await expect(ordinaryPage.getByRole('heading', { name: 'Здесь будут ваши бренды', exact: true })).toBeVisible();
     await expect(ordinaryPage.getByRole('link', { name: 'Администрирование', exact: true })).toHaveCount(0);
@@ -35,12 +35,12 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await page.getByRole('button', { name: 'Обновить с начала', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Обновить с начала', exact: true })).toBeEnabled();
     await expect(page.getByRole('table').getByText(`${target}@example.test`, { exact: true })).toBeVisible();
-    const safe = await page.request.get(`/api/admin/data?category=users&userId=${target}`); expect(await safe.text()).not.toContain('password-sentinel');
-    expect((await page.request.post('/api/admin/revoke-sessions', { data: { userId: target, reason: 'USER_REQUEST', ticket: 'BROWSER-1', idempotencyKey: randomUUID() } })).status()).toBe(403);
+    const safe = await page.request.get(`/api/v1/admin/data?category=users&userId=${target}`); expect(await safe.text()).not.toContain('password-sentinel');
+    expect((await page.request.post('/api/v1/admin/revoke-sessions', { data: { userId: target, reason: 'USER_REQUEST', ticket: 'BROWSER-1', idempotencyKey: randomUUID() } })).status()).toBe(403);
     const deletion=randomUUID();
     await database.client`insert into account_deletion_requests(id,user_id,request_key) values(${deletion},${target},${randomUUID()})`;
-    expect((await ordinaryPage.request.get(`/api/admin/deletion-requests/${deletion}`)).status()).toBe(403);
-    const inspection=await page.request.get(`/api/admin/deletion-requests/${deletion}`);expect(inspection.status()).toBe(200);expect(inspection.headers()['cache-control']).toBe('no-store');expect(await inspection.text()).not.toContain('password-sentinel');
+    expect((await ordinaryPage.request.get(`/api/v1/admin/deletion-requests/${deletion}`)).status()).toBe(403);
+    const inspection=await page.request.get(`/api/v1/admin/deletion-requests/${deletion}`);expect(inspection.status()).toBe(200);expect(inspection.headers()['cache-control']).toBe('no-store');expect(await inspection.text()).not.toContain('password-sentinel');
     await page.getByLabel('Раздел администрирования',{exact:true}).selectOption('deletion_requests');
     const review=page.getByRole('region',{name:'Проверка запроса удаления'});
     await review.getByLabel('Запрос для проверки',{exact:true}).selectOption(deletion);
@@ -59,7 +59,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await page.getByLabel('ID организации (необязательно)',{exact:true}).fill(tenant);await page.getByRole('button',{name:'Обновить с начала',exact:true}).click();
     await expect(page.getByRole('table').getByText(delivery,{exact:true})).toBeVisible();
     await expect(page.getByText('Автоматический повтор заблокирован',{exact:false})).toBeVisible();
-    expect((await ordinaryPage.request.get(`/api/admin/data?category=notification_email&tenantId=${tenant}`)).status()).toBe(403);
+    expect((await ordinaryPage.request.get(`/api/v1/admin/data?category=notification_email&tenantId=${tenant}`)).status()).toBe(403);
     await page.screenshot({ path: testInfo.outputPath('admin-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -68,7 +68,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await page.getByLabel('Номер обращения', { exact: true }).fill('BROWSER-1');
     page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Отозвать сессии', exact: true }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Отозвано сессий:' })).toContainText('Отозвано сессий: 1');
-    expect((await ordinaryPage.request.get('/api/me')).status()).toBe(401);
+    expect((await ordinaryPage.request.get('/api/v1/auth/session')).status()).toBe(401);
     expect((await database.client`select id from platform_actions where actor_id=${operator} and target_user_id=${target}`)).toHaveLength(1);
     await page.getByLabel('Раздел администрирования', { exact: true }).selectOption('actions');
     await expect(page.getByRole('table').getByText('BROWSER-1', { exact: true })).toBeVisible();
@@ -103,7 +103,7 @@ test('ADMIN publishes a priced version while SUPPORT stays read-only', async ({ 
     await page.reload();
     await expect(page.getByLabel('Название тарифа', { exact: true })).toBeEnabled();
     await page.getByLabel('Тариф', { exact: true }).selectOption('AGENCY');
-    const current = await page.request.get('/api/admin/plans');
+    const current = await page.request.get('/api/v1/admin/plans');
     const catalog = (await current.json()).data.plans as Array<{code:string;version:number}>;
     const previous = catalog.find(plan => plan.code === 'AGENCY')!.version;
     await page.getByLabel('Название тарифа', { exact: true }).fill(`Agency fixture ${actor.slice(0, 8)}`);
@@ -113,7 +113,7 @@ test('ADMIN publishes a priced version while SUPPORT stays read-only', async ({ 
     await page.getByLabel('Доступен в каталоге', { exact: true }).uncheck();
     await page.getByLabel('Номер изменения тарифа', { exact: true }).fill('BROWSER-PRICING');
     const payload = { code: 'AGENCY', name: 'Agency browser fixture', enabled: false, expectedVersion: previous, amountMinor: 350000, currency: 'RUB', aiCredits: 500, videoSeconds: 900, ticket: 'BROWSER-PRICING', idempotencyKey: randomUUID() };
-    expect((await page.request.post('/api/admin/plans', { data: payload })).status()).toBe(403);
+    expect((await page.request.post('/api/v1/admin/plans', { data: payload })).status()).toBe(403);
     page.once('dialog', dialog => dialog.accept());
     await page.getByRole('button', { name: 'Опубликовать версию тарифа', exact: true }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Версия тарифа опубликована.' })).toBeVisible();

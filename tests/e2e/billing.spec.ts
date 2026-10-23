@@ -18,19 +18,19 @@ test('owner sees disabled billing and tenant/CSRF boundaries remain enforced',as
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`/billing?organization=${f.tenantId}`);
   await expect(page.getByRole('heading',{name:'Биллинг',exact:true})).toBeVisible();await expect(page.getByText('Приём платежей пока не подключён.',{exact:false})).toBeVisible();
-  const result=await page.request.get(`/api/organizations/${f.tenantId}/billing`);expect(result.status()).toBe(200);
-  const csrf=await page.request.post(`/api/organizations/${f.tenantId}/billing/checkout`,{data:{planVersionId:randomUUID(),idempotencyKey:randomUUID()}});expect(csrf.status()).toBe(403);
-  expect((await page.request.post(`/api/organizations/${f.tenantId}/billing/accept-renewal`,{data:{}})).status()).toBe(403);
+  const result=await page.request.get(`/api/v1/organizations/${f.tenantId}/billing`);expect(result.status()).toBe(200);
+  const csrf=await page.request.post(`/api/v1/organizations/${f.tenantId}/billing/checkout`,{data:{planVersionId:randomUUID(),idempotencyKey:randomUUID()}});expect(csrf.status()).toBe(403);
+  expect((await page.request.post(`/api/v1/organizations/${f.tenantId}/billing/accept-renewal`,{data:{}})).status()).toBe(403);
   await page.screenshot({path:testInfo.outputPath('billing-disabled-desktop.png'),fullPage:true});
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:testInfo.outputPath('billing-disabled-mobile.png'),fullPage:true});expect(errors).toEqual([]);
   await database.client`update organization_members set role='EDITOR' where tenant_id=${f.tenantId}`;
-  expect((await page.request.get(`/api/organizations/${f.tenantId}/billing`)).status()).toBe(403);
-  expect((await page.request.get(`/api/organizations/${f.tenantId}/billing/renewal-policy/${randomUUID()}`)).status()).toBe(403);
+  expect((await page.request.get(`/api/v1/organizations/${f.tenantId}/billing`)).status()).toBe(403);
+  expect((await page.request.get(`/api/v1/organizations/${f.tenantId}/billing/renewal-policy/${randomUUID()}`)).status()).toBe(403);
 });
 test('explicit UI fixtures cover checkout retry, confirmation and paid state',async({page,context,baseURL},testInfo)=>{
   const f=await fixture(),planVersionId=randomUUID(),orderId=randomUUID();await context.addCookies([{name:'contentos_session',value:f.token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const base=`/api/organizations/${f.tenantId}/billing`;let checkoutCalls=0,status='QUEUED';const keys:string[]=[];
+  const base=`/api/v1/organizations/${f.tenantId}/billing`;let checkoutCalls=0,status='QUEUED';const keys:string[]=[];
   const order=()=>({id:orderId,planVersionId,amountMinor:199900,currency:'RUB',createdAt:new Date().toISOString(),status,confirmationUrl:status==='WAITING'?'https://yoomoney.ru/checkout/fixture':null,errorCode:null});
   await page.route(`**${base}`,route=>route.fulfill({json:{data:{checkoutStatus:'READY',plans:[{planVersionId,code:'CREATOR',name:'Автор',amountMinor:199900,currency:'RUB',aiCredits:100,videoSeconds:300}],subscription:{status:status==='PAID'?'ACTIVE':'INACTIVE',current:status==='PAID'?{endsAt:'2027-01-01T00:00:00Z'}:null,orders:[]},renewal:{revision:0,active:null}}}}));
   await page.route(`**${base}/purchase-preview/${planVersionId}`,route=>route.fulfill({json:{data:{expectedTermId:null,effectiveAt:null,direction:'START'}}}));
@@ -46,7 +46,7 @@ test('explicit UI fixtures cover checkout retry, confirmation and paid state',as
 });
 test('renewal opt-in is unchecked and retries preserve consent and checkout identity',async({page,context,baseURL},testInfo)=>{
   const f=await fixture(),planVersionId=randomUUID(),consentId=randomUUID(),orderId=randomUUID();await context.addCookies([{name:'contentos_session',value:f.token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const base=`/api/organizations/${f.tenantId}/billing`,acceptKeys:string[]=[],checkoutKeys:string[]=[];
+  const base=`/api/v1/organizations/${f.tenantId}/billing`,acceptKeys:string[]=[],checkoutKeys:string[]=[];
   await page.route(`**${base}`,route=>route.fulfill({json:{data:{renewalEngineReady:true,checkoutStatus:'READY',plans:[{planVersionId,code:'CREATOR',name:'Автор',amountMinor:199900,currency:'RUB',aiCredits:100,videoSeconds:300}],subscription:{current:null,orders:[]},renewal:{revision:0,active:null,methodReady:false,nextPaymentAt:null}}}}));
   await page.route(`**${base}/renewal-policy/${planVersionId}`,route=>route.fulfill({json:{data:{planVersionId,policyVersion:'fixture-v1',text:'Ежемесячная оплата 1999 RUB. Можно отключить продление.',textHash:'a'.repeat(64),expectedRevision:0}}}));
   await page.route(`**${base}/accept-renewal`,route=>{const body=route.request().postDataJSON();expect(body.accepted).toBe(true);expect(body.textHash).toBe('a'.repeat(64));acceptKeys.push(body.idempotencyKey);return acceptKeys.length===1?route.fulfill({status:503,json:{error:{message:'Тестовый сбой согласия'}}}):route.fulfill({json:{data:{consentId,revision:1}}});});
@@ -61,7 +61,7 @@ test('renewal opt-in is unchecked and retries preserve consent and checkout iden
 });
 test('plan downgrade requires confirmation and submits the displayed paid-term identity',async({page,context,baseURL},testInfo)=>{
   const f=await fixture(),planVersionId=randomUUID(),termId=randomUUID(),orderId=randomUUID();await context.addCookies([{name:'contentos_session',value:f.token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const base=`/api/organizations/${f.tenantId}/billing`,target={id:planVersionId,name:'Старт',amountMinor:100000,aiCredits:50,videoSeconds:100};let calls=0;
+  const base=`/api/v1/organizations/${f.tenantId}/billing`,target={id:planVersionId,name:'Старт',amountMinor:100000,aiCredits:50,videoSeconds:100};let calls=0;
   await page.route(`**${base}`,route=>route.fulfill({json:{data:{checkoutStatus:'READY',plans:[{...target,planVersionId,code:'START',currency:'RUB'}],subscription:{current:{endsAt:'2027-02-01T12:00:00Z',planName:'Автор'},orders:[]},renewal:{revision:0,active:null}}}}));
   await page.route(`**${base}/purchase-preview/${planVersionId}`,route=>route.fulfill({json:{data:{target,source:{name:'Автор'},expectedTermId:termId,effectiveAt:'2027-02-01T12:00:00Z',direction:'DOWNGRADE'}}}));
   await page.route(`**${base}/checkout`,route=>{calls++;expect(route.request().postDataJSON().expectedTermId).toBe(termId);return route.fulfill({json:{data:{id:orderId,planVersionId,amountMinor:100000,currency:'RUB',createdAt:new Date().toISOString(),status:'QUEUED',confirmationUrl:null,errorCode:null}}});});

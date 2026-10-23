@@ -14,7 +14,7 @@ test('image queue, private preview, approval and deletion work with demo storage
   await service.saveOnboarding(user,tenant,brand,{revision:0,step:14,complete:true,data:{...emptyOnboarding('Изображения'),niche:'Обучение',geography:'Онлайн',usp:'Практика',voice:'Спокойный',goals:['Доверие'],platforms:['TELEGRAM'],products:[{name:'Курс',description:''}],audience:[{name:'Студенты',description:''}],pains:[{name:'Мало времени',description:''}],ctas:[{name:'Записаться',description:''}]}},correlation);
   const ledger=new LedgerRepository(database.db);await ledger.grantTrial(user,tenant,correlation);
   await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));const base=`/api/organizations/${tenant}/brands/${brand}/images`;
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));const base=`/api/v1/organizations/${tenant}/brands/${brand}/images`;
   await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=images`);
   await expect(page.getByRole('heading',{name:'Студия изображений',exact:true})).toBeVisible();await expect(page.getByText('Демонстрационный режим:',{exact:false})).toBeVisible();
   await page.getByLabel('Название изображения',{exact:true}).fill('Демо для курса');await page.getByLabel('Описание изображения',{exact:true}).fill('Тестовая иллюстрация для вымышленного учебного курса');await page.getByLabel('Формат изображения',{exact:true}).selectOption('1024x1536');

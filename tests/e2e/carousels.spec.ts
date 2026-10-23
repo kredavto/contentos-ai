@@ -26,7 +26,7 @@ test('Carousel studio generates, versions, approves and copies into calendar',as
     await page.getByLabel('Тема карусели',{exact:true}).fill('Бумажные модели');
     await page.getByRole('button',{name:'Создать карусель · 4 кр.',exact:true}).click();
     await expect(page.getByLabel('Сохранённая карусель',{exact:true}).locator('option')).toHaveCount(2,{timeout:60000});
-    const endpoint=`/api/organizations/${tenant}/brands/${brand}`;
+    const endpoint=`/api/v1/organizations/${tenant}/brands/${brand}`;
     const overview=(await (await page.request.get(`${endpoint}/content`)).json()).data;
     const carousel=overview.carousels[0];expect(overview.usage.balances.AI_CREDITS.available).toBe(6);
     await page.getByLabel('Сохранённая карусель',{exact:true}).selectOption(carousel.id);

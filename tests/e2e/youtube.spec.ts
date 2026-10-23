@@ -15,7 +15,7 @@ test('YouTube configuration, isolated channel cards, local disconnect and viewer
   try{
     const workspace=(await brands.overview(user,tenant)).workspaces[0]!,brand=(await brands.createBrand(user,tenant,{workspaceId:workspace.id,name:'YouTube fixture brand'},correlation)).id;
     await brands.saveOnboarding(user,tenant,brand,{revision:0,step:14,complete:true,data:{...emptyOnboarding('YouTube fixture brand'),niche:'Education',geography:'Online',usp:'Practice',voice:'Calm',goals:['Trust'],platforms:['YOUTUBE'],products:[{name:'Course',description:''}],audience:[{name:'Students',description:''}],pains:[{name:'Time',description:''}],ctas:[{name:'Read',description:''}]}},correlation);
-    const base=`/api/organizations/${tenant}/brands/${brand}`,address=`/brands/${brand}/content?organization=${tenant}&tab=integrations`;
+    const base=`/api/v1/organizations/${tenant}/brands/${brand}`,address=`/brands/${brand}/content?organization=${tenant}&tab=integrations`;
     await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
     const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto(address);
@@ -25,7 +25,7 @@ test('YouTube configuration, isolated channel cards, local disconnect and viewer
     const overview=await page.request.get(`${base}/youtube`);expect(overview.status()).toBe(200);expect(overview.headers()['cache-control']).toBe('no-store');expect((await overview.json()).data.configuration.status).toBe('CONFIGURATION_REQUIRED');
     expect((await page.request.post(`${base}/youtube`,{data:{}})).status()).toBe(403);
     expect((await page.request.post(`${base}/youtube`,{headers:{origin:baseURL!},data:{}})).status()).toBe(503);
-    expect((await page.request.get(`/api/organizations/${tenant}/brands/${randomUUID()}/youtube`)).status()).toBe(404);
+    expect((await page.request.get(`/api/v1/organizations/${tenant}/brands/${randomUUID()}/youtube`)).status()).toBe(404);
     const callback=await page.request.get('/api/social/youtube/callback?state=invalid&code=fixture');expect(callback.status()).toBe(400);expect(callback.headers()['referrer-policy']).toBe('no-referrer');
     const vault=new CredentialVault(JSON.stringify({fixture:Buffer.alloc(32,5).toString('base64')}),'fixture');
     const credential=vault.encrypt('synthetic unusable credential',{tenantId:tenant,brandId:brand,connectionId:connection,provider:'youtube'});

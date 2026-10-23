@@ -34,8 +34,8 @@ test('privacy center registers and cancels a request and revokes every session',
     await expect(page.getByRole('heading', { name: 'История разрешений', exact: true })).toBeVisible();
     await page.goto('/privacy');
     await expect(page.getByText('Активных сессий: 2', { exact: true })).toBeVisible();
-    expect((await page.request.post('/api/privacy/deletion', { data: { password, acknowledged: true, idempotencyKey: randomUUID() } })).status()).toBe(403);
-    expect((await page.request.post('/api/privacy/export', { data: { password } })).status()).toBe(403);
+    expect((await page.request.post('/api/v1/privacy/deletion', { data: { password, acknowledged: true, idempotencyKey: randomUUID() } })).status()).toBe(403);
+    expect((await page.request.post('/api/v1/privacy/export', { data: { password } })).status()).toBe(403);
     await page.getByLabel('Пароль для скачивания данных', { exact: true }).fill(password);
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Скачать JSON', exact: true }).click();
@@ -56,16 +56,16 @@ test('privacy center registers and cancels a request and revokes every session',
     await page.reload();
     await expect(page.getByRole('button', { name: 'Отменить запрос', exact: true })).toBeVisible();
     expect(await database.client`select id from account_deletion_requests where user_id=${user} and status='REQUESTED'`).toHaveLength(1);
-    const response = await page.request.get('/api/privacy'); expect(response.headers()['cache-control']).toBe('no-store'); expect(await response.text()).not.toContain(password);
+    const response = await page.request.get('/api/v1/privacy'); expect(response.headers()['cache-control']).toBe('no-store'); expect(await response.text()).not.toContain(password);
     await page.screenshot({ path: testInfo.outputPath('privacy-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('privacy-mobile.png'), fullPage: true });
     await page.getByRole('button', { name: 'Отменить запрос', exact: true }).click(); await expect(page.getByRole('status')).toContainText('Запрос отменён.');
     await expect(page.getByRole('button', { name: 'Запросить удаление аккаунта', exact: true })).toBeVisible();
-    expect((await second.request.get('/api/me')).status()).toBe(200);
+    expect((await second.request.get('/api/v1/auth/session')).status()).toBe(200);
     page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Выйти на всех устройствах', exact: true }).click();
-    await expect(page).toHaveURL(/\/login$/); expect((await second.request.get('/api/me')).status()).toBe(401);
+    await expect(page).toHaveURL(/\/login$/); expect((await second.request.get('/api/v1/auth/session')).status()).toBe(401);
     expect(errors).toEqual([]);
   } finally { await second.close(); await database.client`delete from sessions where user_id=${user}`; }
 });

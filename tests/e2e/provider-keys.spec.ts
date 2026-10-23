@@ -19,7 +19,7 @@ test('owner manages encrypted HeyGen keys with revision, role and CSRF boundarie
  await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenant},${editor},'EDITOR')`;
  await database.client`insert into sessions(user_id,token_hash,expires_at) values(${user},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
  await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
- const endpoint=`/api/organizations/${tenant}/brands/${brand.id}/provider-keys`,input={provider:'heygen',apiKey,revision:null};
+ const endpoint=`/api/v1/organizations/${tenant}/brands/${brand.id}/provider-keys`,input={provider:'heygen',apiKey,revision:null};
  expect((await page.request.put(endpoint,{data:input})).status()).toBe(403);
  expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:input})).status()).toBe(403);
  const [plan]=await database.client`update plans set enabled=true where code='EXPERT' returning id`;const version=randomUUID();
@@ -34,7 +34,7 @@ test('owner manages encrypted HeyGen keys with revision, role and CSRF boundarie
  const response=await page.request.get(endpoint);expect(response.headers()['cache-control']).toBe('no-store');const body=await response.json(),key=body.data.keys[0];expect(JSON.stringify(body)).not.toContain(apiKey);expect(key).not.toHaveProperty('credential');
  const [row]=await database.client`select credential from provider_keys where id=${key.id}`;expect(row!.credential).not.toBeNull();expect(JSON.stringify(row)).not.toContain(apiKey);
  expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:input})).status()).toBe(409);
- expect((await page.request.get(`/api/organizations/${randomUUID()}/brands/${brand.id}/provider-keys`)).status()).toBe(404);
+ expect((await page.request.get(`/api/v1/organizations/${randomUUID()}/brands/${brand.id}/provider-keys`)).status()).toBe(404);
  expect((await page.request.post(`${endpoint}/${key.id}/verify`,{data:{revision:key.revision}})).status()).toBe(403);
  await page.route(`**/provider-keys/${key.id}/verify`,async route=>{expect(route.request().postDataJSON()).toEqual({revision:key.revision});await route.fulfill({json:{data:{accepted:true}}});});
  await panel.getByRole('button',{name:'Проверить ключ HeyGen',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Доступ к генерации и баланс не проверялись');

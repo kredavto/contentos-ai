@@ -19,7 +19,7 @@ test(`${kind} library runs through API, S3, BullMQ, FFmpeg, browser playback and
   const tenant=(await service.createOrganization(user,{name:'Media browser'},correlation)).id,workspace=(await service.overview(user,tenant)).workspaces[0]!;
   const brand=(await service.createBrand(user,tenant,{name:'Медиа',workspaceId:workspace.id},correlation)).id;
   await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const base=`/api/organizations/${tenant}/brands/${brand}/library-media`,headers={Origin:baseURL!};
+  const base=`/api/v1/organizations/${tenant}/brands/${brand}/library-media`,headers={Origin:baseURL!};
   const bytes=kind==='video'?await readFile(join(tmpdir(),'contentos-e2e-video.mp4')):silentWav();
   const mimeType=kind==='video'?'video/mp4':'audio/wav',openLabel=kind==='video'?'Открыть видео':'Прослушать аудио';
   const input={name:`Фрагмент ${kind} для медиатеки`,source:{mimeType,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')},idempotencyKey:randomUUID()};
@@ -86,7 +86,7 @@ for(const kind of ['video','audio'] as const){
     const tenant=(await service.createOrganization(user,{name:'Browser upload'},correlation)).id,workspace=(await service.overview(user,tenant)).workspaces[0]!;
     const brand=(await service.createBrand(user,tenant,{name:'Загрузка',workspaceId:workspace.id},correlation)).id;
     await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-    const base=`/api/organizations/${tenant}/brands/${brand}/library-media`;
+    const base=`/api/v1/organizations/${tenant}/brands/${brand}/library-media`;
     await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=media`);
     const panel=page.getByRole('region',{name:'Аудио и видео'}),form=panel.getByRole('form',{name:'Загрузка аудио и видео'});
     await expect(form.getByLabel('Аудио или видео',{exact:true})).toBeEnabled();
@@ -132,7 +132,7 @@ test('reload recovers the same upload intent and rejects a different source file
   const tenant=(await service.createOrganization(user,{name:'Resume upload'},correlation)).id,workspace=(await service.overview(user,tenant)).workspaces[0]!;
   const brand=(await service.createBrand(user,tenant,{name:'Продолжение',workspaceId:workspace.id},correlation)).id;
   await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const base=`/api/organizations/${tenant}/brands/${brand}/library-media`,bytes=silentWav();
+  const base=`/api/v1/organizations/${tenant}/brands/${brand}/library-media`,bytes=silentWav();
   await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=media`);
   const panel=page.getByRole('region',{name:'Аудио и видео'}),form=panel.getByRole('form',{name:'Загрузка аудио и видео'});
   await expect(form.getByLabel('Аудио или видео',{exact:true})).toBeEnabled();
@@ -168,7 +168,7 @@ test('64 MiB browser upload resumes 22 chunks after a lost acknowledgement and i
   const tenant=(await service.createOrganization(user,{name:'Chunk upload'},correlation)).id,workspace=(await service.overview(user,tenant)).workspaces[0]!;
   const brand=(await service.createBrand(user,tenant,{name:'Большие файлы',workspaceId:workspace.id},correlation)).id;
   await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-  const base=`/api/organizations/${tenant}/brands/${brand}/library-media`;
+  const base=`/api/v1/organizations/${tenant}/brands/${brand}/library-media`;
   // Real valid PCM WAV at the exact source-size limit: stereo 192 kHz, below 180 seconds.
   const bytes=Buffer.alloc(64*1024*1024);bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);bytes.write('WAVEfmt ',8);bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(2,22);bytes.writeUInt32LE(192000,24);bytes.writeUInt32LE(768000,28);bytes.writeUInt16LE(4,32);bytes.writeUInt16LE(16,34);bytes.write('data',36);bytes.writeUInt32LE(bytes.length-44,40);
   await page.goto(`/brands/${brand}/content?organization=${tenant}&tab=media`);

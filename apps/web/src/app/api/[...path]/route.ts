@@ -1,19 +1,20 @@
+import {apiRoutePath} from '../../../server/api-path';
 import { cookies } from 'next/headers';
 import { DomainError } from '@contentos/types';
 import { services, sessionCookie } from '../../../server/services';
-import { apiResponse, assertOrigin, clientAddress, readBody, readPhotoUpload } from '../../../server/api';
+import { apiData, apiResponse, assertOrigin, clientAddress, readBody, readPhotoUpload } from '../../../server/api';
 import {readLibrarySource} from '../../../server/library-upload';
 export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
     const { providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
-    const { path } = await context.params;
+    const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
     if (request.method !== 'GET') assertOrigin(request, env.APP_URL);
     const ip = clientAddress(request);
-    const ok = (data: unknown, status = 200) => Response.json({ data }, { status });
+    const ok = (data: unknown, status = 200) => apiData(data,correlationId,status);
     if (request.method === 'POST' && path[0] === 'auth') {
       if (key === 'auth/register') return ok(await auth.register(await readBody(request), ip, correlationId), 202);
       if (key === 'auth/login') {

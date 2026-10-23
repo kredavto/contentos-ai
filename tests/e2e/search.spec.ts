@@ -23,8 +23,8 @@ test('searches tenant data with pagination, literal text, empty/error states and
     await page.route(`**/organizations/${tenant}/search?*`,route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'Поиск временно недоступен'}})}),{times:1});
     await panel.getByRole('button',{name:'Найти',exact:true}).click();await expect(panel.getByRole('alert')).toHaveText('Поиск временно недоступен');
     await panel.getByLabel('Поисковый запрос').fill('100%_');await panel.getByRole('button',{name:'Найти',exact:true}).click();await expect(panel.locator('li')).toHaveCount(30);
-    const response=await page.request.get(`/api/organizations/${tenant}/search?q=100%25_`);expect(response.status()).toBe(200);expect(response.headers()['cache-control']).toBe('no-store');
-    expect((await page.request.get(`/api/organizations/${randomUUID()}/search?q=100%25_`)).status()).toBe(404);
+    const response=await page.request.get(`/api/v1/organizations/${tenant}/search?q=100%25_`);expect(response.status()).toBe(200);expect(response.headers()['cache-control']).toBe('no-store');
+    expect((await page.request.get(`/api/v1/organizations/${randomUUID()}/search?q=100%25_`)).status()).toBe(404);
     await page.setViewportSize({width:390,height:844});await panel.scrollIntoViewIfNeeded();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('search-mobile.png')});
   }finally{await database.client`delete from sessions where user_id=${user}`;}
 });
