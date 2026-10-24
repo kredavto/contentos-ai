@@ -1226,3 +1226,7 @@ Delivery confirmation: versioned API and acceptance commit d738f1a00d820e5c350cb
 
 - Storage verification: migrations through 0083 applied in a separate disposable PostgreSQL; all four storage integration cases passed (4.34 s), including accepted 256-character IDs and rejected 257-character IDs. Owned database containers were removed, exit 0. Workspace/test types passed before the final boundary assertions; repository lint passed after the final changes. Full application regression for storage is still pending.
 - First storage run found PostgreSQL rejecting the 256 repetition bound in the check regex and a fixture reusing one content item across calendar entries. Already-applied 0082 remains immutable. Generated/reviewed/applied 0083 replaces only the identity constraint with character checks plus explicit length checks; fixtures now create distinct content items. No existing production database was changed.
+
+## Optional YouTube comments permission acceptance (2026-10-24)
+
+The fb9b571 OAuth/UI checkpoint passed migration 0081, workspace/test types, lint, production build, 673 tests in 95 files and all three Chrome YouTube/onboarding/MVP scenarios (4.4 minutes). Runner exited 0 and removed its disposable resources. The mobile channel-card screenshot was inspected without overflow. This acceptance does not cover the later storage migrations 0082/0083, which have their own four passing database tests, nor does it complete an inbox/import/send workflow. No user Google permission, paid operation or production infrastructure was changed.
