@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {beforeAll,describe,expect,it} from 'vitest';
 import {comments} from '../../packages/db/src/schema/comments';
+import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
 import {CommentRepository} from '../../packages/db/src/repositories/comments';
 import {CommentService} from '../../packages/core/src/comments';
 import {seedDevelopment,demoIds} from '../../packages/db/src/development-seed';
@@ -95,6 +96,39 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await service.triage(manager,tenant,brand,publicationId,input.id!,{revision:1,contentRevision:1,status:'NEW'},randomUUID());
   expect((await service.list(user,tenant,brand,publicationId,{status:'NEW'})).items).toHaveLength(1);
   expect((await service.list(user,tenant,brand,publicationId,{status:'RESOLVED'})).items).toHaveLength(0);
+ });
+
+ async function importRecord(publicationId:string):Promise<typeof commentImports.$inferInsert>{
+  const [target]=await database.client<{connection_id:string}[]>`select j.connection_id from publications p join publishing_jobs j on j.id=p.job_id and j.tenant_id=p.tenant_id where p.id=${publicationId} and p.tenant_id=${tenant}`;
+  if(!target)throw new Error('Missing fixture publication');
+  return {id:randomUUID(),tenantId:tenant,brandId:brand,publicationId,connectionId:target.connection_id,credentialVersion:1,videoId:'abcdefghijk',channelId:'UC'+'a'.repeat(22),requestedBy:user,idempotencyKey:randomUUID(),correlationId:randomUUID()};
+ }
+ it('keeps partial imports exclusive and preserves their resumable position',async()=>{
+  const input=await importRecord(await publication()),[run]=await database.db.insert(commentImports).values(input).returning();
+  expect(run).toMatchObject({status:'QUEUED',position:{kind:'THREADS',cursor:null},remainingPages:200,completedPages:0});
+  await database.client`update comment_imports set status='PARTIAL',remaining_pages=0,position='{"kind":"THREADS","cursor":"opaque-next"}'::jsonb where id=${input.id!}`;
+  await expect(database.db.insert(commentImports).values({...input,id:randomUUID(),idempotencyKey:randomUUID()})).rejects.toThrow();
+  await database.client`update comment_imports set status='QUEUED',remaining_pages=200,revision=revision+1 where id=${input.id!}`;
+  expect((await database.client`select position,revision from comment_imports where id=${input.id!}`)[0]).toEqual({position:{kind:'THREADS',cursor:'opaque-next'},revision:1});
+ });
+ it('requires leases for running imports and explicit terminal checkpoints',async()=>{
+  const input=await importRecord(await publication());await database.db.insert(commentImports).values(input);
+  await expect(database.client`update comment_imports set status='RUNNING' where id=${input.id!}`).rejects.toThrow();
+  await expect(database.client`update comment_imports set remaining_pages=0 where id=${input.id!}`).rejects.toThrow();
+  await expect(database.client`update comment_imports set status='SUCCEEDED',finished_at=now() where id=${input.id!}`).rejects.toThrow();
+  await expect(database.client`update comment_imports set status='FAILED' where id=${input.id!}`).rejects.toThrow();
+  await database.client`update comment_imports set status='RUNNING',lease_token=${randomUUID()},lease_expires_at=now()+interval '2 minutes',started_at=now() where id=${input.id!}`;
+  await expect(database.client`update comment_imports set status='FAILED',finished_at=now() where id=${input.id!}`).rejects.toThrow();
+  await database.client`update comment_imports set status='SUCCEEDED',position=null,finished_at=now(),lease_token=null,lease_expires_at=null where id=${input.id!}`;
+ });
+ it('deduplicates page receipts within a scope and enforces tenant ownership',async()=>{
+  const input=await importRecord(await publication());await database.db.insert(commentImports).values(input);
+  const receipt={tenantId:tenant,importId:input.id!,scope:'THREADS',cursorHash:'a'.repeat(64),ordinal:1,observedAt:new Date()};
+  await database.db.insert(commentImportPages).values(receipt);
+  await expect(database.db.insert(commentImportPages).values({...receipt,ordinal:2})).rejects.toThrow();
+  await expect(database.db.insert(commentImportPages).values({...receipt,cursorHash:'b'.repeat(64)})).rejects.toThrow();
+  await expect(database.db.insert(commentImportPages).values({...receipt,tenantId:randomUUID(),ordinal:2})).rejects.toThrow();
+  await expect(database.db.insert(commentImportPages).values({...receipt,scope:randomUUID(),ordinal:2})).resolves.toBeDefined();
  });
 
 });
