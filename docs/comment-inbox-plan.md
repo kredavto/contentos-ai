@@ -8,6 +8,12 @@ Official [YouTube commentThreads.list](https://developers.google.com/youtube/dat
 
 Replies use [comments.list](https://developers.google.com/youtube/data/reference/rest/v3/comments/list) with parentId and its own pagination. Do not present a partially returned reply list as complete. Provider errors or disabled comments must be explicit states, not empty success or zero analytics.
 
+## OAuth prerequisite verified on 2026-10-24
+
+The official [YouTube discovery document](https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest) lists `https://www.googleapis.com/auth/youtube.force-ssl` for commentThreads.list, comments.list and comments.insert. Current authorization requests only youtube.upload and youtube.readonly; the existing grant must not be presented as comment-ready.
+
+Add an explicit optional comments permission request in the connection flow, persist the requested capability in the one-time OAuth attempt, and verify the granted scope on callback. Keep existing upload-only connections usable. Recheck the current grant and credential generation during every import/send; a missing comments scope requires reconnecting, not fallback to another account. The product must explain the additional Google permission before consent. Acquiring the provider permission is not opt-in to automatic replies; SUGGEST_ONLY remains the default and reply approval is separate.
+
 ## Required implementation and acceptance
 
 - Tenant-scoped UUID comment records with composite publication foreign keys and unique provider/external identity; author identity/name, original provider timestamps, text, nullable unassessed sentiment and status. Validate provider fields and render text without HTML interpretation.

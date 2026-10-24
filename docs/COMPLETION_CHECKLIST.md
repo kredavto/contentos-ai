@@ -123,8 +123,8 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 105 | SECRETS | See TECH_SPEC.md §105; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 106 | PRIVACY CENTER | See TECH_SPEC.md §106; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 107 | DELETION WORKFLOW | Request/cancel intake and operator dependency snapshot exist; no automatic erasure. Scope/authorization, staged external cleanup, reconciliation and PII anonymization remain — account-deletion-review.md. | PARTIAL |
-| 108 | API CONVENTIONS | Catch-all currently serves /api, not required /api/v1. Success responses lack meta/error envelope; errors expose correlationId rather than required requestId. See apps/web/src/app/api/[...path]/route.ts and server/api.ts. Versioned contract migration and compatibility tests remain. | PARTIAL |
-| 109 | AUTH API | Authentication flows exist, but required /api/v1/auth/verify-email and /api/v1/auth/session paths differ from current /api/auth/verify and /api/me. Required versioned paths and endpoint-level acceptance remain. | PARTIAL |
+| 108 | API CONVENTIONS | Versioned /api/v1 dispatch, data/meta/error envelope, matching requestId and legacy compatibility implemented; focused route/error tests passed. Full local regression (661 tests) and all 32 browser scenarios passed; production acceptance remains. See api-v1.md. | PARTIAL |
+| 109 | AUTH API | Required versioned auth paths including verify-email and session implemented; focused dispatch/Origin/cookie/error tests passed. Full local service/browser regression passed (661 tests and 32 browser scenarios); production SMTP acceptance remains. See api-v1.md. | PARTIAL |
 | 110 | ORGANIZATION API | See TECH_SPEC.md §110; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 111 | BRAND API | See TECH_SPEC.md §111; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 112 | BRAND BRAIN API | See TECH_SPEC.md §112; current implementation evidence must be inspected | AUDIT_REQUIRED |

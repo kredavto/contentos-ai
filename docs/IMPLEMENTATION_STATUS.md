@@ -1181,3 +1181,14 @@ Migrations through 0080, workspace/test types, lint, unchanged cached production
 
 - Added /api/v1 dispatch through existing authorization boundaries, canonical auth/session and auth/verify-email paths, JSON data/meta/error envelopes and matching request IDs. Legacy application routes remain compatible; external webhook/callback and binary/redirect contracts are preserved.
 - Browser JSON/photo/library requests now use canonical versioned URLs; browser tests target those routes. Focused unit acceptance passed all 12 tests across route/error/webhook files after correcting the monorepo Next headers mock resolution. Workspace/test typechecks and lint also passed in the isolated worktree. Full regression/browser acceptance after integration remains pending; this does not complete every domain API operation in the original specification.
+
+- Delivery: inspection/clock-fix commit 731056539cdbd70820bccd90c4865b206bec5e8a was pushed to codex/subscription-billing. Vercel reports SUCCESS at https://contentos-g62ua80vg-digagency.vercel.app. GitHub CI run 40031566528 was in progress when checked; no completed CI claim. This is Preview delivery, not configured production infrastructure.
+- Versioned API commit cc1e930 is integrated locally, not yet pushed. Integrated workspace/test types, lint and production build (16.054 seconds) passed. Full 661-test regression and the entire Chrome suite are running in the disposable environment; result pending.
+
+## Versioned API full local acceptance (2026-10-24)
+
+Integrated migrations through 0080, workspace/test types, lint and production build (16.054 seconds) passed, followed by all 661 tests in 93 files (202.17 seconds) and all 32 Chrome scenarios (11.8 minutes). The browser suite covers canonical versioned JSON and upload routes, full MVP, tenant/role/Origin denial, privacy, payment/team/operator screens and simulated YouTube publication. Focused tests additionally cover legacy compatibility, required auth dispatch, error/request IDs, secure cookies and unchanged binary/redirect/webhook response contracts. No live provider acceptance is implied.
+
+After an interrupted tool session the completed browser report remained, but runner cleanup did not finish. Its exact three owned containers and mounted temporary directory were inspected and removed manually; unrelated stopped development containers were preserved. The runner exit status was unavailable, so the individual successful check reports and manual cleanup are the evidence.
+
+Security review: both route prefixes use the same session, Origin, throttle and domain authorization paths; canonical aliases do not bypass them. Request IDs carry no credentials; safe errors retain no-store and redaction. The existing callback/webhook URLs and their provider-specific contracts remain unchanged. Other domain API requirements and production configuration remain open. Overall estimate stays approximately 61%.
