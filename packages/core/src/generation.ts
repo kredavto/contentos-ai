@@ -14,6 +14,8 @@ export class GenerationService {
     id.parse(tenantId); id.parse(brandId); const request = generationRequestSchema.parse(raw);
     if(request.type==='OPTIMIZE_STRATEGY'&&!this.configuration.analyticsAI)throw new DomainError('CONFIGURATION_REQUIRED',503);
     if((request.type==='OPTIMIZE_STRATEGY')!==(request.options.analysisDays!==undefined))throw new DomainError('INVALID_INPUT');
+    if ((request.type==='DRAFT_COMMENT_REPLY')!==(request.options.commentReply!==undefined))throw new DomainError('INVALID_INPUT');
+    if(request.type==='DRAFT_COMMENT_REPLY'&&(request.options.scriptId||request.options.ideaId||request.options.revision!==undefined||request.options.edit!=='GENERATE'||request.options.analysisDays!==undefined))throw new DomainError('INVALID_INPUT');
     if (!this.configuration.ready) throw new DomainError('CONFIGURATION_REQUIRED',503);
     if (!['GENERATE_SCRIPT', 'REVIEW_SCRIPT'].includes(request.type) && (request.options.scriptId || request.options.ideaId)) throw new DomainError('INVALID_INPUT');
     if (request.options.edit !== 'GENERATE' && !request.options.scriptId) throw new DomainError('INVALID_INPUT');

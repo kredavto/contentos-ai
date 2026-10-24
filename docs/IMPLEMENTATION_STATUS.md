@@ -1353,3 +1353,12 @@ Remote CI verification: GitHub Actions run **40053254374** completed successfull
 
 
 Reply editor acceptance passed: **735 tests / 100 files** (214.80s), migrations through 0085, workspace/test typechecks, lint, production build (18.846s), and **Chrome scenario passed** (31.0s suite). The scenario persisted two manual reply versions through the real API/database, checked earlier text retention, viewer read/write boundaries, thread pagination and import controls (synthetic transport only for external import). No real LLM/Google write. Source: `/tmp/contentos-comment-draft-editor-full.log`; owned resources removed. Coverage remains **≈62%** because generation queue, approvals and sending are unfinished.
+
+
+## Queued AI reply generation — 2026-10-24 (local integration)
+
+Added DRAFT_COMMENT_REPLY to the existing typed generation pipeline. Request snapshots are bound to tenant/publication/comment content/review revisions and the expected nullable draft revision. Enqueue uses the existing tenant-locked ledger reservation and outbox. Worker validates the current snapshot before an AI call; completion validates it again and appends an AI version atomically with credit capture. Concurrent human edits or changed source text fail with CONFLICT, allowing the existing failure path to release the reservation. The bounded orchestrator and cached outputs use reply evidence validation; the mock provider is explicitly DEMO and remains forbidden in production.
+
+Migration **0086_comment_reply_generation.sql**, generated as a custom Drizzle migration, adds the configurable internal usage policy (2 AI_CREDITS) and an immutable-history trigger for reply versions. It was applied successfully in disposable tests and must not be edited. This strengthens the earlier schema-only append convention.
+
+**37 PostgreSQL integration tests passed** (`/tmp/contentos-comment-generation-storage.log`, 6.75s), including concurrent intent deduplication/reservation, successful atomic capture, manual-edit conflict/release, source preflight rejection, invalid evidence and immutable history. Owned resources removed. Workspace/test typechecks and lint passed; 19 focused AI/reply tests also passed (`/tmp/contentos-comment-generation-unit.log`). Full regression is not yet confirmed. UI generation controls, approval and sending remain pending. No real LLM/Google call. Coverage **≈62%**.

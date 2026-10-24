@@ -35,3 +35,8 @@ export function commentReplyReview(output:CommentReplyOutput){
 export const commentReplyEditSchema=z.object({revision:z.number().int().nonnegative().nullable(),contentRevision:z.number().int().nonnegative(),reviewRevision:z.number().int().nonnegative(),reply:nonempty(2000)}).strict();
 export type CommentReplyEdit=z.infer<typeof commentReplyEditSchema>;
 export const commentReplyHistorySchema=z.object({beforeVersion:z.coerce.number().int().positive().optional()}).strict();
+
+export const commentReplyTargetSchema=z.object({publicationId:z.uuid(),commentId:z.uuid(),contentRevision:z.number().int().nonnegative(),reviewRevision:z.number().int().nonnegative(),draftRevision:z.number().int().nonnegative().nullable()}).strict();
+export const commentReplySnapshotSchema=z.object({publicationId:z.uuid(),draftRevision:z.number().int().nonnegative().nullable(),comment:commentReplyInputSchema.shape.comment}).strict();
+export type CommentReplyTarget=z.infer<typeof commentReplyTargetSchema>;
+export type CommentReplySnapshot=z.infer<typeof commentReplySnapshotSchema>;

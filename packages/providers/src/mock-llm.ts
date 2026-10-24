@@ -1,4 +1,4 @@
-import { DomainError, generationInputSchema, type LLMProvider, type OperationContext, type GenerationOutput, performanceEvidenceSchema, performanceDimensions, type PerformanceOutput } from '@contentos/types';
+import { commentReplyInputSchema, DomainError, generationInputSchema, type LLMProvider, type OperationContext, type GenerationOutput, performanceEvidenceSchema, performanceDimensions, type PerformanceOutput } from '@contentos/types';
 /** Explicit local/CI fixture. Never registered in production. */
 export class MockLLMProvider implements LLMProvider {
   readonly name = 'mock';
@@ -6,6 +6,10 @@ export class MockLLMProvider implements LLMProvider {
   async generate(input: Parameters<LLMProvider['generate']>[0], context: OperationContext) {
     context.signal.throwIfAborted();
     const request = JSON.parse(input.prompt.split('\nThe previous response')[0]!) as { workflow: string; sourceData: unknown };
+    if(request.workflow==='DRAFT_COMMENT_REPLY'){
+      commentReplyInputSchema.parse(request.sourceData);
+      return {json:{reply:'[ДЕМО] Спасибо за ваш комментарий. Ответ требует проверки.',sentiment:null,risks:[{category:'UNCERTAIN',source:'CONTEXT',quote:null,reason:'Демонстрационный черновик требует человека.'}]},usage:{model:'mock-v1',inputUnits:0,outputUnits:0,costMicrounits:0,currency:'USD'}};
+    }
     if(request.workflow==='OPTIMIZE_STRATEGY'){
       const data=request.sourceData as {evidence:unknown};
       const evidence=performanceEvidenceSchema.parse(data.evidence);

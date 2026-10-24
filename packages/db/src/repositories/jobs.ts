@@ -1,3 +1,4 @@
+import {snapshotCommentReply,checkCommentReplySnapshot,persistGeneratedCommentReply} from './comment-reply-generation';
 import { randomUUID, createHash } from 'node:crypto';
 import { and, eq, sql, desc } from 'drizzle-orm';
 import { DomainError, validateBrandReview, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
@@ -19,7 +20,7 @@ export class JobRepository {
     // original accepted job even when the brand has subsequently changed.
     const inputHash = createHash('sha256').update(JSON.stringify({ brandId, type, options: input.options })).digest('hex');
     return this.db.transaction(async tx => {
-      await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,(type === 'GENERATE_STRATEGY' || type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate');
+      await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,(type === 'GENERATE_STRATEGY' || type === 'OPTIMIZE_STRATEGY' || type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate');
       const [existing] = await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,idempotencyKey)));
       if (existing) { if (existing.inputHash !== inputHash || existing.requestedBy !== userId) throw new DomainError('CONFLICT',409); return existing; }
       const [brand] = await tx.select().from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))).for('share');
@@ -45,6 +46,10 @@ export class JobRepository {
         if(!input.options.analysisDays||input.options.scriptId||input.options.ideaId||input.options.edit!=='GENERATE')throw new DomainError('INVALID_INPUT');
         input={...input,performance:await snapshotPerformance(tx,tenantId,brandId,input.options.analysisDays)};
       }else if(input.options.analysisDays!==undefined||input.performance)throw new DomainError('INVALID_INPUT');
+      if(type==='DRAFT_COMMENT_REPLY'){
+        if(!input.options.commentReply||input.options.scriptId||input.options.ideaId||input.options.revision!==undefined||input.options.edit!=='GENERATE')throw new DomainError('INVALID_INPUT');
+        input={...input,commentReply:await snapshotCommentReply(tx,userId,tenantId,brandId,input.options.commentReply)};
+      }else if(input.options.commentReply||input.commentReply)throw new DomainError('INVALID_INPUT');
       const [policy] = await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,type));
       if (!policy) throw new DomainError('CONFIGURATION_REQUIRED',503);
       const reservation = await reserveInTransaction(tx,tenantId,policy.unit,policy.amount,`job:${idempotencyKey}`,correlationId);
@@ -68,7 +73,7 @@ export class JobRepository {
       const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
       if (!job || (job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO') || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
       let permitted = true;
-      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
+      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY' || job.type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
       if (!permitted || job.attempt >= job.maxAttempts) {
         await settleInTransaction(tx,tenantId,job.reservationId,'RELEASE',job.correlationId);
         await tx.update(jobs).set({status:'FAILED',errorCode:permitted ? 'PROVIDER_UNAVAILABLE' : 'NOT_AUTHORIZED',finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null}).where(jobWhere(tenantId,id));
@@ -79,6 +84,11 @@ export class JobRepository {
       return claimed ?? null;
     });
   }
+  async prepareCommentReply(tenantId:string,id:string,leaseToken:string){return this.db.transaction(async tx=>{
+    await lockTenant(tx,tenantId);const job=await ownedJob(tx,tenantId,id,leaseToken);
+    if(job.type!=='DRAFT_COMMENT_REPLY')throw new DomainError('INVALID_INPUT');
+    await checkCommentReplySnapshot(tx,job,generationInputSchema.parse(job.input));
+  });}
   async heartbeat(tenantId:string,id:string,leaseToken:string) {
     const updated = await this.db.update(jobs).set({leaseExpiresAt:new Date(Date.now()+300_000)}).where(and(jobWhere(tenantId,id),eq(jobs.status,'RUNNING'),eq(jobs.leaseToken,leaseToken),sql`${jobs.leaseExpiresAt} > now()`)).returning({id:jobs.id});
     return updated.length === 1;
@@ -95,11 +105,13 @@ export class JobRepository {
   async complete(tenantId:string,id:string,leaseToken:string,output:GenerationOutput) {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId); const job = await ownedJob(tx,tenantId,id,leaseToken);
-      await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate');
+      await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY' || job.type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate');
       if ((job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO')) throw new DomainError('INVALID_INPUT');
       const input = generationInputSchema.parse(job.input);
       let result: {internalId:string;version:number};
-      if (job.type === 'GENERATE_CAROUSEL') {
+      if(job.type==='DRAFT_COMMENT_REPLY'){
+        result=await persistGeneratedCommentReply(tx,job,input,output);
+      }else if (job.type === 'GENERATE_CAROUSEL') {
         const content = workflowSchemas.GENERATE_CAROUSEL.parse(output);
         const [item] = await tx.insert(contentItems).values({tenantId,brandId:job.brandId,title:content.title,type:'CAROUSEL',status:'READY'}).returning();
         const [carousel] = await tx.insert(carousels).values({tenantId,brandId:job.brandId,contentItemId:item!.id,platform:input.options.platform}).returning();

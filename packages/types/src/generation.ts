@@ -1,3 +1,4 @@
+import {commentReplyTargetSchema,commentReplySnapshotSchema,commentReplyOutputSchema,type CommentReplyOutput} from './comment-replies';
 import {carouselSchema,type CarouselOutput} from './carousels';
 import { postSchema, type PostOutput } from './posts';
 import { brandReviewSchema, type BrandReviewOutput } from './brand-review';
@@ -7,7 +8,7 @@ import {strategySchema,platformSchema,funnelSchema,type StrategyOutput} from './
 import {performanceEvidenceSchema,performanceOutputSchema,type PerformanceOutput} from './performance';
 export {strategySchema,platformSchema,funnelSchema,type StrategyOutput} from './strategy';
 const text = z.string().min(1).max(4000);
-export const workflowTypes = ['GENERATE_STRATEGY', 'GENERATE_IDEAS', 'GENERATE_SCRIPT', 'OPTIMIZE_STRATEGY', 'REVIEW_SCRIPT', 'GENERATE_POST', 'GENERATE_CAROUSEL'] as const;
+export const workflowTypes = ['GENERATE_STRATEGY', 'GENERATE_IDEAS', 'GENERATE_SCRIPT', 'OPTIMIZE_STRATEGY', 'REVIEW_SCRIPT', 'GENERATE_POST', 'GENERATE_CAROUSEL', 'DRAFT_COMMENT_REPLY'] as const;
 export type JobType = WorkflowType | 'CREATE_AVATAR' | 'GENERATE_VIDEO';
 export type WorkflowType = (typeof workflowTypes)[number];
 const score = z.number().min(0).max(100);
@@ -23,18 +24,19 @@ export const generationOptionsSchema = z.object({
   platform: platformSchema.default('TELEGRAM'), duration: z.union([z.literal(15), z.literal(30), z.literal(45), z.literal(60), z.literal(90)]).default(30),
   topic: z.string().max(2000).default(''), audience: z.string().max(1000).default(''), tone: z.string().max(1000).default(''),
   pillar: z.string().max(1000).default(''), product: z.string().max(1000).default(''), cta: z.string().max(1000).default(''), goal: z.string().max(1000).default(''),
+  commentReply:commentReplyTargetSchema.optional(),
   analysisDays:z.union([z.literal(7),z.literal(30),z.literal(90)]).optional(),
   ideaId: z.uuid().optional(), scriptId: z.uuid().optional(), revision: z.number().int().nonnegative().optional(),
   edit: z.enum(['GENERATE', 'REWRITE', 'SHORTEN', 'EXPAND', 'PROVOCATIVE', 'EXPERT', 'EMOTIONAL', 'SALES', 'CHANGE_CTA']).default('GENERATE'),
 }).strict();
 export const generationRequestSchema = z.object({ type: z.enum(workflowTypes), options: generationOptionsSchema.default(() => generationOptionsSchema.parse({})), idempotencyKey: z.uuid() }).strict();
-export const generationInputSchema = z.object({ brain: brandBrainSchema, options: generationOptionsSchema, brandRevision: z.number().int().nonnegative(), previousScript: scriptSchema.optional(), performance:z.object({evidence:performanceEvidenceSchema,strategyId:z.uuid(),strategyVersion:z.number().int().positive(),strategy:strategySchema}).strict().optional() }).strict();
+export const generationInputSchema = z.object({ brain: brandBrainSchema, options: generationOptionsSchema, brandRevision: z.number().int().nonnegative(), previousScript: scriptSchema.optional(), commentReply:commentReplySnapshotSchema.optional(), performance:z.object({evidence:performanceEvidenceSchema,strategyId:z.uuid(),strategyVersion:z.number().int().positive(),strategy:strategySchema}).strict().optional() }).strict();
 export type GenerationInput = z.infer<typeof generationInputSchema>;
 export type GenerationOptions = z.infer<typeof generationOptionsSchema>;
 export type IdeasOutput = z.infer<typeof ideasSchema>;
 export type ScriptOutput = z.infer<typeof scriptSchema>;
-export type GenerationOutput = StrategyOutput | IdeasOutput | ScriptOutput | PerformanceOutput | BrandReviewOutput | PostOutput | CarouselOutput;
-export const workflowSchemas = { GENERATE_STRATEGY: strategySchema, GENERATE_IDEAS: ideasSchema, GENERATE_SCRIPT: scriptSchema, OPTIMIZE_STRATEGY:performanceOutputSchema, REVIEW_SCRIPT:brandReviewSchema, GENERATE_POST:postSchema, GENERATE_CAROUSEL:carouselSchema };
+export type GenerationOutput = StrategyOutput | IdeasOutput | ScriptOutput | PerformanceOutput | BrandReviewOutput | PostOutput | CarouselOutput | CommentReplyOutput;
+export const workflowSchemas = { DRAFT_COMMENT_REPLY:commentReplyOutputSchema, GENERATE_STRATEGY: strategySchema, GENERATE_IDEAS: ideasSchema, GENERATE_SCRIPT: scriptSchema, OPTIMIZE_STRATEGY:performanceOutputSchema, REVIEW_SCRIPT:brandReviewSchema, GENERATE_POST:postSchema, GENERATE_CAROUSEL:carouselSchema };
 export const jobStates = ['QUEUED', 'RUNNING', 'RETRY', 'SUCCEEDED', 'FAILED', 'WAITING_EXTERNAL', 'WAITING_REVIEW', 'RECONCILIATION'] as const;
 export type JobState = (typeof jobStates)[number];
 export type UsageUnit = 'AI_CREDITS' | 'VIDEO_SECONDS';

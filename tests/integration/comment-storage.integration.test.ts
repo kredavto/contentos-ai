@@ -5,6 +5,9 @@ import {emptyOnboarding} from '../../packages/types/src/index';
 import {comments} from '../../packages/db/src/schema/comments';
 import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
 import {CommentReplyRepository} from '../../packages/db/src/repositories/comment-replies';
+import {JobRepository} from '../../packages/db/src/repositories/jobs';
+import {LedgerRepository} from '../../packages/db/src/repositories/ledger';
+import {generationOptionsSchema,generationInputSchema} from '../../packages/types/src/index';
 import {BrandRepository} from '../../packages/db/src/repositories/brands';
 import {CommentReplyService} from '../../packages/core/src/comment-replies';
 import {CommentRepository} from '../../packages/db/src/repositories/comments';
@@ -401,6 +404,44 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   for(let i=0;i<21;i++)await replies.save(user,tenant,brand,publicationId,comment.id!,{revision:i===0?null:i-1,contentRevision:0,reviewRevision:0,reply:`Draft ${i}`},randomUUID());
   const first=await replies.history(user,tenant,brand,publicationId,comment.id!,{});expect(first.items).toHaveLength(20);expect(first.next).toEqual({beforeVersion:2});
   const last=await replies.history(user,tenant,brand,publicationId,comment.id!,first.next);expect(last.items.map(row=>row.version)).toEqual([1]);expect(last.next).toBeNull();
+ });
+
+ async function generationFixture(){
+  const publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  const brain=await new BrandRepository(database.db).getBrandBrain(user,tenant,brand);
+  await new LedgerRepository(database.db).adjust(tenant,'AI_CREDITS',20,randomUUID(),randomUUID());
+  const jobs=new JobRepository(database.db),input={brain:brain.data,brandRevision:brain.brand.revision,options:generationOptionsSchema.parse({commentReply:{publicationId,commentId:comment.id!,contentRevision:0,reviewRevision:0,draftRevision:null}})};
+  const enqueue=(key=randomUUID())=>jobs.enqueue(user,tenant,brand,'DRAFT_COMMENT_REPLY',input,key,'mock','mock-v1',randomUUID());
+  return {publicationId,comment,jobs,input,enqueue};
+ }
+ it('reserves once for concurrent AI reply intent and captures only with a saved version',async()=>{
+  const f=await generationFixture(),key=randomUUID(),[one,two]=await Promise.all([f.enqueue(key),f.enqueue(key)]);expect(one.id).toBe(two.id);
+  expect((await database.client`select count(*)::int as count from usage_ledger where reservation_id=${one.reservationId} and type='RESERVE'`)[0]?.count).toBe(1);
+  const job=(await f.jobs.claim(tenant,one.id))!;await f.jobs.prepareCommentReply(tenant,job.id,job.leaseToken!);
+  expect(generationInputSchema.parse(job.input).commentReply?.comment.text).toBe(f.comment.text);
+  const result=await f.jobs.complete(tenant,job.id,job.leaseToken!,{reply:'AI suggestion',sentiment:null,risks:[]});
+  const history=await replies.history(user,tenant,brand,f.publicationId,f.comment.id!,{});expect(history.draft?.id).toBe(result.internalId);expect(history.items[0]).toMatchObject({source:'AI',content:{reply:'AI suggestion'}});
+  expect((await database.client`select status from usage_reservations where id=${job.reservationId}`)[0]?.status).toBe('CAPTURED');
+  await expect(database.client`update comment_reply_versions set content=content where job_id=${job.id}`).rejects.toThrow();
+  await expect(database.client`delete from comment_reply_versions where job_id=${job.id}`).rejects.toThrow();
+ });
+ it('preserves manual edits made during generation and releases the failed reservation',async()=>{
+  const f=await generationFixture(),queued=await f.enqueue(),job=(await f.jobs.claim(tenant,queued.id))!;
+  await f.jobs.prepareCommentReply(tenant,job.id,job.leaseToken!);
+  await replies.save(user,tenant,brand,f.publicationId,f.comment.id!,{revision:null,contentRevision:0,reviewRevision:0,reply:'Human wins'},randomUUID());
+  await expect(f.jobs.complete(tenant,job.id,job.leaseToken!,{reply:'Late AI',sentiment:null,risks:[]})).rejects.toThrow('CONFLICT');
+  await f.jobs.fail(tenant,job.id,job.leaseToken!,'CONFLICT',false);
+  expect((await database.client`select status from usage_reservations where id=${job.reservationId}`)[0]?.status).toBe('RELEASED');
+  expect((await replies.history(user,tenant,brand,f.publicationId,f.comment.id!,{})).items.map(row=>row.content.reply)).toEqual(['Human wins']);
+ });
+ it('rechecks source changes before an AI call and rejects malformed evidence at completion',async()=>{
+  const f=await generationFixture(),queued=await f.enqueue(),job=(await f.jobs.claim(tenant,queued.id))!;
+  await database.client`update comments set content_revision=1 where id=${f.comment.id!}`;
+  await expect(f.jobs.prepareCommentReply(tenant,job.id,job.leaseToken!)).rejects.toThrow('CONFLICT');await f.jobs.fail(tenant,job.id,job.leaseToken!,'CONFLICT',false);
+  const other=await generationFixture(),q=await other.enqueue(),j=(await other.jobs.claim(tenant,q.id))!;
+  await expect(other.jobs.complete(tenant,j.id,j.leaseToken!,{reply:'Unsafe evidence',sentiment:null,risks:[{category:'MEDICAL',source:'COMMENT',quote:'fabricated',reason:'Check'}]})).rejects.toThrow('PROVIDER_REJECTED');
+  expect((await replies.history(user,tenant,brand,other.publicationId,other.comment.id!,{})).items).toHaveLength(0);
+  await other.jobs.fail(tenant,j.id,j.leaseToken!,'PROVIDER_REJECTED',false);
  });
 
 });
