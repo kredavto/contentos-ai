@@ -29,6 +29,7 @@ export const comments=pgTable('comments',{
   updatedAt:timestamp('updated_at',{withTimezone:true}).notNull().defaultNow(),
 },t=>[
   unique('comment_tenant_id_uq').on(t.tenantId,t.id),
+  unique('comment_publication_identity_uq').on(t.tenantId,t.publicationId,t.id),
   unique('comment_external_identity_uq').on(t.tenantId,t.publicationId,t.provider,t.externalCommentId),
   unique('comment_thread_identity_uq').on(t.tenantId,t.publicationId,t.provider,t.externalThreadId,t.id),
   foreignKey({name:'comment_publication_fk',columns:[t.tenantId,t.publicationId],foreignColumns:[publications.tenantId,publications.id]}),

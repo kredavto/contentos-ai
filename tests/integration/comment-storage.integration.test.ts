@@ -1,5 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {beforeAll,describe,expect,it,vi} from 'vitest';
+import {commentReplyDrafts,commentReplyVersions} from '../../packages/db/src/schema/comment-replies';
+import {emptyOnboarding} from '../../packages/types/src/index';
 import {comments} from '../../packages/db/src/schema/comments';
 import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
 import {CommentRepository} from '../../packages/db/src/repositories/comments';
@@ -326,6 +328,37 @@ describe.skipIf(!url)('comment storage constraints',()=>{
    await database.client`update comment_imports set position=${JSON.stringify(position)}::jsonb where id=${job.id}`;
    await expect(f.repo.preparePage({...job,position})).rejects.toThrow('PROVIDER_REJECTED');
   }
+ });
+
+ async function draftFixture(){
+  const publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  const [draft]=await database.db.insert(commentReplyDrafts).values({tenantId:tenant,publicationId,commentId:comment.id!}).returning();
+  const version={tenantId:tenant,publicationId,commentId:comment.id!,draftId:draft!.id,version:1,source:'HUMAN' as const,createdBy:user,input:{brain:emptyOnboarding('Draft fixture'),brandRevision:0,comment:{id:comment.id!,contentRevision:0,reviewRevision:0,text:comment.text,parentText:null}},content:{reply:'Human draft',sentiment:null,risks:[]}};
+  return {publicationId,comment,draft:draft!,version};
+ }
+ it('binds reply drafts to the exact tenant, publication and comment',async()=>{
+  const f=await draftFixture();
+  await expect(database.db.insert(commentReplyDrafts).values({tenantId:tenant,publicationId:f.publicationId,commentId:f.comment.id!})).rejects.toThrow();
+  await expect(database.db.insert(commentReplyDrafts).values({tenantId:tenant,publicationId:await publication(),commentId:f.comment.id!})).rejects.toThrow();
+  await expect(database.db.insert(commentReplyDrafts).values({tenantId:randomUUID(),publicationId:f.publicationId,commentId:f.comment.id!})).rejects.toThrow();
+ });
+ it('stores separate reply versions and rejects duplicate or cross-scope history entries',async()=>{
+  const f=await draftFixture(),other=await draftFixture();
+  await database.db.insert(commentReplyVersions).values(f.version);
+  await expect(database.db.insert(commentReplyVersions).values(f.version)).rejects.toThrow();
+  await expect(database.db.insert(commentReplyVersions).values({...f.version,version:2,draftId:other.draft.id})).rejects.toThrow();
+  await expect(database.db.insert(commentReplyVersions).values({...f.version,version:2,tenantId:randomUUID()})).rejects.toThrow();
+  await database.db.insert(commentReplyVersions).values({...f.version,version:2,content:{...f.version.content,reply:'Edited human draft'}});
+  const rows=await database.client`select version,content from comment_reply_versions where draft_id=${f.draft.id} order by version`;
+  expect(rows.map(row=>row.content.reply)).toEqual(['Human draft','Edited human draft']);
+ });
+ it('requires valid provenance and snapshot identity for reply history',async()=>{
+  const f=await draftFixture();
+  for(const value of [{...f.version,version:0},{...f.version,source:'AI' as const},{...f.version,jobId:randomUUID()},{...f.version,input:{...f.version.input,comment:{...f.version.input.comment,id:randomUUID()}}}])await expect(database.db.insert(commentReplyVersions).values(value)).rejects.toThrow();
+  await database.db.insert(commentReplyVersions).values(f.version);
+  await expect(database.client`update comment_reply_versions set input=input #- '{comment,reviewRevision}' where draft_id=${f.draft.id}`).rejects.toThrow();
+  await expect(database.client`update comment_reply_versions set content=content-'risks' where draft_id=${f.draft.id}`).rejects.toThrow();
+  await expect(database.client`update comment_reply_versions set content=jsonb_set(content,'{reply}',to_jsonb(${''.padEnd(2001,'x')}::text)) where draft_id=${f.draft.id}`).rejects.toThrow();
  });
 
 });

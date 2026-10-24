@@ -596,6 +596,13 @@
       "when": 1792806134810,
       "tag": "0084_grey_leopardon",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1792808513221,
+      "tag": "0085_curvy_roulette",
+      "breakpoints": true
     }
   ]
 }
