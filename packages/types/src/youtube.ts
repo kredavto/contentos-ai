@@ -62,3 +62,12 @@ export interface YouTubeCommentsProvider {
   /** The caller must bind parentId to a previously verified publication/thread. */
   commentReplies(accessToken:string,parentId:string,channelId:string,cursor:string|null,context:OperationContext):Promise<YouTubeCommentPage<YouTubeComment>>;
 }
+
+export const youtubeCommentReplyInputSchema=z.object({parentId:youtubeCommentIdSchema,channelId:youtubeChannelIdSchema,text:z.string().max(2000).refine(value=>value.trim().length>0&&!value.includes('\u0000'))}).strict();
+export type YouTubeCommentReplyInput=z.infer<typeof youtubeCommentReplyInputSchema>;
+/** Separate write capability: callers must persist an attempt and validate approval/scopes before calling. */
+export interface YouTubeCommentPublishingProvider {
+  /** Read-only evidence lookup; null is not permission to resend an uncertain insert. */
+  commentReplyReceipt(accessToken:string,externalId:string,value:YouTubeCommentReplyInput,context:OperationContext):Promise<{reference:ProviderReference;publishedAt:string}|null>;
+ insertCommentReply(accessToken:string,value:YouTubeCommentReplyInput,context:OperationContext):Promise<{reference:ProviderReference;publishedAt:string}>;
+}

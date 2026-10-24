@@ -1,7 +1,7 @@
 import {youtubeThreadPageSchema,youtubeReplyPageSchema,normalizedYouTubeComment} from './youtube-comments';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {DomainError,ProviderRequestError,youtubeCommentsScope,youtubeCommentIdSchema,youtubeCommentCursorSchema,type YouTubeCommentsProvider,normalizedMetricsSchema,type YouTubeStatisticsProvider,oauthTokenSchema,youtubeChannelIdSchema,youtubeVideoIdSchema,youtubeMetadataSchema,youtubeTokensSchema,type YouTubeAuthorizationProvider,type YouTubePublishingProvider,type YouTubeMetadata,type YouTubeTokens,type YouTubeVideo,type YouTubeUploadResult,type OperationContext,type ErrorCode} from '@contentos/types';
+import {DomainError,ProviderRequestError,youtubeCommentsScope,youtubeCommentIdSchema,youtubeCommentCursorSchema,type YouTubeCommentsProvider,type YouTubeCommentPublishingProvider,type YouTubeCommentReplyInput,youtubeCommentReplyInputSchema,normalizedMetricsSchema,type YouTubeStatisticsProvider,oauthTokenSchema,youtubeChannelIdSchema,youtubeVideoIdSchema,youtubeMetadataSchema,youtubeTokensSchema,type YouTubeAuthorizationProvider,type YouTubePublishingProvider,type YouTubeMetadata,type YouTubeTokens,type YouTubeVideo,type YouTubeUploadResult,type OperationContext,type ErrorCode} from '@contentos/types';
 
 export const youtubeScopes=['https://www.googleapis.com/auth/youtube.upload','https://www.googleapis.com/auth/youtube.readonly'] as const;
 const api='https://www.googleapis.com/youtube/v3';
@@ -11,6 +11,7 @@ const sizeSchema=z.number().int().positive().max(256_000_000_000);
 const failureCode=z.string().regex(/^[A-Za-z0-9_]{1,100}$/);
 const videoSchema=z.object({id:youtubeVideoIdSchema,snippet:z.object({channelId:youtubeChannelIdSchema}),status:z.object({uploadStatus:z.enum(['deleted','failed','processed','rejected','uploaded']),privacyStatus:z.enum(['private','public','unlisted']),failureReason:failureCode.optional(),rejectionReason:failureCode.optional()}),processingDetails:z.object({processingStatus:z.enum(['failed','processing','succeeded','terminated']),processingFailureReason:failureCode.optional()}).optional()});
 const tokenResponseSchema=z.object({access_token:oauthTokenSchema,token_type:z.literal('Bearer'),expires_in:z.number().int().min(1).max(86400),refresh_token:oauthTokenSchema.optional(),refresh_token_expires_in:z.number().int().positive().max(315360000).optional(),scope:z.string().min(1).max(8192).optional()});
+const commentReceiptSchema=z.object({id:youtubeCommentIdSchema,snippet:z.object({channelId:youtubeChannelIdSchema,parentId:youtubeCommentIdSchema,authorChannelId:z.object({value:youtubeChannelIdSchema}),textOriginal:z.string().max(2000),publishedAt:z.iso.datetime({offset:true})})});
 const googleErrorSchema=z.object({error:z.object({code:z.number().int(),errors:z.array(z.object({reason:failureCode})).optional()})});
 const oauthErrorSchema=z.object({error:z.enum(['invalid_grant','invalid_client','access_denied','invalid_request','unauthorized_client','unsupported_grant_type','invalid_scope'])});
 
@@ -43,7 +44,7 @@ async function json(response:Response,mutation:boolean,maxBytes=256000):Promise<
 async function decode<T>(schema:z.ZodType<T>,response:Response,mutation=false,maxBytes=256000):Promise<T>{const parsed=schema.safeParse(await json(response,mutation,maxBytes));if(!parsed.success)throw invalidResponse(mutation);return parsed.data;}
 
 /** Official Google endpoints only; no retry, redirects, credential logging or implicit publish. */
-export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePublishingProvider,YouTubeStatisticsProvider,YouTubeCommentsProvider{
+export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePublishingProvider,YouTubeStatisticsProvider,YouTubeCommentsProvider,YouTubeCommentPublishingProvider{
   private readonly redirectUri:string;
   constructor(private readonly options:{clientId:string;clientSecret:string;redirectUri:string},private readonly transport:typeof fetch=fetch){
     try{
@@ -68,6 +69,11 @@ export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePubl
       const definitive=(error.success&&error.data.error.code===status&&[400,401,403,404,409,429].includes(status))||(url===tokenUrl&&oauth.success&&[400,401,403].includes(status));
       if(!definitive)throw invalidResponse(mutation);
       const reasons=error.success?error.data.error.errors?.map(row=>row.reason)??[]:[];
+      if(operation==='comment_insert'){
+        // Only documented non-creation errors are definitive for this non-idempotent write.
+        const rejected:Record<number,readonly string[]>={400:['commentTextRequired','commentTextTooLong','invalidCustomEmoji','invalidCommentMetadata','operationNotSupported','parentCommentIsPrivate','parentIdMissing'],401:['authError'],403:['forbidden','ineligibleAccount','insufficientPermissions','commentsDisabled','quotaExceeded','rateLimitExceeded','userRateLimitExceeded'],404:['parentCommentNotFound'],429:['rateLimitExceeded','userRateLimitExceeded']};
+        if(!reasons.length||reasons.some(reason=>!rejected[status]?.includes(reason)))throw invalidResponse(true);
+      }
       const code:ErrorCode=operation.startsWith('comment_')&&reasons.includes('commentsDisabled')?'COMMENTS_DISABLED':operation.startsWith('comment_')&&status===404?'NOT_FOUND':oauth.success&&['invalid_client','unauthorized_client'].includes(oauth.data.error)?'CONFIGURATION_REQUIRED':status===401||(oauth.success&&oauth.data.error==='invalid_grant')?'SOCIAL_TOKEN_EXPIRED':status===429||reasons.some(reason=>['quotaExceeded','rateLimitExceeded','userRateLimitExceeded','uploadLimitExceeded'].includes(reason))?'RATE_LIMITED':status===403?'NOT_AUTHORIZED':'PROVIDER_REJECTED';
       throw new YouTubeRequestError(code,code==='RATE_LIMITED'?429:code==='CONFIGURATION_REQUIRED'?503:409,true,retryAfter(response.headers.get('retry-after')));
     }catch(error){if(error instanceof DomainError)throw error;throw new YouTubeRequestError(mutation?'RECONCILIATION_REQUIRED':'PROVIDER_UNAVAILABLE',mutation?409:503,false);}
@@ -178,6 +184,24 @@ export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePubl
     if((cursor!==null&&page.nextPageToken===cursor)||new Set(page.items.map(row=>row.id)).size!==page.items.length)throw invalidResponse(false);
     for(const row of page.items)if(row.snippet.channelId!==channelId||row.snippet.parentId!==parentId||row.id===parentId)throw invalidResponse(false);
     return {reference:{provider:'youtube',internalId:context.internalId,externalId:parentId,metadata:{kind:'comment-replies',channelId}},observedAt:new Date().toISOString(),nextCursor:page.nextPageToken??null,items:page.items.map(normalizedYouTubeComment)};
+  }
+  async commentReplyReceipt(accessToken:string,externalId:string,raw:YouTubeCommentReplyInput,context:OperationContext){
+    const value=input(youtubeCommentReplyInputSchema,raw);input(youtubeCommentIdSchema,externalId);input(z.uuid(),context.internalId);
+    const query=new URLSearchParams({part:'snippet',id:externalId,textFormat:'plainText'});
+    const page=await decode(z.object({items:z.array(commentReceiptSchema).max(1)}),await this.request(`${api}/comments?${query}`,{headers:this.headers(accessToken)},context,'comment_receipt'));
+    const receipt=page.items[0];if(!receipt)return null;
+    if(receipt.id!==externalId||receipt.id===value.parentId||receipt.snippet.channelId!==value.channelId||receipt.snippet.authorChannelId.value!==value.channelId||receipt.snippet.parentId!==value.parentId||receipt.snippet.textOriginal!==value.text)throw invalidResponse(false);
+    return {reference:{provider:'youtube',internalId:context.internalId,externalId:receipt.id,metadata:{kind:'comment-reply',parentId:value.parentId,channelId:value.channelId}},publishedAt:new Date(receipt.snippet.publishedAt).toISOString()};
+  }
+  async insertCommentReply(accessToken:string,raw:YouTubeCommentReplyInput,context:OperationContext){
+    const value=input(youtubeCommentReplyInputSchema,raw);input(z.uuid(),context.internalId);
+    const headers={...this.headers(accessToken),'Content-Type':'application/json; charset=UTF-8'};
+    if(context.signal.aborted)throw new YouTubeRequestError('PROVIDER_UNAVAILABLE',503,true);
+    // A stable local intent does not make YouTube comments.insert idempotent. Never retry here.
+    const response=await this.request(`${api}/comments?part=snippet`,{method:'POST',headers,body:JSON.stringify({snippet:{parentId:value.parentId,textOriginal:value.text}})},context,'comment_insert',true,[200,201]);
+    const receipt=await decode(commentReceiptSchema,response,true);
+    if(receipt.id===value.parentId||receipt.snippet.channelId!==value.channelId||receipt.snippet.authorChannelId.value!==value.channelId||receipt.snippet.parentId!==value.parentId||receipt.snippet.textOriginal!==value.text)throw invalidResponse(true);
+    return {reference:{provider:'youtube',internalId:context.internalId,externalId:receipt.id,metadata:{kind:'comment-reply',parentId:value.parentId,channelId:value.channelId}},publishedAt:new Date(receipt.snippet.publishedAt).toISOString()};
   }
   async thumbnail(accessToken:string,videoId:string,value:{bytes:Uint8Array;mimeType:'image/png'|'image/jpeg'},context:OperationContext){
     input(youtubeVideoIdSchema,videoId);input(z.enum(['image/png','image/jpeg']),value.mimeType);
