@@ -61,3 +61,5 @@ export * from './youtube-resolution-tasks';
 
 export * from './approvals';
 export * from './provider-keys';
+
+export * from './comments';

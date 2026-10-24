@@ -575,6 +575,20 @@
       "when": 1792804862475,
       "tag": "0081_dusty_la_nuit",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1792805764919,
+      "tag": "0082_huge_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1792805873435,
+      "tag": "0083_fresh_bloodscream",
+      "breakpoints": true
     }
   ]
 }
