@@ -10,7 +10,7 @@ Replies use [comments.list](https://developers.google.com/youtube/data/reference
 
 ## OAuth prerequisite verified on 2026-10-24
 
-The official [YouTube discovery document](https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest) lists `https://www.googleapis.com/auth/youtube.force-ssl` for commentThreads.list, comments.list and comments.insert. Current authorization requests only youtube.upload and youtube.readonly; the existing grant must not be presented as comment-ready.
+The official [YouTube discovery document](https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest) lists `https://www.googleapis.com/auth/youtube.force-ssl` for commentThreads.list, comments.list and comments.insert. The default authorization requests only youtube.upload and youtube.readonly; an upload-only grant must not be presented as comment-ready.
 
 Add an explicit optional comments permission request in the connection flow, persist the requested capability in the one-time OAuth attempt, and verify the granted scope on callback. Keep existing upload-only connections usable. Recheck the current grant and credential generation during every import/send; a missing comments scope requires reconnecting, not fallback to another account. The product must explain the additional Google permission before consent. Acquiring the provider permission is not opt-in to automatic replies; SUGGEST_ONLY remains the default and reply approval is separate.
 
@@ -32,4 +32,14 @@ A typed YouTube read adapter now loads bounded thread/reply pages with plainText
 
 Disabled comments, missing objects, expired tokens, quotas and network failure remain explicit typed errors. The existing provider transport keeps its prior response limits for other endpoints. Focused tests passed 23 cases across the new comment adapter and existing YouTube contracts using synthetic HTTP responses; no user credential or live Google call was made. Workspace/test typechecks and lint also passed in the isolated worktree. Full integration remains pending.
 
-This foundation does not implement comment storage, synchronization jobs, UI, expanded OAuth consent, sentiment, drafts, approvals or sends. Existing connections still cannot be advertised as comments-ready. Full §§81–83 remain open.
+The next slice implements optional OAuth permission and channel-card capability controls, with full acceptance pending. This foundation does not implement comment storage, synchronization jobs, inbox UI, sentiment, drafts, approvals or sends. Existing upload-only connections cannot be advertised as comments-ready. Full §§81–83 remain open.
+
+## Storage and import decisions from the existing schema
+
+Publication ownership is derived through publications.job_id → publishing_jobs, where brand_id, connection_id and credential_version already exist. The importer must join that chain under authenticated tenant context rather than accept brand/channel/external video identity from its request. Persisted external identity is validated again against the current YouTube channel before reads. The initial scope is publications already recorded by this application; arbitrary remote video imports require a separate authorized flow.
+
+Store each comment with an internal UUID, tenant/publication association, provider external identity, optional parent UUID within the same tenant/publication, nullable author identity, original/updated provider timestamps and latest observed text. Enforce composite parent/publication foreign keys and unique tenant/publication/provider/external identity. Keep imported content revision separate from local triage revision so replay cannot reset review decisions; changed text must invalidate any pending approved reply. Sentiment stays null until assessed.
+
+Use a durable import run plus bounded page tasks: save each validated page and its next cursor atomically with the next outbox event. A lease token fences page completion. Record visited cursors per run to reject longer cycles, not just identical consecutive tokens. Fetch replies independently for every known thread with replies; a thread-list completion does not imply reply completion. A bounded run that reaches its page/time budget exposes PARTIAL with a resumable cursor, never SUCCEEDED with an apparently complete inbox. Missing rows from a refresh are not deletions; confirmed unavailable objects need explicit evidence and a retained review history.
+
+These are design constraints for the next migration/service slice, not implemented storage or execution guarantees.

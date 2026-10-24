@@ -15,7 +15,7 @@ async function session(tx:Transaction,userId:string,sessionId:string){
 export class YouTubeOAuthRepository{
   constructor(private readonly db:Database){}
   async authorize(userId:string,tenantId:string,brandId:string,sessionId:string){return this.db.transaction(async tx=>{await authorizeSocial(tx,userId,tenantId,brandId,true);await session(tx,userId,sessionId);});}
-  async begin(userId:string,tenantId:string,brandId:string,sessionId:string,input:{id:string;connectionId:string;reconnectId:string|null;revision:number|null;stateHash:string;verifier:EncryptedCredential},correlationId:string){
+  async begin(userId:string,tenantId:string,brandId:string,sessionId:string,input:{commentsAccess?:boolean;id:string;connectionId:string;reconnectId:string|null;revision:number|null;stateHash:string;verifier:EncryptedCredential},correlationId:string){
     return this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);await authorizeSocial(tx,userId,tenantId,brandId,true);await session(tx,userId,sessionId);
       if(input.reconnectId){
@@ -26,7 +26,7 @@ export class YouTubeOAuthRepository{
       const [counter]=await tx.select({count:sql<number>`count(*)::int`}).from(youtubeOAuthAttempts).where(and(eq(youtubeOAuthAttempts.tenantId,tenantId),eq(youtubeOAuthAttempts.createdBy,userId),eq(youtubeOAuthAttempts.status,'PENDING')));
       if(!counter||counter.count>=10)throw new DomainError('RATE_LIMITED',429);
       const [row]=await tx.insert(youtubeOAuthAttempts).values({...input,tenantId,brandId,sessionId,createdBy:userId}).returning({expiresAt:youtubeOAuthAttempts.expiresAt});
-      await tx.insert(auditLogs).values({tenantId,userId,action:'YOUTUBE_OAUTH_STARTED',resourceId:input.id,correlationId,metadata:{reconnect:!!input.reconnectId}});return row!;
+      await tx.insert(auditLogs).values({tenantId,userId,action:'YOUTUBE_OAUTH_STARTED',resourceId:input.id,correlationId,metadata:{reconnect:!!input.reconnectId,commentsAccess:input.commentsAccess??false}});return row!;
     });
   }
   async consume(userId:string,sessionId:string,stateHash:string){
@@ -44,7 +44,8 @@ export class YouTubeOAuthRepository{
       const {tenantId,brandId,connectionId}=attempt;
       await lockTenant(tx,tenantId);await authorizeSocial(tx,userId,tenantId,brandId,true);await session(tx,userId,attempt.sessionId);
       const [current]=await tx.select().from(youtubeOAuthAttempts).where(and(eq(youtubeOAuthAttempts.id,attempt.id),eq(youtubeOAuthAttempts.tenantId,tenantId),eq(youtubeOAuthAttempts.createdBy,userId),eq(youtubeOAuthAttempts.sessionId,attempt.sessionId),eq(youtubeOAuthAttempts.status,'EXCHANGING'),sql`${youtubeOAuthAttempts.expiresAt}>clock_timestamp()`)).for('update');
-      if(!current||current.connectionId!==connectionId||current.brandId!==brandId)throw new DomainError('CONFLICT',409);
+      if(!current||current.connectionId!==connectionId||current.brandId!==brandId||current.commentsAccess!==attempt.commentsAccess)throw new DomainError('CONFLICT',409);
+      if(current.commentsAccess&&channel.reference.metadata.commentsAuthorized!==true)throw new DomainError('NOT_AUTHORIZED',403);
       if(channel.reference.provider!=='youtube'||channel.reference.internalId!==connectionId)throw new DomainError('PROVIDER_REJECTED',502);
       let revision=0;
       if(current.reconnectId){

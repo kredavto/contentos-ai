@@ -33,11 +33,32 @@ test('YouTube configuration, isolated channel cards, local disconnect and viewer
     await page.reload();await expect(panel.getByRole('heading',{name:'Synthetic YouTube fixture'})).toBeVisible();
     expect(await page.locator('article').filter({has:page.getByRole('heading',{name:'Synthetic YouTube fixture'})}).count()).toBe(1);
     expect(JSON.stringify((await (await page.request.get(`${base}/youtube`)).json()).data)).not.toContain('ciphertext');
+    await expect(panel.getByText('Доступ к комментариям не подтверждён.',{exact:true})).toBeVisible();
+    await expect(panel.getByRole('button',{name:'Разрешить доступ к комментариям через Google'})).toBeDisabled();
     await page.setViewportSize({width:390,height:844});await panel.scrollIntoViewIfNeeded();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('youtube-connections-mobile.png'),fullPage:false});
+    // Synthetic transport exercises the explicit permission choice without opening Google.
+    const responseData=await (await page.request.get(`${base}/youtube`)).json();
+    await page.route(`**${base}/youtube`,async route=>{
+      if(route.request().method()==='GET')await route.fulfill({json:{...responseData,data:{...responseData.data,configuration:{ready:true,status:'CONFIGURED'}}}});
+      else await route.fulfill({status:503,json:{data:null,error:{message:'Тест: переход в Google остановлен'}}});
+    });
+    await page.reload();
+    const commentsButton=panel.getByRole('button',{name:'Разрешить доступ к комментариям через Google'});
+    await expect(commentsButton).toBeEnabled();
+    const commentsRequest=page.waitForRequest(request=>request.url().endsWith(`${base}/youtube`)&&request.method()==='POST');
+    await commentsButton.click();
+    expect((await commentsRequest).postDataJSON()).toEqual({connectionId:connection,revision:0,commentsAccess:true});
+    await expect(panel.getByRole('alert')).toHaveText('Тест: переход в Google остановлен');
+    const reconnectRequest=page.waitForRequest(request=>request.url().endsWith(`${base}/youtube`)&&request.method()==='POST');
+    await panel.getByRole('button',{name:'Переподключить YouTube',exact:true}).click();
+    expect((await reconnectRequest).postDataJSON()).toEqual({connectionId:connection,revision:0,commentsAccess:false});
+    await expect(panel.getByRole('alert')).toHaveText('Тест: переход в Google остановлен');
+    await page.unroute(`**${base}/youtube`);await page.reload();
     await panel.getByRole('button',{name:'Отключить YouTube',exact:true}).click();await panel.getByRole('button',{name:'Подтвердить отключение YouTube'}).click();
     await expect(panel.getByText('YouTube отключён',{exact:true})).toBeVisible();expect((await database.client`select status,credential from social_connections where id=${connection}`)[0]).toMatchObject({status:'REVOKED',credential:null});
     await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
     await page.reload();await expect(panel.getByRole('heading',{name:'Synthetic YouTube fixture'})).toBeVisible();await expect(panel.getByRole('button',{name:'Подключить YouTube через Google'})).toHaveCount(0);
+    await expect(panel.getByRole('button',{name:'Разрешить доступ к комментариям через Google'})).toHaveCount(0);
     expect((await page.request.post(`${base}/youtube`,{headers:{origin:baseURL!},data:{}})).status()).toBe(403);
     expect(errors).toEqual([]);
   }finally{await database.client`delete from sessions where user_id=${user}`;}

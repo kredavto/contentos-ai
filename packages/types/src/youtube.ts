@@ -15,7 +15,7 @@ export type YouTubeMetadata=z.infer<typeof youtubeMetadataSchema>;
 export const oauthTokenSchema=z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/);
 export const youtubeTokensSchema=z.object({accessToken:oauthTokenSchema,refreshToken:oauthTokenSchema,expiresAt:z.iso.datetime(),refreshExpiresAt:z.iso.datetime().nullable(),scopes:z.array(z.string().min(1).max(256)).min(1).max(32)}).strict();
 export type YouTubeTokens=z.infer<typeof youtubeTokensSchema>;
-export const youtubeConnectSchema=z.object({connectionId:z.uuid().optional(),revision:z.number().int().nonnegative().optional()}).strict().refine(value=>(value.connectionId===undefined)===(value.revision===undefined));
+export const youtubeConnectSchema=z.object({commentsAccess:z.boolean().default(false),connectionId:z.uuid().optional(),revision:z.number().int().nonnegative().optional()}).strict().refine(value=>(value.connectionId===undefined)===(value.revision===undefined));
 export const youtubeCallbackSchema=z.object({state:z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),code:oauthTokenSchema.optional(),error:z.string().regex(/^[a-z_]{1,100}$/).optional()}).refine(value=>(value.code===undefined)!==(value.error===undefined));
 export interface YouTubeVideo {
   reference:ProviderReference;channelId:string;privacy:z.infer<typeof youtubePrivacySchema>;
@@ -31,7 +31,7 @@ export interface YouTubePublishingProvider {
   thumbnail(accessToken:string,videoId:string,input:{bytes:Uint8Array;mimeType:'image/png'|'image/jpeg'},context:OperationContext):Promise<void>;
 }
 export interface YouTubeAuthorizationProvider {
-  authorizationUrl(state:string,verifier:string):string;
+  authorizationUrl(state:string,verifier:string,commentsAccess?:boolean):string;
   exchange(code:string,verifier:string,context:OperationContext):Promise<YouTubeTokens>;
   refresh(tokens:YouTubeTokens,context:OperationContext):Promise<YouTubeTokens>;
   revoke(refreshToken:string,context:OperationContext):Promise<void>;

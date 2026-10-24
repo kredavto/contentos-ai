@@ -55,3 +55,9 @@ it('keeps disabled comments, unavailable objects, revoked tokens and quotas dist
  }
  const transport=vi.fn<typeof fetch>(async()=>{throw new Error(token);});await expect(new YouTubeProvider(options,transport).commentReplies(token,'comment-a',channel,null,context())).rejects.toThrow('PROVIDER_UNAVAILABLE');expect(transport).toHaveBeenCalledOnce();
 });
+it('requests the additional Google permission only with explicit comments access',()=>{
+ const adapter=new YouTubeProvider(options),state='s'.repeat(43),verifier='v'.repeat(64),permission='https://www.googleapis.com/auth/youtube.force-ssl';
+ expect(new URL(adapter.authorizationUrl(state,verifier)).searchParams.get('scope')).not.toContain(permission);
+ expect(new URL(adapter.authorizationUrl(state,verifier,true)).searchParams.get('scope')?.split(' ')).toContain(permission);
+ expect(new URL(adapter.authorizationUrl(state,verifier,false)).searchParams.get('scope')).not.toContain(permission);
+});

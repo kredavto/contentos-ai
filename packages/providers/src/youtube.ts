@@ -1,7 +1,7 @@
 import {youtubeThreadPageSchema,youtubeReplyPageSchema,normalizedYouTubeComment} from './youtube-comments';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {DomainError,ProviderRequestError,youtubeCommentIdSchema,youtubeCommentCursorSchema,type YouTubeCommentsProvider,normalizedMetricsSchema,type YouTubeStatisticsProvider,oauthTokenSchema,youtubeChannelIdSchema,youtubeVideoIdSchema,youtubeMetadataSchema,youtubeTokensSchema,type YouTubeAuthorizationProvider,type YouTubePublishingProvider,type YouTubeMetadata,type YouTubeTokens,type YouTubeVideo,type YouTubeUploadResult,type OperationContext,type ErrorCode} from '@contentos/types';
+import {DomainError,ProviderRequestError,youtubeCommentsScope,youtubeCommentIdSchema,youtubeCommentCursorSchema,type YouTubeCommentsProvider,normalizedMetricsSchema,type YouTubeStatisticsProvider,oauthTokenSchema,youtubeChannelIdSchema,youtubeVideoIdSchema,youtubeMetadataSchema,youtubeTokensSchema,type YouTubeAuthorizationProvider,type YouTubePublishingProvider,type YouTubeMetadata,type YouTubeTokens,type YouTubeVideo,type YouTubeUploadResult,type OperationContext,type ErrorCode} from '@contentos/types';
 
 export const youtubeScopes=['https://www.googleapis.com/auth/youtube.upload','https://www.googleapis.com/auth/youtube.readonly'] as const;
 const api='https://www.googleapis.com/youtube/v3';
@@ -53,10 +53,11 @@ export class YouTubeProvider implements YouTubeAuthorizationProvider,YouTubePubl
       this.redirectUri=url.href;
     }catch{throw new DomainError('CONFIGURATION_REQUIRED',503);}
   }
-  authorizationUrl(state:string,verifier:string){
+  authorizationUrl(state:string,verifier:string,commentsAccess=false){
+    input(z.boolean(),commentsAccess);
     input(z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),state);input(verifierSchema,verifier);
     const url=new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    url.search=new URLSearchParams({client_id:this.options.clientId,redirect_uri:this.redirectUri,response_type:'code',scope:youtubeScopes.join(' '),state,access_type:'offline',prompt:'consent',include_granted_scopes:'true',code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'}).toString();return url.href;
+    url.search=new URLSearchParams({client_id:this.options.clientId,redirect_uri:this.redirectUri,response_type:'code',scope:[...youtubeScopes,...(commentsAccess?[youtubeCommentsScope]:[])].join(' '),state,access_type:'offline',prompt:'consent',include_granted_scopes:'true',code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'}).toString();return url.href;
   }
   private async request(url:string,init:RequestInit,context:OperationContext,operation:string,mutation=false,accepted=[200]){
     let status=0;const started=Date.now();

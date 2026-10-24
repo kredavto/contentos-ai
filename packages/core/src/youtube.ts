@@ -1,13 +1,16 @@
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {YouTubeOAuthRepository,SocialRepository} from '@contentos/db';
-import {DomainError,youtubeConnectSchema,youtubeCallbackSchema,youtubeTokensSchema,socialRevisionSchema,type YouTubeAuthorizationProvider,type OperationContext} from '@contentos/types';
+import {DomainError,youtubeCommentsScope,youtubeConnectSchema,youtubeCallbackSchema,youtubeTokensSchema,socialRevisionSchema,type YouTubeAuthorizationProvider,type YouTubeTokens,type OperationContext} from '@contentos/types';
 import {CredentialVault} from './credential-vault';
 const uuid=z.uuid();
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 function storedTokens(encoded:string){
   let value:unknown;try{value=JSON.parse(encoded);}catch{throw new DomainError('SOCIAL_TOKEN_EXPIRED',409);}
   const parsed=youtubeTokensSchema.safeParse(value);if(!parsed.success)throw new DomainError('SOCIAL_TOKEN_EXPIRED',409);return parsed.data;
+}
+function withCommentCapability(channel:Awaited<ReturnType<YouTubeAuthorizationProvider['channel']>>,tokens:YouTubeTokens){
+  return {...channel,reference:{...channel.reference,metadata:{...channel.reference.metadata,commentsAuthorized:tokens.scopes.includes(youtubeCommentsScope)}}};
 }
 export class YouTubeService{
   constructor(private readonly repository:YouTubeOAuthRepository,private readonly social:SocialRepository,private readonly provider:YouTubeAuthorizationProvider|null,private readonly vault:CredentialVault|null){}
@@ -20,8 +23,8 @@ export class YouTubeService{
     await this.repository.authorize(userId,tenantId,brandId,sessionId);
     if(!this.provider||!this.vault)throw new DomainError('CONFIGURATION_REQUIRED',503);
     const id=randomUUID(),connectionId=value.connectionId??randomUUID(),state=randomBytes(32).toString('base64url'),verifier=randomBytes(48).toString('base64url');
-    const authorizationUrl=this.provider.authorizationUrl(state,verifier);
-    const saved=await this.repository.begin(userId,tenantId,brandId,sessionId,{id,connectionId,reconnectId:value.connectionId??null,revision:value.revision??null,stateHash:hash(state),verifier:this.vault.encrypt(verifier,{tenantId,brandId,connectionId:id,provider:'youtube-oauth'})},correlationId);
+    const authorizationUrl=this.provider.authorizationUrl(state,verifier,value.commentsAccess);
+    const saved=await this.repository.begin(userId,tenantId,brandId,sessionId,{id,connectionId,commentsAccess:value.commentsAccess,reconnectId:value.connectionId??null,revision:value.revision??null,stateHash:hash(state),verifier:this.vault.encrypt(verifier,{tenantId,brandId,connectionId:id,provider:'youtube-oauth'})},correlationId);
     return {authorizationUrl,expiresAt:saved.expiresAt};
   }
   async callback(userId:string,sessionId:string,raw:unknown,correlationId:string){
@@ -34,7 +37,8 @@ export class YouTubeService{
       const context=this.context(attempt.tenantId,attempt.connectionId,correlationId);
       const tokens=await this.provider.exchange(value.code!,verifier,context);
       youtubeTokensSchema.parse(tokens);
-      const channel=await this.provider.channel(tokens.accessToken,context);
+      if(attempt.commentsAccess&&!tokens.scopes.includes(youtubeCommentsScope))throw new DomainError('NOT_AUTHORIZED',403);
+      const channel=withCommentCapability(await this.provider.channel(tokens.accessToken,context),tokens);
       const credential=this.vault.encrypt(JSON.stringify(tokens),{tenantId:attempt.tenantId,brandId:attempt.brandId,connectionId:attempt.connectionId,provider:'youtube'});
       const result=await this.repository.finish(userId,attempt,channel,credential,correlationId);return {...result,connected:true};
     }catch(error){await this.repository.fail(userId,attempt,error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE',correlationId);throw error;}
@@ -49,7 +53,7 @@ export class YouTubeService{
     try{
       let tokens=storedTokens(this.vault.decrypt(row.credential,scope));
       if(Date.parse(tokens.expiresAt)<=Date.now()+60000)tokens=await this.provider.refresh(tokens,context);
-      const channel=await this.provider.channel(tokens.accessToken,context);
+      const channel=withCommentCapability(await this.provider.channel(tokens.accessToken,context),tokens);
       return await this.repository.checked(userId,tenantId,brandId,id,revision,channel,this.vault.encrypt(JSON.stringify(youtubeTokensSchema.parse(tokens)),scope),correlationId);
     }catch(error){
       if(error instanceof DomainError&&['SOCIAL_TOKEN_EXPIRED','NOT_AUTHORIZED','PROVIDER_UNAVAILABLE','PROVIDER_REJECTED'].includes(error.code))await this.social.checkFailed(userId,tenantId,brandId,id,revision,error.code,correlationId);
@@ -57,19 +61,24 @@ export class YouTubeService{
     }
   }
   /** Worker-only secret boundary; no HTTP route exposes this result. */
-  async accessForPublication(userId:string,tenantId:string,brandId:string,id:string,generation:number,context:OperationContext){
+  accessForPublication(userId:string,tenantId:string,brandId:string,id:string,generation:number,context:OperationContext){return this.access(userId,tenantId,brandId,id,generation,context,false);}
+  accessForComments(userId:string,tenantId:string,brandId:string,id:string,generation:number,context:OperationContext){return this.access(userId,tenantId,brandId,id,generation,context,true);}
+  private async access(userId:string,tenantId:string,brandId:string,id:string,generation:number,context:OperationContext,commentsAccess:boolean){
     if(context.tenantId!==tenantId)throw new DomainError('NOT_AUTHORIZED',403);
     if(!this.provider||!this.vault)throw new DomainError('CONFIGURATION_REQUIRED',503);
     const scope={tenantId,brandId,connectionId:id,provider:'youtube'};
     const current=async()=>{
       const row=await this.social.managed(userId,tenantId,brandId,id);
       if(row.provider!=='youtube'||row.status!=='ACTIVE'||!row.credential||row.credentialVersion!==generation)throw new DomainError('SOCIAL_TOKEN_EXPIRED',409);
-      return {row,tokens:storedTokens(this.vault!.decrypt(row.credential,scope))};
+      const tokens=storedTokens(this.vault!.decrypt(row.credential,scope));
+      if(commentsAccess&&!tokens.scopes.includes(youtubeCommentsScope))throw new DomainError('NOT_AUTHORIZED',403);
+      return {row,tokens};
     };
     const {row,tokens}=await current();
     if(Date.parse(tokens.expiresAt)>Date.now()+60000)return {accessToken:tokens.accessToken,channelId:row.reference.externalId};
     const providerContext={...context,internalId:id},renewed=youtubeTokensSchema.parse(await this.provider.refresh(tokens,providerContext));
-    const channel=await this.provider.channel(renewed.accessToken,providerContext);
+    if(commentsAccess&&!renewed.scopes.includes(youtubeCommentsScope))throw new DomainError('NOT_AUTHORIZED',403);
+    const channel=withCommentCapability(await this.provider.channel(renewed.accessToken,providerContext),renewed);
     try{await this.repository.checked(userId,tenantId,brandId,id,row.revision,channel,this.vault.encrypt(JSON.stringify(renewed),scope),context.correlationId);}
     catch(error){
       if(!(error instanceof DomainError&&error.code==='CONFLICT'))throw error;
