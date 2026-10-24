@@ -40,3 +40,13 @@ export const commentReplyTargetSchema=z.object({publicationId:z.uuid(),commentId
 export const commentReplySnapshotSchema=z.object({publicationId:z.uuid(),draftRevision:z.number().int().nonnegative().nullable(),comment:commentReplyInputSchema.shape.comment}).strict();
 export type CommentReplyTarget=z.infer<typeof commentReplyTargetSchema>;
 export type CommentReplySnapshot=z.infer<typeof commentReplySnapshotSchema>;
+
+export const commentReplyApprovalSchema=z.object({version:z.number().int().positive(),revision:z.number().int().nonnegative(),acknowledgeRisks:z.literal(true),idempotencyKey:z.uuid()}).strict();
+export type CommentReplyApproval=z.infer<typeof commentReplyApprovalSchema>;
+export const commentReplyApprovalBindingSchema=z.object({
+ brandRevision:z.number().int().nonnegative(),contentRevision:z.number().int().nonnegative(),reviewRevision:z.number().int().nonnegative(),
+ rootId:z.uuid(),rootContentRevision:z.number().int().nonnegative(),rootReviewRevision:z.number().int().nonnegative(),
+ connectionId:z.uuid(),credentialVersion:z.number().int().positive(),
+ channel:z.object({provider:z.literal('youtube'),internalId:z.uuid(),externalId:z.string().regex(/^UC[A-Za-z0-9_-]{22}$/),metadata:z.object({}).strict()}).strict(),
+}).strict();
+export type CommentReplyApprovalBinding=z.infer<typeof commentReplyApprovalBindingSchema>;

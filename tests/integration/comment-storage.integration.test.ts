@@ -4,6 +4,7 @@ import {commentReplyDrafts,commentReplyVersions} from '../../packages/db/src/sch
 import {emptyOnboarding} from '../../packages/types/src/index';
 import {comments} from '../../packages/db/src/schema/comments';
 import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
+import {CommentReplyApprovalRepository} from '../../packages/db/src/repositories/comment-reply-approvals';
 import {CommentReplyRepository} from '../../packages/db/src/repositories/comment-replies';
 import {JobRepository} from '../../packages/db/src/repositories/jobs';
 import {LedgerRepository} from '../../packages/db/src/repositories/ledger';
@@ -367,7 +368,7 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await expect(database.client`update comment_reply_versions set content=jsonb_set(content,'{reply}',to_jsonb(${''.padEnd(2001,'x')}::text)) where draft_id=${f.draft.id}`).rejects.toThrow();
  });
 
- const replies=new CommentReplyService(new CommentReplyRepository(database.db),new BrandRepository(database.db));
+ const replies=new CommentReplyService(new CommentReplyRepository(database.db),new BrandRepository(database.db),new CommentReplyApprovalRepository(database.db));
  it('appends manual reply versions, marks stale sources and omits private snapshots from history',async()=>{
   const publicationId=await publication(),comment=record(publicationId);await insert(comment);
   expect(await replies.history(user,tenant,brand,publicationId,comment.id!,{})).toEqual({draft:null,items:[],next:null});
@@ -465,6 +466,59 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await expect(replies.generationStatus(user,tenant,randomUUID(),f.publicationId,f.comment.id!)).rejects.toThrow();
   await expect(replies.generationStatus(user,randomUUID(),brand,f.publicationId,f.comment.id!)).rejects.toThrow();
   await expect(replies.generationStatus(randomUUID(),tenant,brand,f.publicationId,f.comment.id!)).rejects.toThrow();
+ });
+
+ const approvals=new CommentReplyApprovalRepository(database.db);
+ async function approvalFixture(){
+  const publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  const [connectionRow]=await database.client`select j.connection_id from publishing_jobs j join publications p on p.job_id=j.id where p.id=${publicationId}`;
+  const connectionId=connectionRow!.connection_id as string;
+  await database.client`update social_connections set status='ACTIVE',credential='{"test":true}'::jsonb,reference=jsonb_set(reference,'{metadata,commentsAuthorized}','true'::jsonb) where id=${connectionId}`;
+  await replies.save(user,tenant,brand,publicationId,comment.id!,{revision:null,contentRevision:0,reviewRevision:0,reply:'Approved exact text'},randomUUID());
+  const input={version:1,revision:0,acknowledgeRisks:true as const,idempotencyKey:randomUUID()};
+  const approve=(actor=user)=>approvals.approve(actor,tenant,brand,publicationId,comment.id!,input,randomUUID());
+  const status=()=>approvals.status(user,tenant,brand,publicationId,comment.id!);
+  return {publicationId,comment,connectionId,input,approve,status};
+ }
+ it('records idempotent immutable approvals and explicit immutable revocations without sending',async()=>{
+  const f=await approvalFixture();expect(await f.status()).toBeNull();
+  const [a,b]=await Promise.all([f.approve(),f.approve()]);expect(a.id).toBe(b.id);expect(await f.status()).toMatchObject({id:a.id,status:'APPROVED',version:1});
+  await expect(database.client`update comment_reply_approvals set version=version where id=${a.id}`).rejects.toThrow();
+  await approvals.revoke(user,tenant,brand,f.publicationId,f.comment.id!,a.id,randomUUID());
+  await approvals.revoke(user,tenant,brand,f.publicationId,f.comment.id!,a.id,randomUUID());
+  expect(await f.status()).toMatchObject({status:'REVOKED'});
+  await expect(database.client`delete from comment_reply_approval_revocations where approval_id=${a.id}`).rejects.toThrow();
+  expect((await database.client`select count(*)::int as count from comment_reply_approval_revocations where approval_id=${a.id}`)[0]?.count).toBe(1);
+ });
+ it('allows client approvers but denies viewers, mismatched scope and missing risk acknowledgment',async()=>{
+  const f=await approvalFixture(),viewer=await member('VIEWER'),approver=await member('CLIENT_APPROVER');
+  await expect(f.approve(viewer)).rejects.toThrow('NOT_AUTHORIZED');await expect(f.approve(approver)).resolves.toMatchObject({version:1});
+  await expect(approvals.approve(user,tenant,brand,await publication(),f.comment.id!,{...f.input,idempotencyKey:randomUUID()},randomUUID())).rejects.toThrow('NOT_FOUND');
+  await expect(approvals.approve(user,tenant,brand,f.publicationId,f.comment.id!,{...f.input,acknowledgeRisks:false} as never,randomUUID())).rejects.toThrow();
+  await expect(approvals.status(viewer,randomUUID(),brand,f.publicationId,f.comment.id!)).rejects.toThrow();
+ });
+ it('invalidates approval on manual editing, source changes and credential replacement',async()=>{
+  const f=await approvalFixture();await f.approve();
+  await replies.save(user,tenant,brand,f.publicationId,f.comment.id!,{revision:0,contentRevision:0,reviewRevision:0,reply:'Changed'},randomUUID());expect(await f.status()).toMatchObject({status:'STALE'});
+  const g=await approvalFixture();await g.approve();await database.client`update comments set content_revision=1 where id=${g.comment.id!}`;expect(await g.status()).toMatchObject({status:'STALE'});
+  const h=await approvalFixture();await h.approve();await database.client`update social_connections set credential_version=credential_version+1 where id=${h.connectionId}`;expect(await h.status()).toMatchObject({status:'STALE'});
+ });
+ it('invalidates approval when its actor loses permission and rejects unavailable channels',async()=>{
+  const f=await approvalFixture(),actor=await member('CLIENT_APPROVER');await f.approve(actor);
+  await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${actor}`;expect(await f.status()).toMatchObject({status:'STALE'});
+  const g=await approvalFixture();await database.client`update social_connections set status='REVOKED',credential=null where id=${g.connectionId}`;await expect(g.approve()).rejects.toThrow('CONFIGURATION_REQUIRED');
+ });
+
+ it('rejects changed root context and Brand Brain and never keeps approval effective after a concurrent edit',async()=>{
+  const f=await approvalFixture();await f.approve();await database.client`update comments set can_reply=false where id=${f.comment.id!}`;expect(await f.status()).toMatchObject({status:'STALE'});
+  const g=await approvalFixture();await g.approve();await database.client`update brands set revision=revision+1 where id=${brand}`;expect(await g.status()).toMatchObject({status:'STALE'});
+  const h=await approvalFixture();await Promise.allSettled([h.approve(),replies.save(user,tenant,brand,h.publicationId,h.comment.id!,{revision:0,contentRevision:0,reviewRevision:0,reply:'Concurrent replacement'},randomUUID())]);
+  expect((await h.status())?.status).not.toBe('APPROVED');
+ });
+ it('rejects approval of an AI response with no proposed text',async()=>{
+  const f=await generationFixture(),queued=await f.enqueue(),job=(await f.jobs.claim(tenant,queued.id))!;
+  await f.jobs.complete(tenant,job.id,job.leaseToken!,{reply:null,sentiment:null,risks:[{category:'UNCERTAIN',source:'CONTEXT',quote:null,reason:'Needs a person'}]});
+  await expect(approvals.approve(user,tenant,brand,f.publicationId,f.comment.id!,{version:1,revision:0,acknowledgeRisks:true,idempotencyKey:randomUUID()},randomUUID())).rejects.toThrow('CONFLICT');
  });
 
 });

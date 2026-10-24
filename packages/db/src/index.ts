@@ -74,3 +74,5 @@ export * from './repositories/comment-imports';
 export * from './repositories/comment-import-pages';
 
 export * from './repositories/comment-replies';
+
+export * from './repositories/comment-reply-approvals';

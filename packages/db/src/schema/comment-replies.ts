@@ -23,7 +23,7 @@ export const commentReplyVersions=pgTable('comment_reply_versions',{
  source:text('source',{enum:['AI','HUMAN']}).notNull(),input:jsonb('input').$type<CommentReplyInput>().notNull(),content:jsonb('content').$type<CommentReplyOutput>().notNull(),
  jobId:uuid('job_id'),createdBy:uuid('created_by').notNull().references(()=>users.id),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),
 },t=>[
- unique('comment_reply_version_tenant_uq').on(t.tenantId,t.id),unique('comment_reply_version_number_uq').on(t.tenantId,t.draftId,t.version),unique('comment_reply_version_job_uq').on(t.jobId),
+ unique('comment_reply_version_tenant_uq').on(t.tenantId,t.id),unique('comment_reply_version_scope_uq').on(t.tenantId,t.publicationId,t.commentId,t.draftId,t.version),unique('comment_reply_version_number_uq').on(t.tenantId,t.draftId,t.version),unique('comment_reply_version_job_uq').on(t.jobId),
  foreignKey({name:'comment_reply_version_draft_fk',columns:[t.tenantId,t.publicationId,t.commentId,t.draftId],foreignColumns:[commentReplyDrafts.tenantId,commentReplyDrafts.publicationId,commentReplyDrafts.commentId,commentReplyDrafts.id]}),
  foreignKey({name:'comment_reply_version_job_fk',columns:[t.tenantId,t.jobId],foreignColumns:[jobs.tenantId,jobs.id]}),
  check('comment_reply_version_source_valid',sql`${t.version}>0 and ((${t.source}='AI' and ${t.jobId} is not null) or (${t.source}='HUMAN' and ${t.jobId} is null))`),

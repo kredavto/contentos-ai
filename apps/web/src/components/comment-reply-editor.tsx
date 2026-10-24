@@ -1,16 +1,17 @@
 'use client';
 import {useEffect,useState,useRef} from 'react';
 import type {CommentReplyService,GenerationService} from '@contentos/core';
+import {CommentReplyApproval} from './comment-reply-approval';
 import {api} from '../lib/api-client';
 type History=Awaited<ReturnType<CommentReplyService['history']>>;
 type GenerationStatus=Awaited<ReturnType<CommentReplyService['generationStatus']>>;
 type Generation=Awaited<ReturnType<GenerationService['overview']>>;
-type Props={endpoint:string;base:string;publicationId:string;commentId:string;generation:Generation|null;canManage:boolean;contentRevision:number;reviewRevision:number};
+type Props={endpoint:string;base:string;publicationId:string;commentId:string;generation:Generation|null;canManage:boolean;canApprove:boolean;contentRevision:number;reviewRevision:number};
 export function CommentReplyEditor(props:Props){
  const [open,setOpen]=useState(false);
  return <div className="stack"><button className="text-button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'Закрыть черновик':'Черновик ответа и история'}</button>{open?<Editor {...props}/>:null}</div>;
 }
-function Editor({endpoint,base,publicationId,commentId,generation,canManage,contentRevision,reviewRevision}:Props){
+function Editor({endpoint,base,publicationId,commentId,generation,canManage,canApprove,contentRevision,reviewRevision}:Props){
  const [history,setHistory]=useState<History|null>(null),[reply,setReply]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[pending,setPending]=useState(false),[reload,setReload]=useState(0);
  const intent=useRef<{payload:string;key:string}|null>(null);
  const [status,setStatus]=useState<GenerationStatus|null>(null),[statusError,setStatusError]=useState(''),[statusReload,setStatusReload]=useState(0);
@@ -34,7 +35,7 @@ function Editor({endpoint,base,publicationId,commentId,generation,canManage,cont
   setStatus(null);setStatusError('');setStatusReload(value=>value+1);intent.current=null;setNotice('Задание принято. Несохранённый текст не используется для генерации.');
  }catch(failure){setError(failure instanceof Error?failure.message:'Не удалось запросить AI-черновик');}finally{setPending(false);}}
  async function more(){if(!history?.next)return;setPending(true);setError('');try{const page=await api<History>(`${endpoint}?beforeVersion=${history.next.beforeVersion}`);setHistory({...history,items:[...history.items,...page.items],next:page.next});}catch(failure){setError(failure instanceof Error?failure.message:'Не удалось загрузить историю');}finally{setPending(false);}}
- return <section className="stack" aria-label="Редактор черновика ответа"><p className="notice">Черновик хранится в приложении. Согласование и отправка ответа пока недоступны.</p>
+ return <section className="stack" aria-label="Редактор черновика ответа"><p className="notice">Черновик хранится в приложении. Отправка ответа пока недоступна.</p>
   {error?<p role="alert">{error}</p>:null}{notice?<p role="status">{notice}</p>:null}
   {!history&&!error?<p role="status">Загружаем историю черновика…</p>:null}
   {changed?<p className="notice warning">Комментарий изменился. Скопируйте несохранённый текст, обновите список и откройте черновик снова.</p>:null}
@@ -46,6 +47,7 @@ function Editor({endpoint,base,publicationId,commentId,generation,canManage,cont
    {job?.status==='FAILED'?<p role="alert">AI-черновик не создан. Проверьте изменения комментария и черновика, затем загрузите последнюю версию перед повтором.</p>:null}
   </div>:null}
   {canManage?<><label>Текст черновика<textarea rows={5} maxLength={2000} value={reply} disabled={!history||pending} onChange={event=>setReply(event.target.value)}/></label><div className="studio-actions"><button className="button primary" disabled={!history||pending||changed||!reply.trim()} onClick={()=>void save()}>Сохранить черновик</button><button className="button secondary" disabled={pending} onClick={()=>setReload(value=>value+1)}>Загрузить последнюю версию</button></div><small>Загрузка последней версии заменяет несохранённый текст. После конфликта сначала сохраните свой текст отдельно.</small></>:null}
+  {history?.draft&&history.items[0]?<CommentReplyApproval key={`${history.draft.id}/${history.draft.revision}`} endpoint={endpoint} version={history.items[0].version} revision={history.draft.revision} reply={history.items[0].content.reply} risks={history.items[0].content.risks} canApprove={canApprove&&!changed}/>:null}
   {history?.items.length===0?<p>Сохранённых версий пока нет.</p>:null}
   {history?.items.map(version=><article className="panel" key={version.id}><h4>Версия {version.version} · {version.source==='HUMAN'?'Ручной черновик':'AI-предложение'}</h4>{version.stale?<p className="notice warning">Исходный комментарий или его разметка изменились.</p>:null}<p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{version.content.reply??'Текст ответа не предложен — требуется человек.'}</p>{version.content.risks.map(risk=><p key={risk.category}>Требуется проверка: {risk.reason}</p>)}</article>)}
   {history?.next?<button className="button secondary" disabled={pending} onClick={()=>void more()}>Более ранние версии</button>:null}

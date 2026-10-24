@@ -1,10 +1,10 @@
 import {randomUUID} from 'node:crypto';
 import {beforeEach,expect,it,vi} from 'vitest';
 import {DomainError} from '../packages/types/src/index';
-const fixture=vi.hoisted(()=>({generationStatus:vi.fn(),history:vi.fn(),save:vi.fn(),session:vi.fn(),throttle:vi.fn(),list:vi.fn(),triage:vi.fn(),latest:vi.fn(),request:vi.fn(),resume:vi.fn(),cancel:vi.fn()}));
+const fixture=vi.hoisted(()=>({approvalStatus:vi.fn(),approve:vi.fn(),revokeApproval:vi.fn(),generationStatus:vi.fn(),history:vi.fn(),save:vi.fn(),session:vi.fn(),throttle:vi.fn(),list:vi.fn(),triage:vi.fn(),latest:vi.fn(),request:vi.fn(),resume:vi.fn(),cancel:vi.fn()}));
 vi.mock('../apps/web/node_modules/next/headers.js',()=>({cookies:async()=>({get:()=>({value:'fixture-session'})})}));
 vi.mock('../apps/web/src/server/services',()=>({sessionCookie:'session',services:()=>({
- commentReplies:{generationStatus:fixture.generationStatus,history:fixture.history,save:fixture.save},auth:{session:fixture.session,throttle:fixture.throttle},comments:{list:fixture.list,triage:fixture.triage},commentImports:{latest:fixture.latest,request:fixture.request,resume:fixture.resume,cancel:fixture.cancel},env:{APP_URL:'https://contentos.example',NODE_ENV:'production'},
+ commentReplies:{approvalStatus:fixture.approvalStatus,approve:fixture.approve,revokeApproval:fixture.revokeApproval,generationStatus:fixture.generationStatus,history:fixture.history,save:fixture.save},auth:{session:fixture.session,throttle:fixture.throttle},comments:{list:fixture.list,triage:fixture.triage},commentImports:{latest:fixture.latest,request:fixture.request,resume:fixture.resume,cancel:fixture.cancel},env:{APP_URL:'https://contentos.example',NODE_ENV:'production'},
 })}));
 vi.mock('../apps/web/src/server/error-reporting',()=>({errorReporter:()=>({capture:vi.fn(),flush:async()=>true})}));
 import {GET,POST,PATCH} from '../apps/web/src/app/api/[...path]/route';
@@ -70,4 +70,14 @@ it('reads comment-scoped generation status without exposing a mutation endpoint'
  expect(fixture.generationStatus).toHaveBeenCalledWith(user,tenant,brand,publication,id);
  expect((await call(`${base}/${id}/draft/generation`,'POST',{})).status).toBe(404);
  fixture.session.mockResolvedValue(null);expect((await call(`${base}/${id}/draft/generation`)).status).toBe(401);
+});
+
+it('scopes approval and revocation with authenticated Origin checks',async()=>{
+ fixture.approvalStatus.mockResolvedValue(null);fixture.approve.mockResolvedValue({id,version:1});fixture.revokeApproval.mockResolvedValue({id,status:'REVOKED'});
+ const endpoint=`${base}/${id}/draft/approval`,input={version:1,revision:0,acknowledgeRisks:true,idempotencyKey:randomUUID()};
+ expect((await call(endpoint)).status).toBe(200);expect(fixture.approvalStatus).toHaveBeenCalledWith(user,tenant,brand,publication,id);
+ expect((await call(endpoint,'POST',input,false)).status).toBe(403);expect(fixture.approve).not.toHaveBeenCalled();
+ expect((await call(endpoint,'POST',input)).status).toBe(201);expect(fixture.approve).toHaveBeenCalledWith(user,tenant,brand,publication,id,input,expect.any(String));
+ expect((await call(`${endpoint}/${id}/revoke`,'POST',{},false)).status).toBe(403);expect(fixture.revokeApproval).not.toHaveBeenCalled();
+ expect((await call(`${endpoint}/${id}/revoke`,'POST',{})).status).toBe(200);expect(fixture.revokeApproval).toHaveBeenCalledWith(user,tenant,brand,publication,id,id,expect.any(String));
 });

@@ -58,6 +58,17 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await expect(editor.getByLabel('Текст черновика')).toHaveValue('[ДЕМО] Спасибо за ваш комментарий. Ответ требует проверки.');
   const generated=await database.client`select j.status,r.status as reservation_status from jobs j join usage_reservations r on r.id=j.reservation_id and r.tenant_id=j.tenant_id where j.tenant_id=${tenant} and j.brand_id=${brand} and j.type='DRAFT_COMMENT_REPLY'`;
   expect(generated).toHaveLength(1);expect(generated[0]).toMatchObject({status:'SUCCEEDED',reservation_status:'CAPTURED'});
+  // Approval requires an available channel; this synthetic credential never leaves the fixture.
+  await database.client`update social_connections set status='ACTIVE',credential='{"test":true}'::jsonb,reference=jsonb_set(reference,'{metadata,commentsAuthorized}','true'::jsonb) where id=${connection}`;
+  const approval=editor.getByRole('region',{name:'Согласование ответа',exact:true});
+  await approval.getByLabel('Я проверил сохранённый текст и указанные риски').check();
+  await approval.getByRole('button',{name:'Одобрить версию 3',exact:true}).click();
+  await expect(approval.getByText('Версия 3: одобрена',{exact:true})).toBeVisible();
+  await approval.getByRole('button',{name:'Отозвать одобрение',exact:true}).click();
+  await expect(approval.getByText('Версия 3: одобрение отозвано',{exact:true})).toBeVisible();
+  expect((await database.client`select count(*)::int as count from comment_reply_approvals where tenant_id=${tenant} and comment_id=${root}`)[0]?.count).toBe(1);
+  await database.client`update social_connections set status='REVOKED',credential=null where id=${connection}`;
+
   await panel.getByRole('button',{name:'Закрыть черновик',exact:true}).click();
   await panel.getByRole('button',{name:'Показать ответы (26)'}).click();
   const replies=panel.getByRole('region',{name:'Ответы на комментарий',exact:true});await expect(replies.locator('article')).toHaveCount(25);
