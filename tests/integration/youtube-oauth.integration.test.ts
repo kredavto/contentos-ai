@@ -1,0 +1,106 @@
+import {randomUUID,createHash} from 'node:crypto';
+import {beforeAll,describe,expect,it,vi} from 'vitest';
+import {YouTubeOAuthRepository,SocialRepository} from '../../packages/db/src/index';
+import {YouTubeService} from '../../packages/core/src/youtube';
+import {CredentialVault} from '../../packages/core/src/credential-vault';
+import {seedDevelopment,demoIds} from '../../packages/db/src/development-seed';
+import {DomainError,type YouTubeAuthorizationProvider,type YouTubeTokens} from '../../packages/types/src/index';
+import {isolatedTestDatabase} from '../helpers/isolated-database';
+const url=process.env.TEST_DATABASE_URL;
+describe.skipIf(!url)('session-bound YouTube authorization',()=>{
+  const database=isolatedTestDatabase(url),repository=new YouTubeOAuthRepository(database.db),social=new SocialRepository(database.db);
+  const vault=new CredentialVault(JSON.stringify({test:Buffer.alloc(32,11).toString('base64')}),'test');
+  const {user,tenant,brand}=demoIds,sessionId=randomUUID(),otherSession=randomUUID(),correlation=randomUUID();
+  const channelId='UC'+'a'.repeat(22),tokens:YouTubeTokens={accessToken:'fixture_access',refreshToken:'fixture_refresh',expiresAt:'2099-01-01T00:00:00.000Z',refreshExpiresAt:null,scopes:['https://www.googleapis.com/auth/youtube.upload','https://www.googleapis.com/auth/youtube.readonly']};
+  const exchange=vi.fn<YouTubeAuthorizationProvider['exchange']>(async()=>tokens),refresh=vi.fn<YouTubeAuthorizationProvider['refresh']>(async()=>tokens);
+  const channel=vi.fn<YouTubeAuthorizationProvider['channel']>(async(_token,ctx)=>({reference:{provider:'youtube',internalId:ctx.internalId,externalId:channelId,metadata:{}},name:'Fixture YouTube',username:'@fixture'}));
+  const provider:YouTubeAuthorizationProvider={authorizationUrl:(state,_verifier)=>`https://accounts.google.com/o/oauth2/v2/auth?state=${state}`,exchange,refresh,channel,revoke:async()=>{}};
+  const service=new YouTubeService(repository,social,provider,vault);
+  let connectionId='';
+  const state=(result:{authorizationUrl:string})=>new URL(result.authorizationUrl).searchParams.get('state')!;
+  beforeAll(async()=>{
+    await seedDevelopment(database.db,`scrypt:v1:${'0'.repeat(32)}:${'0'.repeat(128)}`);
+    for(const id of [sessionId,otherSession])await database.client`insert into sessions(id,user_id,token_hash,expires_at) values (${id},${user},${createHash('sha256').update(id).digest('hex')},now()+interval '1 hour')`;
+  });
+  it('stores only hashed state and encrypted verifier, creates a connection once and hides credentials',async()=>{
+    const started=await service.start(user,sessionId,tenant,brand,{},correlation),nonce=state(started);
+    const [attempt]=await database.client`select * from youtube_oauth_attempts where state_hash=${createHash('sha256').update(nonce).digest('hex')}`;
+    expect(attempt).toBeTruthy();expect(JSON.stringify(attempt)).not.toContain(nonce);expect(attempt?.verifier.ciphertext).toBeTruthy();
+    const outcomes=await Promise.allSettled([1,2].map(()=>service.callback(user,sessionId,{state:nonce,code:'fixture_code'},correlation)));
+    expect(outcomes.filter(result=>result.status==='fulfilled')).toHaveLength(1);expect(exchange).toHaveBeenCalledTimes(1);
+    const result=outcomes.find(result=>result.status==='fulfilled')!;if(result.status!=='fulfilled'||!('id' in result.value))throw new Error('Expected success');connectionId=result.value.id;
+    const [saved]=await database.client`select credential from social_connections where id=${connectionId}`;expect(JSON.stringify(saved)).not.toContain(tokens.accessToken);expect(JSON.stringify(saved)).not.toContain(tokens.refreshToken);
+    expect(vault.decrypt(saved!.credential,{tenantId:tenant,brandId:brand,connectionId,provider:'youtube'})).toContain(tokens.refreshToken);
+    expect((await database.client`select status,verifier from youtube_oauth_attempts where id=${attempt!.id}`)[0]).toMatchObject({status:'COMPLETED',verifier:null});
+    const view=await service.overview(user,tenant,brand);expect(view.connections).toHaveLength(1);expect(JSON.stringify(view)).not.toMatch(/fixture_access|fixture_refresh|ciphertext|stateHash/);
+    await expect(service.callback(user,sessionId,{state:nonce,code:'fixture_code'},correlation)).rejects.toThrow('INVALID_INPUT');
+  });
+  it('limits worker access to the current tenant and grant without exposing the refresh token',async()=>{
+    const context={tenantId:tenant,internalId:randomUUID(),idempotencyKey:randomUUID(),correlationId:correlation,signal:new AbortController().signal};
+    expect(await service.accessForPublication(user,tenant,brand,connectionId,1,context)).toEqual({accessToken:tokens.accessToken,channelId});
+    await expect(service.accessForPublication(user,tenant,brand,connectionId,2,context)).rejects.toThrow('SOCIAL_TOKEN_EXPIRED');
+    await expect(service.accessForPublication(user,tenant,brand,connectionId,1,{...context,tenantId:randomUUID()})).rejects.toThrow('NOT_AUTHORIZED');
+    const scope={tenantId:tenant,brandId:brand,connectionId,provider:'youtube'},plaintext='fixture_plaintext_should_not_leak';
+    await database.client`update social_connections set credential=${JSON.stringify(vault.encrypt(plaintext,scope))}::jsonb where id=${connectionId}`;
+    const failure=await service.accessForPublication(user,tenant,brand,connectionId,1,context).catch((error:unknown)=>error);
+    expect(failure).toBeInstanceOf(DomainError);expect(String(failure)).toBe('DomainError: SOCIAL_TOKEN_EXPIRED');expect(String(failure)).not.toContain(plaintext);
+    await database.client`update social_connections set credential=${JSON.stringify(vault.encrypt(JSON.stringify(tokens),scope))}::jsonb where id=${connectionId}`;
+  });
+  it('denies cross-brand, cross-tenant, viewer, expired and different-session flows before exchange',async()=>{
+    await expect(service.start(user,sessionId,tenant,randomUUID(),{},correlation)).rejects.toThrow('NOT_FOUND');
+    await expect(service.start(user,sessionId,randomUUID(),brand,{},correlation)).rejects.toThrow('NOT_FOUND');
+    const started=await service.start(user,sessionId,tenant,brand,{},correlation),nonce=state(started),calls=exchange.mock.calls.length;
+    await expect(service.callback(user,otherSession,{state:nonce,code:'fixture_code'},correlation)).rejects.toThrow('INVALID_INPUT');
+    await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
+    await expect(service.start(user,sessionId,tenant,brand,{},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await expect(service.callback(user,sessionId,{state:nonce,code:'fixture_code'},correlation)).rejects.toThrow('NOT_AUTHORIZED');
+    await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
+    await database.client`update youtube_oauth_attempts set expires_at=now()-interval '1 second' where state_hash=${createHash('sha256').update(nonce).digest('hex')}`;
+    await expect(service.callback(user,sessionId,{state:nonce,code:'fixture_code'},correlation)).rejects.toThrow('INVALID_INPUT');expect(exchange.mock.calls).toHaveLength(calls);
+  });
+  it('requires explicit reconnect and preserves the old connection on channel mismatch',async()=>{
+    const duplicate=await service.start(user,sessionId,tenant,brand,{},correlation);
+    await expect(service.callback(user,sessionId,{state:state(duplicate),code:'fixture_code'},correlation)).rejects.toThrow('CONFLICT');
+    const reconnect=await service.start(user,sessionId,tenant,brand,{connectionId,revision:0},correlation);
+    channel.mockImplementationOnce(async(_token,ctx)=>({reference:{provider:'youtube',internalId:ctx.internalId,externalId:'UC'+'b'.repeat(22),metadata:{}},name:'Wrong channel',username:null}));
+    await expect(service.callback(user,sessionId,{state:state(reconnect),code:'fixture_code'},correlation)).rejects.toThrow('CONFLICT');
+    expect((await social.managed(user,tenant,brand,connectionId)).revision).toBe(0);
+    const correct=await service.start(user,sessionId,tenant,brand,{connectionId,revision:0},correlation);
+    expect(await service.callback(user,sessionId,{state:state(correct),code:'fixture_code'},correlation)).toMatchObject({id:connectionId,revision:1,connected:true});
+    expect((await social.managed(user,tenant,brand,connectionId)).credentialVersion).toBe(2);
+  });
+  it('consumes denied consent without exchanging and marks provider failure without storing tokens',async()=>{
+    const denied=await service.start(user,sessionId,tenant,brand,{},correlation),calls=exchange.mock.calls.length;
+    expect(await service.callback(user,sessionId,{state:state(denied),error:'access_denied'},correlation)).toMatchObject({connected:false});expect(exchange.mock.calls).toHaveLength(calls);
+    const failed=await service.start(user,sessionId,tenant,brand,{},correlation);exchange.mockRejectedValueOnce(new DomainError('PROVIDER_UNAVAILABLE',503));
+    await expect(service.callback(user,sessionId,{state:state(failed),code:'fixture_code'},correlation)).rejects.toThrow('PROVIDER_UNAVAILABLE');
+    expect((await database.client`select status,verifier from youtube_oauth_attempts where state_hash=${createHash('sha256').update(state(failed)).digest('hex')}`)[0]).toMatchObject({status:'FAILED',verifier:null});
+    expect(await database.client`select id from social_connections where provider='youtube'`).toHaveLength(1);
+  });
+  it('refreshes expired access tokens without changing the grant generation and fences a late reconnect',async()=>{
+    const scope={tenantId:tenant,brandId:brand,connectionId,provider:'youtube'};
+    await database.client`update social_connections set credential=${JSON.stringify(vault.encrypt(JSON.stringify({...tokens,expiresAt:'2000-01-01T00:00:00.000Z'}),scope))}::jsonb where id=${connectionId}`;
+    await service.check(user,tenant,brand,connectionId,{revision:1},correlation);expect(refresh).toHaveBeenCalledTimes(1);
+    const checked=await social.managed(user,tenant,brand,connectionId);expect(checked).toMatchObject({revision:2,credentialVersion:2,status:'ACTIVE'});
+    await database.client`update social_connections set credential=${JSON.stringify(vault.encrypt(JSON.stringify({...tokens,expiresAt:'2000-01-01T00:00:00.000Z'}),scope))}::jsonb where id=${connectionId}`;
+    const context={tenantId:tenant,internalId:randomUUID(),idempotencyKey:randomUUID(),correlationId:correlation,signal:new AbortController().signal};
+    const renewed=await Promise.all([1,2].map(()=>service.accessForPublication(user,tenant,brand,connectionId,2,context)));
+    expect(renewed).toEqual([{accessToken:tokens.accessToken,channelId},{accessToken:tokens.accessToken,channelId}]);
+    expect(await social.managed(user,tenant,brand,connectionId)).toMatchObject({revision:3,credentialVersion:2});
+    const reconnect=await service.start(user,sessionId,tenant,brand,{connectionId,revision:3},correlation);
+    await social.disconnect(user,tenant,brand,connectionId,3,correlation);
+    await expect(service.callback(user,sessionId,{state:state(reconnect),code:'fixture_code'},correlation)).rejects.toThrow('CONFLICT');
+    expect(await social.managed(user,tenant,brand,connectionId)).toMatchObject({status:'REVOKED',credential:null});
+  });
+  it('rechecks account and session after external exchange and deletes pending state on logout',async()=>{
+    const reconnect=await service.start(user,sessionId,tenant,brand,{connectionId,revision:4},correlation);
+    exchange.mockImplementationOnce(async()=>{await database.client`update users set disabled_at=now() where id=${user}`;return tokens;});
+    await expect(service.callback(user,sessionId,{state:state(reconnect),code:'fixture_code'},correlation)).rejects.toThrow('NOT_FOUND');
+    await database.client`update users set disabled_at=null where id=${user}`;
+    expect(await social.managed(user,tenant,brand,connectionId)).toMatchObject({status:'REVOKED',credential:null});
+    const pending=await service.start(user,otherSession,tenant,brand,{},correlation);
+    await database.client`delete from sessions where id=${otherSession}`;
+    expect(await database.client`select id from youtube_oauth_attempts where session_id=${otherSession}`).toHaveLength(0);
+    await expect(service.callback(user,otherSession,{state:state(pending),code:'fixture_code'},correlation)).rejects.toThrow('INVALID_INPUT');
+  });
+});

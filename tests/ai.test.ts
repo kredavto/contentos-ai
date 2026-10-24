@@ -13,6 +13,16 @@ function recorder() {
   return {events,record};
 }
 describe('bounded structured generation',()=>{
+  it('preserves every extended Brand Brain collection in the provider source context', async () => {
+    const extended = { ...input, brain: { ...input.brain, desires: [{ name: 'Confidence', description: 'Practical skills' }], objections: [], positioning: [], pillars: [], offers: [], rules: [{ name: 'Evidence', description: 'Verify claims' }] } };
+    const provider: LLMProvider = { name: 'test', async generate(request) {
+      const payload = JSON.parse(request.prompt);
+      expect(payload.sourceData.brain).toEqual(extended.brain);
+      return { json: output, usage };
+    } };
+    await new GenerationOrchestrator([{ provider, model: 'test-model' }]).run('GENERATE_SCRIPT', extended, context, recorder().record);
+  });
+
   it('repairs invalid output while recording every metered call',async()=>{
     let calls=0;const provider:LLMProvider={name:'test',async generate(request){calls++;if(calls===2)expect(request.prompt).toContain('failed validation');return {json:calls===1?{hook:'Incomplete'}:output,usage};}};
     const {events,record}=recorder();

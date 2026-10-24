@@ -1,8 +1,17 @@
 import sharp from 'sharp';
-import { DomainError, maxPhotoUploadBytes } from '@contentos/types';
+import { DomainError, maxPhotoUploadBytes, maxGeneratedImageBytes, imageGenerationSchema, type ImageGenerationInput } from '@contentos/types';
 /** Decode raster bytes, apply orientation, strip metadata, then encode a fresh JPEG. */
 export async function normalizePhoto(bytes: Uint8Array, mimeType: string) {
-  if (!bytes.byteLength || bytes.byteLength > maxPhotoUploadBytes) throw new DomainError('INVALID_MEDIA', 413);
+  return normalizeRaster(bytes,mimeType,maxPhotoUploadBytes);
+}
+/** The generation budget is separate from upload limits. Never trust provider dimensions. */
+export async function normalizeGeneratedImage(bytes:Uint8Array,mimeType:string,input:ImageGenerationInput){
+  const parsed=imageGenerationSchema.safeParse(input);
+  if(!parsed.success)throw new DomainError('INVALID_INPUT');
+  return normalizeRaster(bytes,mimeType,maxGeneratedImageBytes,parsed.data);
+}
+async function normalizeRaster(bytes:Uint8Array,mimeType:string,maxInputBytes:number,expected?:{width:number;height:number}){
+  if (!bytes.byteLength || bytes.byteLength > maxInputBytes) throw new DomainError('INVALID_MEDIA', 413);
   const header = Buffer.from(bytes.subarray(0,12));
   const rasterSignature = header.subarray(0,3).equals(Buffer.from([0xff,0xd8,0xff])) || header.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) || (header.subarray(0,4).toString() === 'RIFF' && header.subarray(8,12).toString() === 'WEBP');
   if (!rasterSignature) throw new DomainError('INVALID_MEDIA');
@@ -12,8 +21,10 @@ export async function normalizePhoto(bytes: Uint8Array, mimeType: string) {
     const formats: Record<string,string> = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
     const mime = formats[metadata.format ?? ''];
     if (!mime || mime !== mimeType || (metadata.pages ?? 1) !== 1) throw new DomainError('INVALID_MEDIA');
+    if(expected&&(metadata.width!==expected.width||metadata.height!==expected.height))throw new DomainError('INVALID_MEDIA');
     const { data, info } = await image.rotate().resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer({ resolveWithObject: true });
     if (data.byteLength > maxPhotoUploadBytes) throw new DomainError('INVALID_MEDIA', 413);
+    if(expected&&(info.width!==expected.width||info.height!==expected.height))throw new DomainError('INVALID_MEDIA');
     return { bytes: data, width: info.width, height: info.height, mimeType: 'image/jpeg' as const };
   } catch (error) { if (error instanceof DomainError) throw error; throw new DomainError('INVALID_MEDIA'); }
 }

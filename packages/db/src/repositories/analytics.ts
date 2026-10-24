@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
 import {and,eq,desc,inArray} from 'drizzle-orm';
-import {DomainError,manualMetricsSchema,type ManualMetrics} from '@contentos/types';
+import {DomainError,manualMetricsSchema,youtubeMetricsObservationSchema,type YouTubeMetricsObservation,type ManualMetrics} from '@contentos/types';
 import type {Database} from '../index';
-import {brands,publications,publishingJobs,publicationMetrics,auditLogs} from '../schema';
+import {brands,publications,publishingJobs,publicationMetrics,auditLogs,socialConnections} from '../schema';
 import {assertMembership,lockTenant,type Transaction} from './ledger';
 async function authorize(tx:Transaction,userId:string,tenantId:string,brandId:string,write=false){
   await assertMembership(tx,userId,tenantId,write?'strategy':'read');
@@ -24,6 +24,10 @@ export class AnalyticsRepository{
     return rows.map(row=>({...row,title:row.title.title,latest:byId.get(row.id)??null}));
   });}
   async history(userId:string,tenantId:string,brandId:string,id:string){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);await publication(tx,tenantId,brandId,id);return tx.select(projection).from(publicationMetrics).where(and(eq(publicationMetrics.tenantId,tenantId),eq(publicationMetrics.publicationId,id))).orderBy(desc(publicationMetrics.observedAt),desc(publicationMetrics.recordedAt),desc(publicationMetrics.id)).limit(100);});}
+  /** Internal completion boundary. No public route accepts API observations. */
+  async recordYouTube(userId:string,tenantId:string,brandId:string,raw:YouTubeMetricsObservation,correlationId:string){
+    return this.db.transaction(tx=>recordYouTubeObservation(tx,userId,tenantId,brandId,raw,correlationId,this.now()));
+  }
   async record(userId:string,tenantId:string,brandId:string,input:ManualMetrics,correlationId:string){
     const parsed=manualMetricsSchema.parse(input),observedAt=new Date(parsed.observedAt);
     const inputHash=createHash('sha256').update(JSON.stringify({...parsed,observedAt:observedAt.toISOString()})).digest('hex');
@@ -37,4 +41,20 @@ export class AnalyticsRepository{
       await tx.insert(auditLogs).values({tenantId,userId,action:'PUBLICATION_METRICS_RECORDED',resourceId:row!.id,correlationId,metadata:{publicationId:target.id,source:'MANUAL'}});return row!;
     });
   }
+}
+
+/** Shares the caller transaction so task completion and its observation commit together. */
+export async function recordYouTubeObservation(tx:Transaction,userId:string,tenantId:string,brandId:string,raw:YouTubeMetricsObservation,correlationId:string,now:Date,source:'API'|'DEMO'='API'){
+    const input=youtubeMetricsObservationSchema.parse(raw),observedAt=new Date(input.observedAt),inputHash=createHash('sha256').update(JSON.stringify({...input,observedAt:observedAt.toISOString()})).digest('hex');
+      await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId,true);
+      const [target]=await tx.select({publication:publications,connection:socialConnections}).from(publications).innerJoin(publishingJobs,and(eq(publishingJobs.tenantId,publications.tenantId),eq(publishingJobs.id,publications.jobId))).innerJoin(socialConnections,and(eq(socialConnections.tenantId,publishingJobs.tenantId),eq(socialConnections.id,publishingJobs.connectionId))).where(and(eq(publications.tenantId,tenantId),eq(publications.id,input.publicationId),eq(publishingJobs.brandId,brandId)));
+      if(!target)throw new DomainError('NOT_FOUND',404);
+      if(target.publication.provider!=='youtube'||target.publication.reference.provider!=='youtube'||(target.publication.reference.metadata.demo===true)!==(source==='DEMO')||target.publication.reference.externalId!==input.videoId||target.connection.provider!=='youtube'||target.connection.reference.provider!=='youtube'||target.connection.reference.externalId!==input.channelId||(target.connection.reference.metadata.demo===true)!==(source==='DEMO'))throw new DomainError('NOT_AUTHORIZED',403);
+      if(target.connection.status!=='ACTIVE'||!target.connection.credential||target.connection.credentialVersion!==input.credentialVersion)throw new DomainError('SOCIAL_TOKEN_EXPIRED',409);
+      const [existing]=await tx.select().from(publicationMetrics).where(and(eq(publicationMetrics.tenantId,tenantId),eq(publicationMetrics.idempotencyKey,input.idempotencyKey)));
+      if(existing){if(existing.source!==source||existing.inputHash!==inputHash||existing.recordedBy!==userId)throw new DomainError('CONFLICT',409);return {id:existing.id};}
+      if(observedAt<target.publication.publishedAt||observedAt>now)throw new DomainError('INVALID_INPUT');
+      const [row]=await tx.insert(publicationMetrics).values({tenantId,publicationId:input.publicationId,source,sourceNote:source==='DEMO'?'DEMO: simulated YouTube counters':'YouTube Data API: cumulative counters',metrics:input.metrics,observedAt,recordedBy:userId,idempotencyKey:input.idempotencyKey,inputHash}).returning({id:publicationMetrics.id});
+      await tx.insert(auditLogs).values({tenantId,userId,action:'PUBLICATION_METRICS_RECORDED',resourceId:row!.id,correlationId,metadata:{publicationId:input.publicationId,source}});return row!;
+
 }

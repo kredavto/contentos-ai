@@ -1,11 +1,16 @@
 import {describe,it,expect} from 'vitest';
 import {randomUUID} from 'node:crypto';
-import {HeyGenClient,HeyGenAvatarProvider,HeyGenVideoProvider} from '../packages/providers/src/heygen';
+import {verifyHeyGenKey,HeyGenClient,HeyGenAvatarProvider,HeyGenVideoProvider} from '../packages/providers/src/heygen';
 const context={internalId:randomUUID(),tenantId:randomUUID(),idempotencyKey:randomUUID(),correlationId:randomUUID(),signal:new AbortController().signal};
 const ref={provider:'heygen',internalId:context.internalId,externalId:'look-1',metadata:{groupId:'group-1'}};
 const look={id:'look-1',group_id:'group-1',name:'Fictional fixture',status:'completed',preview_image_url:'https://files.heygen.ai/test.jpg'};
 const response=(data:unknown)=>new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}});
 describe('HeyGen v3 adapters',()=>{
+  it('checks only the current key without exposing identity or billing metadata',async()=>{
+    const result=await verifyHeyGenKey('fixture-only',context,async(url,init)=>{expect(url).toBe('https://api.heygen.com/v3/api_keys/self');expect(init?.method).toBe('GET');expect(init?.body).toBeUndefined();expect(new Headers(init?.headers).get('X-Api-Key')).toBe('fixture-only');return response({data:{key_id:'private-key-id',status:'active',key_name:'private-name',scopes:['private-scope']}});});expect(result).toBeUndefined();
+    for(const data of [{key_id:'id',status:'revoked'},{key_id:'',status:'active'},{status:'active'}])await expect(verifyHeyGenKey('fixture-only',context,async()=>response({data}))).rejects.toThrow();
+    await expect(verifyHeyGenKey('fixture-only',context,async()=>new Response('sensitive provider error',{status:401}))).rejects.toThrow('CONFIGURATION_REQUIRED');
+  });
   it('verifies video deletion and treats an already absent video as deleted',async()=>{
     const video={...ref,externalId:'video-1'};
     const deleting=new HeyGenVideoProvider(new HeyGenClient('test-key',async(url,init)=>{expect(url).toBe('https://api.heygen.com/v3/videos/video-1');expect(init?.method).toBe('DELETE');return response({data:{id:'video-1',deleted:true}});}));

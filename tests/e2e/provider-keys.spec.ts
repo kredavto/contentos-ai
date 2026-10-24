@@ -1,0 +1,104 @@
+import {test,expect} from '@playwright/test';
+import {randomUUID,randomBytes,createHash} from 'node:crypto';
+import {BrandRepository,BillingRepository,createDatabase} from '../../packages/db/src/index';
+import {BrandService} from '../../packages/core/src/brands';
+import {emptyOnboarding} from '../../packages/types/src/index';
+const url=process.env.TEST_DATABASE_URL;
+if(!url||!new URL(url).pathname.endsWith('_test'))throw new Error('Dedicated test database required');
+const database=createDatabase(url);
+test.afterAll(()=>database.close());
+test('owner manages encrypted HeyGen keys with revision, role and CSRF boundaries',async({page,context,baseURL},testInfo)=>{
+ const user=randomUUID(),editor=randomUUID(),correlation=randomUUID(),token=randomBytes(32).toString('base64url'),apiKey=`fixture-only-${randomUUID()}`;
+ for(const id of [user,editor])await database.client`insert into users(id,email,name,password_hash,email_verified_at) values(${id},${`${id}@example.test`},'Key fixture','unusable',now())`;
+  const brands = new BrandService(new BrandRepository(database.db));
+  const tenant = (await brands.createOrganization(user, { name: 'Privacy brand owner' }, correlation)).id;
+  const workspace = (await brands.overview(user, tenant)).workspaces[0]!;
+  const brand = await brands.createBrand(user, tenant, { name: 'Privacy brand', workspaceId: workspace.id }, correlation);
+  await brands.saveOnboarding(user, tenant, brand.id, { data: { ...emptyOnboarding('Privacy brand'), niche: 'Testing', geography: 'Online', usp: 'Clear', voice: 'Calm', products: [{ name: 'Product', description: '' }], audience: [{ name: 'Audience', description: '' }], pains: [{ name: 'Pain', description: '' }], goals: ['Trust'], platforms: ['TELEGRAM'], ctas: [{ name: 'Read', description: '' }] }, revision: 0, step: 14, complete: true }, correlation);
+
+ await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenant},${editor},'EDITOR')`;
+ await database.client`insert into sessions(user_id,token_hash,expires_at) values(${user},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+ await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
+ const endpoint=`/api/v1/organizations/${tenant}/brands/${brand.id}/provider-keys`,input={provider:'heygen',apiKey,revision:null};
+ expect((await page.request.put(endpoint,{data:input})).status()).toBe(403);
+ expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:input})).status()).toBe(403);
+ const [plan]=await database.client`update plans set enabled=true where code='EXPERT' returning id`;const version=randomUUID();
+ await database.client`insert into plan_versions(id,plan_id,version,amount_minor,ai_credits,video_seconds) values(${version},${plan!.id},${100000+Math.floor(Math.random()*100000000)},10000,100,100)`;
+ const billing=new BillingRepository(database.db),merchant={provider:'yookassa' as const,merchantId:'100500',test:true};
+ const order=await billing.checkout(user,tenant,version,randomUUID(),{returnUrl:'https://example.test/billing',receipt:{customerEmail:'fixture@example.test',vatCode:11,subject:'service',mode:'full_payment'}},merchant,correlation);
+ await billing.settle(tenant,order.id,{...merchant,externalId:randomUUID(),internalId:order.id,amountMinor:10000,currency:'RUB',status:'SUCCEEDED',paid:true});
+ await page.goto(`/brands/${brand.id}/content?organization=${tenant}&tab=avatars`);
+ const panel=page.getByRole('region',{name:'Свой ключ HeyGen'}),field=panel.getByLabel('API-ключ HeyGen',{exact:true});
+ await expect(field).toBeEnabled();await expect(field).toHaveAttribute('type','password');await field.fill(apiKey);await panel.getByRole('button',{name:'Сохранить ключ HeyGen',exact:true}).click();
+ await expect(panel.getByRole('status')).toContainText('Ключ сохранён в зашифрованном виде');await expect(field).toHaveValue('');await expect(panel.getByText(`••••••••${apiKey.slice(-4)}`,{exact:true})).toBeVisible();
+ const response=await page.request.get(endpoint);expect(response.headers()['cache-control']).toBe('no-store');const body=await response.json(),key=body.data.keys[0];expect(JSON.stringify(body)).not.toContain(apiKey);expect(key).not.toHaveProperty('credential');
+ const [row]=await database.client`select credential from provider_keys where id=${key.id}`;expect(row!.credential).not.toBeNull();expect(JSON.stringify(row)).not.toContain(apiKey);
+ expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:input})).status()).toBe(409);
+ expect((await page.request.get(`/api/v1/organizations/${randomUUID()}/brands/${brand.id}/provider-keys`)).status()).toBe(404);
+ expect((await page.request.post(`${endpoint}/${key.id}/verify`,{data:{revision:key.revision}})).status()).toBe(403);
+ await page.route(`**/provider-keys/${key.id}/verify`,async route=>{expect(route.request().postDataJSON()).toEqual({revision:key.revision});await route.fulfill({json:{data:{accepted:true}}});});
+ await panel.getByRole('button',{name:'Проверить ключ HeyGen',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Доступ к генерации и баланс не проверялись');
+ await page.route(`**/brands/${brand.id}/voices`,async route=>{if(route.request().method()!=='POST')return route.continue();expect(route.request().postDataJSON()).toEqual({connection:{id:key.id,revision:key.revision}});await route.fulfill({json:{data:{nextCursor:null}}});});
+ await panel.getByRole('button',{name:'Загрузить голоса через свой ключ',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Публичные голоса загружены');
+ await page.reload();await expect(field).toBeEnabled();await expect(field).toHaveValue('');
+ const selection=page.getByLabel('Подключение для создания',{exact:true});
+ await expect(selection).toHaveValue('platform');
+ await expect(selection.locator('option',{hasText:'Ключ HeyGen бренда'})).toHaveCount(1);
+ await selection.selectOption(`${key.id}:${key.revision}`);await expect(selection).toHaveValue(`${key.id}:${key.revision}`);
+ await expect(page.getByText('Создание будет оплачено в аккаунте HeyGen владельца ключа.',{exact:false})).toBeVisible();
+
+ await page.setViewportSize({width:390,height:844});await expect(panel.getByText(`••••••••${apiKey.slice(-4)}`,{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await panel.screenshot({path:testInfo.outputPath('provider-key-mobile.png')});
+ await panel.getByRole('button',{name:'Отозвать ключ HeyGen',exact:true}).click();await expect(panel.getByRole('status')).toContainText('Ключ удалён из хранилища');expect((await database.client`select credential from provider_keys where id=${key.id}`)[0]?.credential).toBeNull();
+ await expect(page.getByRole('alert').filter({hasText:'Ключ заменён, отозван или недоступен по тарифу'})).toBeVisible({timeout:15000});
+ await expect(selection).toHaveValue(`${key.id}:${key.revision}`);
+ await expect(page.getByRole('button',{name:/Создать образ/})).toBeDisabled();
+ await page.screenshot({path:testInfo.outputPath('avatar-stale-key-mobile.png'),fullPage:true});
+ // Presentation-only avatar fixture: no generation endpoint or external provider is called.
+ const lookId=randomUUID();
+ await page.route(`**/brands/${brand.id}/avatars`,async route=>{
+  if(route.request().method()!=='GET')return route.abort();
+  const response=await route.fetch(),body=await response.json();
+  await route.fulfill({json:{...body,data:{...body.data,looks:[{id:lookId,avatarId:randomUUID(),avatarName:'Bound fixture',name:'Bound look',status:'READY',avatarStatus:'ACTIVE',consentValid:true,voiceId:randomUUID(),connection:{id:key.id,revision:key.revision}}]}}});
+ });
+ await page.getByRole('navigation',{name:'Контент',exact:true}).getByRole('button',{name:'Видео',exact:true}).click();
+ await page.getByLabel('Образ аватара',{exact:true}).selectOption(lookId);
+ await expect(page.getByText('Видео использует ключ HeyGen бренда, закреплённый за аватаром.',{exact:false})).toBeVisible();
+ await expect(page.getByRole('alert').filter({hasText:'Подключение аватара недоступно'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Создать видео',exact:true})).toBeDisabled();
+ await page.unroute(`**/brands/${brand.id}/avatars`);
+ const restoredResponse=await page.request.put(endpoint,{headers:{origin:baseURL!},data:{...input,revision:key.revision+1}});expect(restoredResponse.status()).toBe(200);
+ const restored=(await restoredResponse.json()).data;
+ await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
+ expect((await page.request.get(endpoint)).status()).toBe(403);expect((await page.request.put(endpoint,{headers:{origin:baseURL!},data:{...input,revision:1}})).status()).toBe(403);
+ await page.reload();await expect(page.getByRole('heading',{name:'Студия аватаров',exact:true})).toBeVisible();await expect(panel).toHaveCount(0);
+ await page.unroute(`**/brands/${brand.id}/voices`);
+ const requests:unknown[]=[];
+ await page.route(`**/brands/${brand.id}/voices`,async route=>{
+  if(route.request().method()==='POST'){
+   requests.push(route.request().postDataJSON());
+   return route.fulfill({json:{data:{nextCursor:requests.length===1?'fixture-page-two':requests.length===2?'fixture-page-three':null}}});
+  }
+  const response=await route.fetch(),body=await response.json();
+  await route.fulfill({json:{...body,data:{...body.data,configuration:{ready:false,byokReady:true}}}});
+ });
+ await page.reload();await expect(panel).toHaveCount(0);
+ const catalog=page.getByLabel('Подключение каталога голосов',{exact:true}),refresh=page.getByRole('button',{name:'Обновить каталог голосов',exact:true});
+ await expect(catalog).toHaveValue('platform');await expect(refresh).toBeDisabled();
+ await catalog.selectOption(`${restored.id}:${restored.revision}`);await expect(refresh).toBeEnabled();await refresh.click();
+ await expect(page.getByRole('status')).toContainText('Публичный каталог голосов обновлён');
+ await expect(page.getByRole('button',{name:'Загрузить ещё голоса',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Загрузить ещё голоса',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Загрузить ещё голоса',exact:true})).toBeEnabled();
+ expect(requests).toEqual([{connection:{id:restored.id,revision:restored.revision}},{connection:{id:restored.id,revision:restored.revision},cursor:'fixture-page-two'}]);
+ await catalog.selectOption('platform');await expect(refresh).toBeDisabled();
+ await catalog.selectOption(`${restored.id}:${restored.revision}`);await refresh.click();await expect(refresh).toBeEnabled();
+ expect(requests[2]).toEqual({connection:{id:restored.id,revision:restored.revision}});
+ await expect(selection).toHaveValue('platform');
+ await page.screenshot({path:testInfo.outputPath('editor-voice-catalog-mobile.png'),fullPage:true});
+ await database.client`update organization_members set role='OWNER' where tenant_id=${tenant} and user_id=${user}`;
+ expect((await page.request.post(`${endpoint}/${restored.id}/revoke`,{headers:{origin:baseURL!},data:{revision:restored.revision}})).status()).toBe(200);
+ await database.client`update organization_members set role='EDITOR' where tenant_id=${tenant} and user_id=${user}`;
+ await expect(page.getByRole('alert').filter({hasText:'Ключ каталога заменён, отозван или недоступен по тарифу'})).toBeVisible({timeout:15000});
+ await expect(catalog).toHaveValue(`${restored.id}:${restored.revision}`);await expect(refresh).toBeDisabled();expect(requests).toHaveLength(3);
+
+});

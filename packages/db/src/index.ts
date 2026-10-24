@@ -24,3 +24,55 @@ export * from './repositories/publishing';
 export * from './repositories/analytics';
 export * from './repositories/channel-analytics';
 export * from './repositories/performance';
+export * from './repositories/billing';
+export * from './repositories/renewal';
+export * from './repositories/payment-tasks';
+export * from './repositories/payment-webhooks';
+export * from './repositories/renewal-billing';
+export * from './repositories/notifications';
+
+export * from './repositories/email';
+
+export * from './repositories/team';
+
+export * from './repositories/agency';
+
+export * from './repositories/admin';
+
+export * from './repositories/admin-finance';
+
+export * from './repositories/privacy';
+
+export * from './repositories/utm';
+
+export * from './repositories/funnels';
+
+export * from './repositories/covers';
+export * from './repositories/images';
+
+export * from './repositories/library-media';
+export * from './repositories/youtube-oauth';
+
+export * from './repositories/youtube-uploads';
+
+export * from './repositories/publication-analytics';
+
+export * from './repositories/youtube-resolutions';
+
+export * from './repositories/search';
+
+export * from './repositories/approvals';
+
+export * from './repositories/notification-preferences';
+export * from './repositories/notification-email';
+export * from './repositories/provider-keys';
+
+export * from './repositories/comments';
+
+export * from './repositories/comment-imports';
+
+export * from './repositories/comment-import-pages';
+
+export * from './repositories/comment-replies';
+
+export * from './repositories/comment-reply-approvals';

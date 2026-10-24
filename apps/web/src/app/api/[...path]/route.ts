@@ -1,18 +1,20 @@
+import {apiRoutePath} from '../../../server/api-path';
 import { cookies } from 'next/headers';
 import { DomainError } from '@contentos/types';
 import { services, sessionCookie } from '../../../server/services';
-import { apiResponse, assertOrigin, clientAddress, readBody, readPhotoUpload } from '../../../server/api';
+import { apiData, apiResponse, assertOrigin, clientAddress, readBody, readPhotoUpload } from '../../../server/api';
+import {readLibrarySource} from '../../../server/library-upload';
 export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
-    const { path } = await context.params;
+    const { commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
     if (request.method !== 'GET') assertOrigin(request, env.APP_URL);
     const ip = clientAddress(request);
-    const ok = (data: unknown, status = 200) => Response.json({ data }, { status });
+    const ok = (data: unknown, status = 200) => apiData(data,correlationId,status);
     if (request.method === 'POST' && path[0] === 'auth') {
       if (key === 'auth/register') return ok(await auth.register(await readBody(request), ip, correlationId), 202);
       if (key === 'auth/login') {
@@ -36,14 +38,113 @@ async function dispatch(request: Request, context: RouteContext) {
       await auth.throttle('mutation', user.userId);
       if (request.method === 'POST' && key === 'organizations') return ok(await brands.createOrganization(user.userId, await readBody(request), correlationId), 201);
     }
+    if (key === 'privacy' && request.method === 'GET') return ok(await privacy.overview(user.userId));
+    if (key === 'privacy/export' && request.method === 'POST') { await auth.throttle('account-export', user.userId); return ok(await privacy.exportAccount(user.userId, await readBody(request), correlationId)); }
+    if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
+    if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
+    if (path[0] === 'admin') {
+      if(path[1]==='deletion-requests'&&path[2]&&path.length===3&&request.method==='GET'){await auth.throttle('admin-privacy',user.userId);return ok(await admin.inspectDeletion(user.userId,path[2],correlationId));}
+      if(key==='admin/youtube-resolution'&&request.method==='POST'){await auth.throttle('youtube-resolution',user.userId);return ok(await youtubeResolutions.request(user.userId,await readBody(request),correlationId),202);}
+      if(key==='admin/youtube-resolution/tasks'&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await youtubeResolutions.tasks(user.userId,query.get('tenantId')??'',query.get('jobId')??'',correlationId));}
+      if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
+      if (key === 'admin/finance' && request.method === 'GET') { await auth.throttle('admin-finance', user.userId); return ok(await admin.finance(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId)); }
+      if (key === 'admin/plans' && request.method === 'GET') return ok(await admin.catalog(user.userId, correlationId));
+      if (key === 'admin/plans' && request.method === 'POST') return ok(await admin.publishPlan(user.userId, await readBody(request), correlationId));
+      if (key === 'admin/data' && request.method === 'GET') return ok(await admin.list(user.userId, Object.fromEntries(new URL(request.url).searchParams), correlationId));
+      if (key === 'admin/revoke-sessions' && request.method === 'POST') return ok(await admin.revokeSessions(user.userId, await readBody(request), correlationId));
+    }
+    if(request.method==='POST'&&key==='team/accept')return ok(await team.accept(user.userId,await readBody(request),correlationId));
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
+      if(path[2]==='approvals'){
+        if(path[3]&&path[4]==='comments'&&path.length===5){if(request.method==='GET')return ok(await approvals.comments(user.userId,tenantId,path[3],Object.fromEntries(new URL(request.url).searchParams)));if(request.method==='POST')return ok(await approvals.comment(user.userId,tenantId,path[3],await readBody(request),correlationId),201);}
+        if(path[3]&&path[4]==='preview'&&path.length===5&&request.method==='GET')return ok(await approvals.preview(user.userId,tenantId,path[3],correlationId));
+        if(path.length===3&&request.method==='GET')return ok(await approvals.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
+        if(path[3]==='reviewers'&&path.length===4&&request.method==='GET')return ok(await approvals.reviewers(user.userId,tenantId));
+        if(path[3]&&path.length===4&&request.method==='POST')return ok(await approvals.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
+      }
+      if(path[2]==='brands'&&path[3]&&path[4]==='approval-requests'&&path.length===5&&request.method==='POST')return ok(await approvals.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+      if(path[2]==='search'&&path.length===3&&request.method==='GET'){await auth.throttle('search',user.userId);return ok(await search.search(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));}
+      if (path[2] === 'agency') {
+        if (path.length === 3 && request.method === 'GET') return ok(await agency.overview(user.userId, tenantId));
+        if (path.length === 3 && request.method === 'PUT') return ok(await agency.setMode(user.userId, tenantId, await readBody(request), correlationId));
+        if (path[3] === 'clients' && path.length === 4 && request.method === 'POST') return ok(await agency.addClient(user.userId, tenantId, await readBody(request), correlationId), 201);
+        if (path[3] === 'clients' && path[4] && path.length === 5 && request.method === 'PUT') return ok(await agency.setArchived(user.userId, tenantId, path[4], await readBody(request), correlationId));
+      }
+      if(path[2]==='team'){
+        if(path.length===3&&request.method==='GET')return ok(await team.overview(user.userId,tenantId));
+        if(path.length===4&&request.method==='POST'){
+          const input=await readBody(request);
+          if(path[3]==='invite')return ok(await team.invite(user.userId,tenantId,input,correlationId),201);
+          if(path[3]==='role')return ok(await team.changeRole(user.userId,tenantId,input,correlationId));
+          if(path[3]==='remove')return ok(await team.remove(user.userId,tenantId,input,correlationId));
+          if(path[3]==='transfer')return ok(await team.transfer(user.userId,tenantId,input,correlationId));
+          if(path[3]==='revoke')return ok(await team.revoke(user.userId,tenantId,input,correlationId));
+        }
+      }
       if (path.length === 2 && request.method === 'GET') return ok(await brands.overview(user.userId, tenantId));
+      if(path[2]==='notifications'&&path[3]==='preferences'&&path.length===4){
+        if(request.method==='GET')return ok(await notificationPreferences.get(user.userId,tenantId));
+        if(request.method==='PUT'){await auth.throttle('mutation',user.userId);return ok(await notificationPreferences.update(user.userId,tenantId,await readBody(request),correlationId));}
+      }
+      if(path[2]==='notifications'&&path.length===3&&request.method==='GET')return ok(await notifications.list(user.userId,tenantId,Object.fromEntries(new URL(request.url).searchParams)));
+      if(path[2]==='notifications'&&path[3]==='read-batch'&&path.length===4&&request.method==='POST'){await auth.throttle('mutation',user.userId);return ok(await notifications.markReadBatch(user.userId,tenantId,await readBody(request)));}
+      if(path[2]==='notifications'&&path[3]==='read'&&path.length===4&&request.method==='POST')return ok(await notifications.markRead(user.userId,tenantId,await readBody(request)));
+      if(path[2]==='billing'){
+        if(path.length===3&&request.method==='GET')return ok(await billing.overview(user.userId,tenantId));
+        if(path[3]==='checkout'&&path.length===4&&request.method==='POST')return ok(await billing.checkout(user.userId,tenantId,await readBody(request),correlationId),202);
+        if(path[3]==='orders'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.orderStatus(user.userId,tenantId,path[4]));
+        if(path[3]==='purchase-preview'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.purchasePreview(user.userId,tenantId,path[4]));
+        if(path[3]==='renewal-policy'&&path[4]&&path.length===5&&request.method==='GET')return ok(await billing.renewalPolicy(user.userId,tenantId,path[4]));
+        if(path[3]==='accept-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.acceptRenewal(user.userId,tenantId,await readBody(request),{ip,userAgent:request.headers.get('user-agent')??''},correlationId),201);
+        if(path[3]==='cancel-renewal'&&path.length===4&&request.method==='POST')return ok(await billing.cancelRenewal(user.userId,tenantId,await readBody(request),correlationId));
+      }
       if (path[2] === 'trial' && path.length === 3 && request.method === 'POST') return ok(await generation.grantTrial(user.userId, tenantId, correlationId));
       if (path[2] === 'brands') {
+        if(path[3]&&path[4]==='provider-keys'){
+          if(path.length===5&&request.method==='GET')return ok(await providerKeys.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='PUT')return ok(await providerKeys.save(user.userId,tenantId,path[3],await readBody(request),correlationId));
+          if(path[5]&&path[6]==='verify'&&path.length===7&&request.method==='POST')return ok(await providerKeys.verify(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+          if(path[5]&&path[6]==='revoke'&&path.length===7&&request.method==='POST')return ok(await providerKeys.revoke(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+        }
+        if (path[3] && path[4] === 'brain' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await brands.collection(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') return ok(await brands.saveCollection(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId));
+        }
         if(path[3]&&path[4]==='performance'&&path.length===5){
           if(request.method==='GET')return ok(await performance.list(user.userId,tenantId,path[3]));
           if(request.method==='POST')return ok(await performance.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
+        }
+        if(path[3]&&path[4]==='publications'&&path[5]&&path[6]==='comments'){
+          const scope=[user.userId,tenantId,path[3],path[5]] as const;
+          if(path.length===7&&request.method==='GET'){
+            const query=Object.fromEntries(new URL(request.url).searchParams);
+            const data=await comments.list(...scope,query),sync=await commentImports.latest(...scope);
+            return ok({...data,sync});
+          }
+          if(path[7]==='imports'){
+            if(path.length===8&&request.method==='GET')return ok(await commentImports.latest(...scope));
+            if(path.length===8&&request.method==='POST'){await auth.throttle('comment-import',user.userId);return ok(await commentImports.request(...scope,await readBody(request),correlationId),202);}
+            if(path[8]&&path.length===10&&request.method==='POST'){
+              if(path[9]==='resume'){await auth.throttle('comment-import',user.userId);return ok(await commentImports.resume(...scope,path[8],await readBody(request)),202);}
+              if(path[9]==='cancel')return ok(await commentImports.cancel(...scope,path[8],await readBody(request)));
+            }
+          }
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path[9]==='approval'&&path.length===10){
+            if(request.method==='GET')return ok(await commentReplies.approvalStatus(...scope,path[7]));
+            if(request.method==='POST')return ok(await commentReplies.approve(...scope,path[7],await readBody(request),correlationId),201);
+          }
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path[9]==='approval'&&path[10]&&path[11]==='revoke'&&path.length===12&&request.method==='POST')return ok(await commentReplies.revokeApproval(...scope,path[7],path[10],correlationId));
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path[9]==='generation'&&path.length===10&&request.method==='GET')return ok(await commentReplies.generationStatus(...scope,path[7]));
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path.length===9){
+            if(request.method==='GET')return ok(await commentReplies.history(...scope,path[7],Object.fromEntries(new URL(request.url).searchParams)));
+            if(request.method==='POST')return ok(await commentReplies.save(...scope,path[7],await readBody(request),correlationId),201);
+          }
+          if(path[7]&&path[7]!=='imports'&&path.length===8&&request.method==='PATCH')return ok(await comments.triage(...scope,path[7],await readBody(request),correlationId));
+        }
+        if(path[3]&&path[4]==='publication-analytics'&&path.length===5){
+          if(request.method==='GET')return ok(await publicationAnalytics.overview(user.userId,tenantId,path[3]));
+          if(request.method==='POST'){await auth.throttle('publication-analytics',user.userId);return ok(await publicationAnalytics.request(user.userId,tenantId,path[3],await readBody(request),correlationId),202);}
         }
         if(path[3]&&path[4]==='channel-analytics'){
           if(path.length===5&&request.method==='GET')return ok(await channelAnalytics.overview(user.userId,tenantId,path[3]));
@@ -60,6 +161,14 @@ async function dispatch(request: Request, context: RouteContext) {
           if(path.length===5&&request.method==='POST')return ok(await publishing.approve(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
           if(path[5]&&path[6]==='cancel'&&path.length===7&&request.method==='POST'){await publishing.cancel(user.userId,tenantId,path[3],path[5]);return ok({cancelled:true});}
         }
+        if(path[3]&&path[4]==='youtube'){
+          if(path.length===6&&path[5]==='publications'&&request.method==='GET')return ok(await youtubePublications.overview(user.userId,tenantId,path[3]));
+          if(path.length===6&&path[5]==='publications'&&request.method==='POST'){await auth.throttle('youtube-approve',user.userId);return ok(await youtubePublications.approve(user.userId,tenantId,path[3],await readBody(request),correlationId),202);}
+          if(path.length===6&&path[5]==='categories'&&request.method==='GET'){await auth.throttle('youtube-categories',user.userId);return ok(await youtubePublications.categories(user.userId,tenantId,path[3],new URL(request.url).searchParams.get('connectionId')??'',new URL(request.url).searchParams.get('regionCode')??'',correlationId));}
+          if(path.length===5&&request.method==='GET')return ok(await youtube.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST'){await auth.throttle('youtube-connect',user.userId);return ok(await youtube.start(user.userId,user.id,tenantId,path[3],await readBody(request),correlationId));}
+          if(path.length===7&&path[5]&&path[6]==='check'&&request.method==='POST'){await auth.throttle('youtube-check',user.userId);return ok(await youtube.check(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));}
+        }
         if(path[3]&&path[4]==='social'){
           if(path.length===5&&request.method==='GET')return ok(await social.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await social.connect(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
@@ -70,6 +179,28 @@ async function dispatch(request: Request, context: RouteContext) {
             if(path[6]==='rewrap'){await social.rewrap(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({rotated:true});}
           }
         }
+        if(path[3]&&path[4]==='funnels'){
+          const query=Object.fromEntries(new URL(request.url).searchParams);
+          if(path.length===5&&request.method==='GET')return ok(await funnels.list(user.userId,tenantId,path[3],query));
+          if(path.length===5&&request.method==='POST')return ok(await funnels.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          if(path[5]==='choices'&&path.length===6&&request.method==='GET')return ok(await funnels.choices(user.userId,tenantId,path[3],query));
+          if(path[5]&&path[6]==='measurements'&&path.length===7){
+            if(request.method==='GET')return ok(await funnels.measurements(user.userId,tenantId,path[3],path[5],query));
+            if(request.method==='POST')return ok(await funnels.measure(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),201);
+          }
+        }
+        if(path[3]&&path[4]==='images'){
+          if(path.length===5&&request.method==='GET')return ok(await images.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST')return ok(await images.request(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
+          if(path[5]&&path.length===7&&path[6]==='delete'&&request.method==='POST')return ok(await images.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+          if(path[5]&&path.length===7&&path[6]==='approve'&&request.method==='POST'){await images.approve(user.userId,tenantId,path[3],path[5],correlationId);return ok({approved:true});}
+          if(path[5]&&path.length===7&&['preview','download'].includes(path[6]!)&&request.method==='GET')return ok(await images.download(user.userId,tenantId,path[3],path[5],path[6]==='download',correlationId));
+        }
+        if(path[3]&&path[4]==='utm'){
+          if(path.length===5&&request.method==='GET')return ok(await utm.list(user.userId,tenantId,path[3],Object.fromEntries(new URL(request.url).searchParams)));
+          if(path.length===5&&request.method==='POST')return ok(await utm.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          if(path[5]&&path.length===7&&path[6]==='archive'&&request.method==='POST')return ok(await utm.archive(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+        }
         if(path[3]&&path[4]==='calendar'){
           if(path.length===5&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await calendar.list(user.userId,tenantId,path[3],{from:query.get('from'),to:query.get('to')}));}
           if(path.length===5&&request.method==='POST')return ok(await calendar.create(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
@@ -77,6 +208,12 @@ async function dispatch(request: Request, context: RouteContext) {
           if(path[5]&&path.length===7&&path[6]==='cancel'&&request.method==='POST'){await calendar.cancel(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId);return ok({cancelled:true});}
         }
         if(path[3]&&path[4]==='videos'){
+          if(path[5]&&path[6]==='covers'){
+            if(path.length===7&&request.method==='GET')return ok(await covers.overview(user.userId,tenantId,path[3],path[5]));
+            if(path.length===7&&request.method==='POST')return ok(await covers.request(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),202);
+            if(path.length===7&&request.method==='PUT')return ok(await covers.select(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));
+            if(path.length===8&&path[7]&&request.method==='GET')return ok(await covers.download(user.userId,tenantId,path[3],path[5],path[7],correlationId));
+          }
           if(path.length===8&&path[5]&&path[6]==='captions'&&path[7]==='confirm'&&request.method==='POST')return ok(await videos.confirmCaptions(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId),202);
           if(path.length===5&&request.method==='GET')return ok(await videos.overview(user.userId,tenantId,path[3]));
           if(path.length===5&&request.method==='POST')return ok(await videos.create(user.userId,tenantId,path[3],await readBody(request),correlationId),202);
@@ -88,7 +225,7 @@ async function dispatch(request: Request, context: RouteContext) {
             if(path[6]==='resume'&&request.method==='POST'){await videos.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
             if(path[6]==='download'&&request.method==='GET')return ok(await videos.download(user.userId,tenantId,path[3],path[5],correlationId));
             if(path[6]==='history'&&request.method==='GET')return ok(await videos.history(user.userId,tenantId,path[3],path[5]));
-            if(path[6]==='approve'&&request.method==='POST')return ok(await videos.approve(user.userId,tenantId,path[3],path[5],correlationId));
+            if(path[6]==='approve'&&request.method==='POST')return ok(await videos.approve(user.userId,tenantId,path[3],path[5],correlationId,await readBody(request)));
           }
         }
         if (path[3] && path[4] === 'voices') {
@@ -102,6 +239,34 @@ async function dispatch(request: Request, context: RouteContext) {
           if (path[5] && path[6] === 'delete' && path.length === 7 && request.method === 'POST') return ok(await avatars.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
         }
         if (path[3] && path[4] === 'avatar-jobs' && path[5] && path[6] === 'resume' && path.length === 7 && request.method === 'POST') {await avatars.resume(user.userId,tenantId,path[3],path[5],correlationId);return ok({status:'RETRY'},202);}
+        if(path[3]&&path[4]==='library-media'){
+          if(path.length===5&&request.method==='GET')return ok(await libraryMedia.overview(user.userId,tenantId,path[3]));
+          if(path.length===5&&request.method==='POST'){
+            await auth.throttle('library-upload',`${tenantId}:${user.userId}`);
+            return ok(await libraryMedia.begin(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          }
+          if(path.length===6&&path[5]==='upload-intents'&&request.method==='POST'){
+            await auth.throttle('library-upload',`${tenantId}:${user.userId}`);
+            return ok(await libraryMedia.beginBrowserUpload(user.userId,tenantId,path[3],await readBody(request),correlationId),201);
+          }
+          if(path[5]&&path.length===8&&path[6]==='chunks'&&path[7]&&request.method==='POST'){
+            await auth.throttle('library-chunk',`${tenantId}:${user.userId}`);
+            const index=Number(path[7]);
+            await libraryMedia.authorizeChunk(user.userId,tenantId,path[3],path[5],index);
+            const source=await readLibrarySource(request,1);
+            return ok(await libraryMedia.uploadChunk(user.userId,tenantId,path[3],path[5],index,source.bytes,source.mimeType),202);
+          }
+          if(path[5]&&path.length===7&&path[6]==='source'&&request.method==='POST'){
+            await auth.throttle('library-upload',`${tenantId}:${user.userId}`);
+            await libraryMedia.authorizeSource(user.userId,tenantId,path[3],path[5]);
+            const source=await readLibrarySource(request);
+            return ok(await libraryMedia.uploadSource(user.userId,tenantId,path[3],path[5],source.bytes,source.mimeType),202);
+          }
+          if(path[5]&&path.length===7&&path[6]==='upload-intent'&&request.method==='GET')return ok(await libraryMedia.resumeUpload(user.userId,tenantId,path[3],path[5]));
+          if(path[5]&&path.length===7&&path[6]==='confirm'&&request.method==='POST')return ok(await libraryMedia.confirm(user.userId,tenantId,path[3],path[5]),202);
+          if(path[5]&&path.length===7&&path[6]==='delete'&&request.method==='POST')return ok(await libraryMedia.delete(user.userId,tenantId,path[3],path[5],correlationId),202);
+          if(path[5]&&path.length===7&&path[6]==='download'&&request.method==='GET')return ok(await libraryMedia.download(user.userId,tenantId,path[3],path[5]));
+        }
         if (path[3] && path[4] === 'media') {
           if (path.length === 5 && request.method === 'GET') return ok(await media.overview(user.userId,tenantId,path[3]));
           if (path.length === 5 && request.method === 'POST') {
@@ -120,6 +285,18 @@ async function dispatch(request: Request, context: RouteContext) {
         }
         if (path[3] && path[4] === 'content' && path.length === 5 && request.method === 'GET') return ok(await generation.overview(user.userId, tenantId, path[3]));
         if (path[3] && path[4] === 'jobs' && path.length === 5 && request.method === 'POST') return ok(await generation.enqueue(user.userId, tenantId, path[3], await readBody(request), correlationId), 202);
+        if(path[3]&&path[4]==='posts'&&path[5]&&path[6]==='history'&&path.length===7&&request.method==='GET')return ok(await generation.postHistoryPage(user.userId,tenantId,path[3],path[5],Object.fromEntries(new URL(request.url).searchParams)));
+        if (path[3] && path[4] === 'posts' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await generation.postHistory(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editPost(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }
+        }
+        if(path[3]&&path[4]==='carousels'&&path[5]&&path[6]==='history'&&path.length===7&&request.method==='GET')return ok(await generation.carouselHistoryPage(user.userId,tenantId,path[3],path[5],Object.fromEntries(new URL(request.url).searchParams)));
+        if(path[3]&&path[4]==='carousels'&&path[5]&&path[6]==='export'&&path.length===7&&request.method==='GET')return ok(await generation.authorizeCarouselExport(user.userId,tenantId,path[3],path[5],Object.fromEntries(new URL(request.url).searchParams)));
+        if(path[3]&&path[4]==='carousels'&&path[5]&&path[6]==='archive'&&path.length===7&&request.method==='PUT'){await auth.throttle('mutation',user.userId);return ok(await generation.setCarouselArchived(user.userId,tenantId,path[3],path[5],await readBody(request),correlationId));}
+        if (path[3] && path[4] === 'carousels' && path[5] && path.length === 6) {
+          if (request.method === 'GET') return ok(await generation.carouselHistory(user.userId, tenantId, path[3], path[5]));
+          if (request.method === 'PUT') { await auth.throttle('mutation', user.userId); return ok(await generation.editCarousel(user.userId, tenantId, path[3], path[5], await readBody(request), correlationId)); }
+        }
         if (path[3] && path[4] === 'scripts' && path[5] && path.length === 6) {
           if (request.method === 'GET') return ok(await generation.history(user.userId, tenantId, path[3], path[5]));
           if (request.method === 'PUT') {
@@ -129,6 +306,7 @@ async function dispatch(request: Request, context: RouteContext) {
         }
         if (path.length === 3 && request.method === 'POST') return ok(await brands.createBrand(user.userId, tenantId, await readBody(request), correlationId), 201);
         if (path[3] && path.length === 4 && request.method === 'GET') return ok(await brands.getBrandBrain(user.userId, tenantId, path[3]));
+        if (path[3] && path[4] === 'profile' && path.length === 5 && request.method === 'PUT') return ok(await brands.saveProfile(user.userId, tenantId, path[3], await readBody(request), correlationId));
         if (path[3] && path[4] === 'onboarding' && path.length === 5 && request.method === 'PUT') {
           await auth.throttle('onboarding', user.userId);
           return ok(await brands.saveOnboarding(user.userId, tenantId, path[3], await readBody(request), correlationId));
@@ -141,3 +319,5 @@ async function dispatch(request: Request, context: RouteContext) {
 export const GET = dispatch;
 export const POST = dispatch;
 export const PUT = dispatch;
+
+export const PATCH = dispatch;

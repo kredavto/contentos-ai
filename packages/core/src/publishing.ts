@@ -1,3 +1,5 @@
+import type {ErrorReporter} from '@contentos/types';
+import {reportError} from './error-reporting';
 import {z} from 'zod';
 import {PublishingRepository} from '@contentos/db';
 import {DomainError,ProviderRequestError,publishingApprovalSchema,validateTelegramPublication,telegramVideoByteLimit,type PublishingProvider,type StorageProvider,type OperationContext} from '@contentos/types';
@@ -13,7 +15,7 @@ export class PublishingService{
   cancel(userId:string,tenantId:string,brandId:string,id:string){return this.repository.cancel(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id));}
 }
 export class PublishingProcessor{
-  constructor(private readonly repository:PublishingRepository,private readonly connection:PublishingConnection,private readonly inspector:SocialConnection,private readonly vault:CredentialVault|null,private readonly storage:StorageProvider|null){}
+  constructor(private readonly repository:PublishingRepository,private readonly connection:PublishingConnection,private readonly inspector:SocialConnection,private readonly vault:CredentialVault|null,private readonly storage:StorageProvider|null,private readonly errors?:ErrorReporter){}
   async run(tenantId:string,id:string){
     const job=await this.repository.claim(tenantId,id);if(!job)return;
     const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),120000);
@@ -33,9 +35,9 @@ export class PublishingProcessor{
       }
       if(abort.signal.aborted)throw new DomainError('PROVIDER_UNAVAILABLE',503);
       await this.repository.begin(job,avatarConsentPolicies());
-      const result=await this.connection.provider.publish({credential,channel:inspected.reference,type:job.snapshot.type,caption:job.snapshot.caption,privacy:job.snapshot.privacy,commentsEnabled:job.snapshot.commentsEnabled,bytes},context);
+      const result=await this.connection.provider.publish({credential,channel:inspected.reference,type:job.snapshot.type,caption:job.snapshot.caption,privacy:job.snapshot.privacy as 'PUBLIC'|'PRIVATE',commentsEnabled:job.snapshot.commentsEnabled,bytes},context);
       await this.repository.complete(job,result);
-    }catch(error){await this.repository.fail(job,error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE',error instanceof ProviderRequestError&&error.definitiveRejection);}
+    }catch(error){reportError(this.errors,error,{correlationId:job.correlationId,jobId:id});await this.repository.fail(job,error instanceof DomainError?error.code:'PROVIDER_UNAVAILABLE',error instanceof ProviderRequestError&&error.definitiveRejection);}
     finally{clearTimeout(timer);}
   }
 }

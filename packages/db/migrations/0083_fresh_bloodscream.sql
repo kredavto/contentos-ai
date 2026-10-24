@@ -1,0 +1,2 @@
+ALTER TABLE "comments" DROP CONSTRAINT "comment_identity_valid";--> statement-breakpoint
+ALTER TABLE "comments" ADD CONSTRAINT "comment_identity_valid" CHECK ("comments"."provider"='youtube' and "comments"."external_comment_id" ~ '^[A-Za-z0-9_.-]+$' and length("comments"."external_comment_id") between 1 and 256 and "comments"."external_thread_id" ~ '^[A-Za-z0-9_.-]+$' and length("comments"."external_thread_id") between 1 and 256 and ("comments"."parent_id" is null or "comments"."parent_id"<>"comments"."id"));

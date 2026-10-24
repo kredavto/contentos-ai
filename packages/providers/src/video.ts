@@ -19,3 +19,5 @@ export function videoFromEnvironment(env:{VIDEO_PROVIDER:string;HEYGEN_API_KEY?:
   if(env.VIDEO_PROVIDER==='mock'&&env.MOCK_VIDEO_FILE)return {provider:new MockVideoProvider(env.NODE_ENV,env.MOCK_VIDEO_FILE),name:'mock-avatar'};
   return null;
 }
+
+export function videoFromKey(apiKey:string):VideoProvider{return new HeyGenVideoProvider(new HeyGenClient(apiKey));}

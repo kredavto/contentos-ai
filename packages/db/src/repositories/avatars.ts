@@ -1,9 +1,10 @@
 import { randomUUID,createHash } from 'node:crypto';
-import { and,eq,sql,desc,isNull } from 'drizzle-orm';
+import { and,eq,sql,desc,isNull,isNotNull } from 'drizzle-orm';
 import { DomainError,avatarJobInputSchema,type AvatarRequest,type AvatarJobInput,type ConsentType,type ProviderReference } from '@contentos/types';
 import type { Database } from '../index';
-import { avatars,avatarLooks,mediaAssets,consentSubjects,consentRecords,jobs,outbox,usagePolicies,auditLogs,aiCalls } from '../schema';
+import { avatars,avatarLooks,mediaAssets,consentSubjects,consentRecords,jobs,outbox,usagePolicies,auditLogs,aiCalls,providerKeys } from '../schema';
 import { lockTenant,assertMembership,reserveInTransaction,settleInTransaction,type Transaction } from './ledger';
+import {ProviderKeyRepository,resolveProviderKey} from './provider-keys';
 import { requireConsent } from './consent';
 import { ownedJob,type StoredJob } from './jobs';
 export type ConsentPolicy = {type:ConsentType;version:string;textHash:string};
@@ -17,6 +18,7 @@ async function entities(tx:Transaction,job:StoredJob){
   const [avatar]=await tx.select().from(avatars).where(avatarWhere(job.tenantId,input.avatarId));
   const [look]=await tx.select().from(avatarLooks).where(and(lookWhere(job.tenantId,input.lookId),eq(avatarLooks.jobId,job.id),eq(avatarLooks.avatarId,input.avatarId)));
   if(!avatar||!look||avatar.brandId!==job.brandId||avatar.subjectId!==input.subjectId||look.sourceAssetId!==input.sourceAssetId)throw new DomainError('NOT_FOUND',404);
+  if((input.connection?.id??null)!==avatar.providerKeyId||(input.connection?.revision??null)!==avatar.providerKeyRevision)throw new DomainError('CONFLICT',409);
   return {input,avatar,look};
 }
 async function validConsent(tx:Transaction,tenantId:string,input:AvatarJobInput,policies:ConsentPolicy[]){
@@ -31,6 +33,7 @@ export class AvatarRepository {
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
       const [existing]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,input.idempotencyKey)));
       if(existing){if(existing.inputHash!==inputHash||existing.requestedBy!==userId||existing.type!=='CREATE_AVATAR')throw new DomainError('CONFLICT',409);return {id:existing.id,status:existing.status};}
+      if(input.connection){const key=await resolveProviderKey(tx,userId,tenantId,brandId,input.connection);if(key.provider!==provider)throw new DomainError('INVALID_INPUT');}
       const [subject]=await tx.select().from(consentSubjects).where(and(eq(consentSubjects.tenantId,tenantId),eq(consentSubjects.brandId,brandId),eq(consentSubjects.id,input.subjectId),eq(consentSubjects.type,'PERSON')));
       const [asset]=await tx.select().from(mediaAssets).where(and(eq(mediaAssets.tenantId,tenantId),eq(mediaAssets.brandId,brandId),eq(mediaAssets.id,input.sourceAssetId),eq(mediaAssets.status,'READY')));
       if(!subject||!asset)throw new DomainError('NOT_FOUND',404);
@@ -41,14 +44,14 @@ export class AvatarRepository {
       if(input.avatarId){
         [avatar]=await tx.select().from(avatars).where(and(avatarWhere(tenantId,input.avatarId),eq(avatars.brandId,brandId),eq(avatars.subjectId,input.subjectId),eq(avatars.status,'ACTIVE'),eq(avatars.provider,provider)));
         const [ready]=await tx.select({id:avatarLooks.id}).from(avatarLooks).where(and(eq(avatarLooks.tenantId,tenantId),eq(avatarLooks.avatarId,input.avatarId),eq(avatarLooks.status,'READY'))).limit(1);
-        if(!avatar?.reference||!ready)throw new DomainError('CONFLICT',409);
-      } else [avatar]=await tx.insert(avatars).values({tenantId,brandId,subjectId:subject.id,name:input.name,provider,correlationId}).returning();
+        if(!avatar?.reference||!ready||(avatar.providerKeyId??null)!==(input.connection?.id??null)||(avatar.providerKeyRevision??null)!==(input.connection?.revision??null))throw new DomainError('CONFLICT',409);
+      } else [avatar]=await tx.insert(avatars).values({tenantId,brandId,subjectId:subject.id,name:input.name,provider,correlationId,providerKeyId:input.connection?.id??null,providerKeyRevision:input.connection?.revision??null}).returning();
       if(!avatar)throw new Error('Avatar insert failed');
       const [policy]=await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,'CREATE_AVATAR'));
       if(!policy)throw new DomainError('CONFIGURATION_REQUIRED',503);
       const reservation=await reserveInTransaction(tx,tenantId,policy.unit,policy.amount,`job:${input.idempotencyKey}`,correlationId);
       const lookId=randomUUID();
-      const jobInput:AvatarJobInput={avatarId:avatar.id,lookId,sourceAssetId:asset.id,subjectId:subject.id,requirements:requirements.map((policy,i)=>({...policy,type:policy.type as AvatarJobInput['requirements'][number]['type'],recordId:records[i]!}))};
+      const jobInput:AvatarJobInput={...(input.connection?{connection:input.connection}:{}),avatarId:avatar.id,lookId,sourceAssetId:asset.id,subjectId:subject.id,requirements:requirements.map((policy,i)=>({...policy,type:policy.type as AvatarJobInput['requirements'][number]['type'],recordId:records[i]!}))};
       const [job]=await tx.insert(jobs).values({tenantId,brandId,requestedBy:userId,type:'CREATE_AVATAR',input:jobInput,inputHash,idempotencyKey:input.idempotencyKey,reservationId:reservation.id,provider,model:'photo-avatar',correlationId}).returning();
       if(!job)throw new Error('Job insert failed');
       await tx.insert(avatarLooks).values({id:lookId,tenantId,avatarId:avatar.id,sourceAssetId:asset.id,jobId:job.id,name:input.name});
@@ -57,12 +60,13 @@ export class AvatarRepository {
       return {id:job.id,status:job.status};
     });
   }
+  generationReferences(userId:string,tenantId:string,brandId:string){return new ProviderKeyRepository(this.db).generationReferences(userId,tenantId,brandId);}
   async list(userId:string,tenantId:string,brandId:string,policies:ConsentPolicy[]){
     return this.db.transaction(async tx=>{
       await assertMembership(tx,userId,tenantId);
       const rows=await tx.select({avatar:avatars,look:avatarLooks,input:jobs.input}).from(avatars).innerJoin(avatarLooks,and(eq(avatarLooks.tenantId,avatars.tenantId),eq(avatarLooks.avatarId,avatars.id))).innerJoin(jobs,and(eq(jobs.tenantId,avatarLooks.tenantId),eq(jobs.id,avatarLooks.jobId))).where(and(eq(avatars.tenantId,tenantId),eq(avatars.brandId,brandId),sql`${avatars.status} <> 'DELETED'`)).orderBy(desc(avatars.createdAt),desc(avatarLooks.createdAt)).limit(100);
       const active=await tx.select({id:consentRecords.id}).from(consentRecords).where(and(eq(consentRecords.tenantId,tenantId),isNull(consentRecords.revokedAt)));const ids=new Set(active.map(row=>row.id));
-      return rows.map(({avatar,look,input})=>{const requirements=avatarJobInputSchema.parse(input).requirements;return {id:look.id,avatarId:avatar.id,avatarName:avatar.name,voiceId:avatar.voiceId,name:look.name,subjectId:avatar.subjectId,sourceAssetId:look.sourceAssetId,status:look.status,avatarStatus:avatar.status,jobId:look.jobId,errorCode:look.errorCode??avatar.errorCode,consentValid:requirements.every(requirement=>ids.has(requirement.recordId)&&policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash))};});
+      return rows.map(({avatar,look,input})=>{const requirements=avatarJobInputSchema.parse(input).requirements;return {connection:avatar.providerKeyId?{id:avatar.providerKeyId,revision:avatar.providerKeyRevision!}:null,id:look.id,avatarId:avatar.id,avatarName:avatar.name,voiceId:avatar.voiceId,name:look.name,subjectId:avatar.subjectId,sourceAssetId:look.sourceAssetId,status:look.status,avatarStatus:avatar.status,jobId:look.jobId,errorCode:look.errorCode??avatar.errorCode,consentValid:requirements.every(requirement=>ids.has(requirement.recordId)&&policies.some(policy=>policy.type===requirement.type&&policy.version===requirement.version&&policy.textHash===requirement.textHash))};});
     });
   }
   async claim(tenantId:string,id:string){
@@ -81,6 +85,7 @@ export class AvatarRepository {
       await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);
       await assertMembership(tx,active.requestedBy,active.tenantId,'generate');
       const data=await entities(tx,active);
+      const key=data.input.connection?await resolveProviderKey(tx,active.requestedBy,job.tenantId,job.brandId,data.input.connection):null;
       if(data.avatar.status!=='ACTIVE')throw new DomainError('CONFLICT',409);
       await validConsent(tx,job.tenantId,data.input,policies);
       if(active.consecutiveFailures>=active.maxAttempts||(!data.look.reference&&data.look.firstSubmittedAt&&Date.now()-data.look.firstSubmittedAt.getTime()>23*3600_000))throw new DomainError('RECONCILIATION_REQUIRED',409);
@@ -90,7 +95,7 @@ export class AvatarRepository {
         await tx.update(avatarLooks).set({status:'PROCESSING',mutationState:data.look.firstSubmittedAt?'UNKNOWN':'STARTED',firstSubmittedAt:data.look.firstSubmittedAt??new Date()}).where(lookWhere(job.tenantId,data.look.id));
         await tx.insert(auditLogs).values({tenantId:job.tenantId,action:'AVATAR_SUBMISSION_AUTHORIZED',resourceId:data.look.id,correlationId:job.correlationId,metadata:{jobId:job.id,attempt:job.attempt}});
       }
-      return {...data,asset,job:active};
+      return {...data,asset,job:active,key};
     });
   }
   async submitted(job:StoredJob,reference:ProviderReference){
@@ -119,6 +124,7 @@ export class AvatarRepository {
     await this.db.transaction(async tx=>{
       await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,active.tenantId,'generate');
       const data=await entities(tx,active);await validConsent(tx,job.tenantId,data.input,policies);
+      if(data.input.connection)await resolveProviderKey(tx,active.requestedBy,job.tenantId,job.brandId,data.input.connection);
       if(data.avatar.status!=='ACTIVE'||!data.look.reference)throw new DomainError('CONFLICT',409);
       await settleInTransaction(tx,job.tenantId,job.reservationId,'CAPTURE',job.correlationId);
       await tx.update(avatarLooks).set({status:'READY',errorCode:null}).where(lookWhere(job.tenantId,data.look.id));
@@ -128,12 +134,12 @@ export class AvatarRepository {
   }
   async fail(job:StoredJob,code:string,definitiveRejection=false){
     await this.db.transaction(async tx=>{
-      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);const {look}=await entities(tx,active);
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);const {look,avatar}=await entities(tx,active);
       const rejected=definitiveRejection&&look.mutationState==='STARTED'&&!look.reference;
       const uncertain=!look.reference&&!!look.firstSubmittedAt&&!rejected&&look.mutationState!=='REJECTED';
       const failures=active.consecutiveFailures+1;
       const retry=code==='PROVIDER_UNAVAILABLE'&&failures<active.maxAttempts&&(!look.firstSubmittedAt||Date.now()-look.firstSubmittedAt.getTime()<23*3600_000);
-      const reconcile=!retry&&(uncertain||code==='RECONCILIATION_REQUIRED'||(!!look.reference&&code==='PROVIDER_UNAVAILABLE'));
+      const reconcile=!retry&&((!!avatar.providerKeyId&&!!look.reference&&['CONFIGURATION_REQUIRED','PLAN_LIMIT_REACHED'].includes(code))||uncertain||code==='RECONCILIATION_REQUIRED'||(!!look.reference&&code==='PROVIDER_UNAVAILABLE'));
       if(!retry&&!reconcile)await settleInTransaction(tx,job.tenantId,job.reservationId,'RELEASE',job.correlationId);
       await tx.update(avatarLooks).set({status:retry?'PROCESSING':reconcile?'RECONCILIATION':'FAILED',errorCode:code,...(rejected?{mutationState:'REJECTED' as const}:uncertain?{mutationState:'UNKNOWN' as const}:{})}).where(lookWhere(job.tenantId,look.id));
       await tx.update(jobs).set({status:retry?'RETRY':reconcile?'RECONCILIATION':'FAILED',errorCode:reconcile?'RECONCILIATION_REQUIRED':code,consecutiveFailures:failures,leaseToken:null,leaseExpiresAt:null,nextAttemptAt:new Date(Date.now()+5000*2**Math.min(failures-1,6)),finishedAt:retry||reconcile?null:new Date()}).where(jobWhere(job.tenantId,job.id));
@@ -145,6 +151,7 @@ export class AvatarRepository {
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'strategy');const [job]=await tx.select().from(jobs).where(and(jobWhere(tenantId,id),eq(jobs.brandId,brandId),eq(jobs.type,'CREATE_AVATAR'))).for('update');
       if(!job||job.status!=='RECONCILIATION')throw new DomainError('CONFLICT',409);
       const data=await entities(tx,job);await validConsent(tx,tenantId,data.input,policies);
+      if(data.input.connection)await resolveProviderKey(tx,job.requestedBy,tenantId,brandId,data.input.connection);
       if(data.avatar.status!=='ACTIVE'||(!data.look.reference&&data.look.firstSubmittedAt&&Date.now()-data.look.firstSubmittedAt.getTime()>=23*3600_000))throw new DomainError('RECONCILIATION_REQUIRED',409);
       await tx.update(jobs).set({status:'RETRY',consecutiveFailures:0,pollCount:0,nextAttemptAt:new Date(),errorCode:null}).where(jobWhere(tenantId,id));
       await tx.insert(auditLogs).values({tenantId,userId,action:'AVATAR_CHECK_RESUMED',resourceId:data.look.id,correlationId});
@@ -160,11 +167,17 @@ export class AvatarRepository {
       await tx.insert(auditLogs).values({tenantId,userId,action:'AVATAR_DELETION_REQUESTED',resourceId:id,correlationId});return {status:'DELETE_PENDING' as const};
     });
   }
-  async claimDeletion(provider:string){
+  async claimDeletion(provider:string,byok=false){
     return this.db.transaction(async tx=>{
-      const [avatar]=await tx.select().from(avatars).where(and(eq(avatars.provider,provider),eq(avatars.status,'DELETE_PENDING'),sql`${avatars.deleteAfter} <= now()`,sql`(${avatars.leaseExpiresAt} is null or ${avatars.leaseExpiresAt} < now())`,sql`not exists (select 1 from ${avatarLooks} l where l.tenant_id = ${avatars.tenantId} and l.avatar_id = ${avatars.id} and l.reference is null and l.mutation_state in ('STARTED','UNKNOWN'))`)).for('update',{skipLocked:true}).limit(1);
+      const [avatar]=await tx.select().from(avatars).where(and(byok?isNotNull(avatars.providerKeyId):isNull(avatars.providerKeyId),eq(avatars.provider,provider),eq(avatars.status,'DELETE_PENDING'),sql`${avatars.deleteAfter} <= now()`,sql`(${avatars.leaseExpiresAt} is null or ${avatars.leaseExpiresAt} < now())`,sql`not exists (select 1 from ${avatarLooks} l where l.tenant_id = ${avatars.tenantId} and l.avatar_id = ${avatars.id} and l.reference is null and l.mutation_state in ('STARTED','UNKNOWN'))`)).for('update',{skipLocked:true}).limit(1);
       if(!avatar)return null;const [claimed]=await tx.update(avatars).set({leaseToken:randomUUID(),leaseExpiresAt:new Date(Date.now()+120_000),deleteAttempts:avatar.deleteAttempts+1}).where(avatarWhere(avatar.tenantId,avatar.id)).returning();return claimed??null;
     });
+  }
+  /** Prior authorized deletion may run after paid-term expiry; never switch key revisions/accounts. */
+  async deletionKey(avatar:StoredAvatar){
+    if(avatar.provider!=='heygen'||!avatar.providerKeyId||avatar.providerKeyRevision===null)throw new DomainError('CONFIGURATION_REQUIRED',503);
+    const [key]=await this.db.select().from(providerKeys).where(and(eq(providerKeys.tenantId,avatar.tenantId),eq(providerKeys.brandId,avatar.brandId),eq(providerKeys.id,avatar.providerKeyId!),eq(providerKeys.revision,avatar.providerKeyRevision!),eq(providerKeys.provider,'heygen'),eq(providerKeys.status,'ACTIVE')));
+    if(!key?.credential)throw new DomainError('CONFIGURATION_REQUIRED',503);return key;
   }
   async finishDeletion(avatar:StoredAvatar,succeeded:boolean){
     await this.db.transaction(async tx=>{

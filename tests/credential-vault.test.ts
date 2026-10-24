@@ -3,6 +3,14 @@ import {describe,it,expect} from 'vitest';
 import {CredentialVault,credentialVaultFromEnvironment} from '../packages/core/src/credential-vault';
 const scope=()=>({tenantId:randomUUID(),brandId:randomUUID(),connectionId:randomUUID(),provider:'telegram'});
 describe('authenticated credential encryption',()=>{
+  it('separates payment methods from social credentials and binds merchant/test identity',()=>{
+    const vault=new CredentialVault(JSON.stringify({v1:randomBytes(32).toString('base64')}),'v1');
+    const context={kind:'PAYMENT_METHOD' as const,tenantId:randomUUID(),methodId:randomUUID(),provider:'yookassa',merchantId:'100500',test:true};
+    const encrypted=vault.encrypt('fixture-saved-method',context);expect(vault.decrypt(encrypted,context)).toBe('fixture-saved-method');
+    for(const changed of [{tenantId:randomUUID()},{methodId:randomUUID()},{provider:'other'},{merchantId:'other'},{test:false}])expect(()=>vault.decrypt(encrypted,{...context,...changed})).toThrow('CONFIGURATION_REQUIRED');
+    expect(()=>vault.decrypt(encrypted,scope())).toThrow('CONFIGURATION_REQUIRED');
+    expect(vault.decrypt(vault.rewrap(encrypted,context),context)).toBe('fixture-saved-method');
+  });
   it('disables credential operations for missing or invalid configuration',()=>{
     expect(credentialVaultFromEnvironment({})).toBeNull();
     expect(credentialVaultFromEnvironment({CREDENTIAL_ENCRYPTION_KEYS:'invalid',CREDENTIAL_ACTIVE_KEY_ID:'v1'})).toBeNull();

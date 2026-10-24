@@ -4,13 +4,15 @@ import { brands } from './identity';
 import { consentSubjects } from './consent';
 import { mediaAssets } from './media';
 import { voiceProfiles } from './voices';
+import {providerKeys} from './provider-keys';
 import { jobs } from './generation';
 import type { ProviderReference,AvatarStatus,AvatarLookStatus } from '@contentos/types';
 export const avatars=pgTable('avatars',{
   id:uuid('id').primaryKey().defaultRandom(),tenantId:uuid('tenant_id').notNull(),brandId:uuid('brand_id').notNull(),subjectId:uuid('subject_id').notNull(),
+  providerKeyId:uuid('provider_key_id'),providerKeyRevision:integer('provider_key_revision'),
   voiceId:uuid('voice_id'),name:text('name').notNull(),provider:text('provider').notNull(),status:text('status').$type<AvatarStatus>().notNull().default('ACTIVE'),reference:jsonb('reference').$type<ProviderReference>(),
   leaseToken:uuid('lease_token'),leaseExpiresAt:timestamp('lease_expires_at',{withTimezone:true}),deleteAfter:timestamp('delete_after',{withTimezone:true}),deleteAttempts:integer('delete_attempts').notNull().default(0),errorCode:text('error_code'),correlationId:uuid('correlation_id').notNull(),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),deletedAt:timestamp('deleted_at',{withTimezone:true}),
-},t=>[unique('avatar_tenant_id_uq').on(t.tenantId,t.id),index('avatar_brand_idx').on(t.tenantId,t.brandId),index('avatar_deletion_idx').on(t.status,t.deleteAfter),
+},t=>[foreignKey({name:'avatar_provider_key_scope_fk',columns:[t.tenantId,t.brandId,t.providerKeyId,t.provider],foreignColumns:[providerKeys.tenantId,providerKeys.brandId,providerKeys.id,providerKeys.provider]}),check('avatar_provider_key_binding_valid',sql`(${t.providerKeyId} is null and ${t.providerKeyRevision} is null) or (${t.providerKeyId} is not null and ${t.providerKeyRevision} is not null and ${t.providerKeyRevision}>=0 and ${t.provider}='heygen')`),unique('avatar_tenant_id_uq').on(t.tenantId,t.id),index('avatar_brand_idx').on(t.tenantId,t.brandId),index('avatar_deletion_idx').on(t.status,t.deleteAfter),
   foreignKey({columns:[t.tenantId,t.voiceId],foreignColumns:[voiceProfiles.tenantId,voiceProfiles.id]}),foreignKey({columns:[t.tenantId,t.brandId],foreignColumns:[brands.tenantId,brands.id]}),foreignKey({columns:[t.tenantId,t.subjectId],foreignColumns:[consentSubjects.tenantId,consentSubjects.id]}),check('avatar_status_valid',sql`${t.status} in ('ACTIVE','DELETE_PENDING','DELETED')`),
 ]);
 export const avatarLooks=pgTable('avatar_looks',{

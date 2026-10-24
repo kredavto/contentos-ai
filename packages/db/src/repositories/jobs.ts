@@ -1,8 +1,9 @@
+import {snapshotCommentReply,checkCommentReplySnapshot,persistGeneratedCommentReply} from './comment-reply-generation';
 import { randomUUID, createHash } from 'node:crypto';
-import { and, eq, sql, desc } from 'drizzle-orm';
-import { DomainError, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
+import { and, eq, sql, desc, inArray } from 'drizzle-orm';
+import { DomainError, validateBrandReview, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
 import type { Database } from '../index';
-import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions } from '../schema';
+import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions, brandReviews, posts, postVersions, carousels, carouselVersions } from '../schema';
 import { lockTenant, assertMembership, reserveInTransaction, settleInTransaction, type Transaction } from './ledger';
 import {snapshotPerformance,persistPerformance} from './performance';
 export type StoredJob = typeof jobs.$inferSelect;
@@ -19,16 +20,23 @@ export class JobRepository {
     // original accepted job even when the brand has subsequently changed.
     const inputHash = createHash('sha256').update(JSON.stringify({ brandId, type, options: input.options })).digest('hex');
     return this.db.transaction(async tx => {
-      await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,(type === 'GENERATE_STRATEGY' || type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate');
+      await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,(type === 'GENERATE_STRATEGY' || type === 'OPTIMIZE_STRATEGY' || type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate');
       const [existing] = await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,idempotencyKey)));
       if (existing) { if (existing.inputHash !== inputHash || existing.requestedBy !== userId) throw new DomainError('CONFLICT',409); return existing; }
       const [brand] = await tx.select().from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))).for('share');
       if (!brand) throw new DomainError('NOT_FOUND',404);
       if (!brand.onboardingCompletedAt || brand.revision !== input.brandRevision) throw new DomainError('CONFLICT',409);
+      if (['GENERATE_POST','GENERATE_CAROUSEL'].includes(type) && (input.options.scriptId || input.options.ideaId || input.options.revision !== undefined || input.options.edit !== 'GENERATE')) throw new DomainError('INVALID_INPUT');
+      if (type === 'REVIEW_SCRIPT' && (!input.options.scriptId || !input.options.revision || input.options.ideaId || input.options.edit !== 'GENERATE')) throw new DomainError('INVALID_INPUT');
       if (input.options.scriptId) {
         const [script] = await tx.select().from(scripts).where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId),eq(scripts.id,input.options.scriptId)));
         if (!script) throw new DomainError('NOT_FOUND',404);
         if (script.currentVersion !== input.options.revision) throw new DomainError('CONFLICT',409);
+        if (type === 'REVIEW_SCRIPT') {
+          const [snapshot] = await tx.select({ content: scriptVersions.content }).from(scriptVersions).where(and(eq(scriptVersions.tenantId,tenantId), eq(scriptVersions.scriptId,script.id), eq(scriptVersions.version,script.currentVersion)));
+          if (!snapshot) throw new DomainError('CONFLICT',409);
+          input = { ...input, previousScript: snapshot.content };
+        }
       }
       if (input.options.ideaId) {
         const [idea] = await tx.select({id:ideas.id}).from(ideas).where(and(eq(ideas.tenantId,tenantId),eq(ideas.brandId,brandId),eq(ideas.id,input.options.ideaId)));
@@ -38,6 +46,12 @@ export class JobRepository {
         if(!input.options.analysisDays||input.options.scriptId||input.options.ideaId||input.options.edit!=='GENERATE')throw new DomainError('INVALID_INPUT');
         input={...input,performance:await snapshotPerformance(tx,tenantId,brandId,input.options.analysisDays)};
       }else if(input.options.analysisDays!==undefined||input.performance)throw new DomainError('INVALID_INPUT');
+      if(type==='DRAFT_COMMENT_REPLY'){
+        if(!input.options.commentReply||input.options.scriptId||input.options.ideaId||input.options.revision!==undefined||input.options.edit!=='GENERATE')throw new DomainError('INVALID_INPUT');
+        const [active]=await tx.select({id:jobs.id}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId),eq(jobs.type,'DRAFT_COMMENT_REPLY'),inArray(jobs.status,['QUEUED','RUNNING','RETRY']),sql`${jobs.input}->'options'->'commentReply'->>'commentId' = ${input.options.commentReply.commentId}`)).limit(1);
+        if(active)throw new DomainError('CONFLICT',409);
+        input={...input,commentReply:await snapshotCommentReply(tx,userId,tenantId,brandId,input.options.commentReply)};
+      }else if(input.options.commentReply||input.commentReply)throw new DomainError('INVALID_INPUT');
       const [policy] = await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,type));
       if (!policy) throw new DomainError('CONFIGURATION_REQUIRED',503);
       const reservation = await reserveInTransaction(tx,tenantId,policy.unit,policy.amount,`job:${idempotencyKey}`,correlationId);
@@ -49,7 +63,7 @@ export class JobRepository {
     });
   }
   async list(userId: string, tenantId: string, brandId: string) {
-    return this.db.transaction(async tx => { await assertMembership(tx,userId,tenantId); return tx.select({id:jobs.id,type:jobs.type,status:jobs.status,progress:jobs.progress,attempt:jobs.attempt,errorCode:jobs.errorCode,result:jobs.result,createdAt:jobs.createdAt,provider:jobs.provider}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId))).orderBy(desc(jobs.createdAt)).limit(50); });
+    return this.db.transaction(async tx => { await assertMembership(tx,userId,tenantId); return tx.select({commentId:sql<string|null>`case when ${jobs.type}='DRAFT_COMMENT_REPLY' then ${jobs.input}->'options'->'commentReply'->>'commentId' else null end`,id:jobs.id,type:jobs.type,status:jobs.status,progress:jobs.progress,attempt:jobs.attempt,errorCode:jobs.errorCode,result:jobs.result,createdAt:jobs.createdAt,provider:jobs.provider}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId))).orderBy(desc(jobs.createdAt)).limit(50); });
   }
   async due() {
     return this.db.select({tenantId:jobs.tenantId,id:jobs.id,type:jobs.type}).from(jobs).innerJoin(outbox,and(eq(outbox.tenantId,jobs.tenantId),eq(outbox.jobId,jobs.id))).where(sql`((${jobs.status} in ('QUEUED','RETRY','WAITING_EXTERNAL') and ${jobs.nextAttemptAt} <= now()) or (${jobs.status} = 'RUNNING' and ${jobs.leaseExpiresAt} <= now())) and (${outbox.lastDispatchedAt} is null or ${outbox.lastDispatchedAt} < now() - interval '30 seconds')`).limit(100);
@@ -61,7 +75,7 @@ export class JobRepository {
       const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
       if (!job || (job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO') || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
       let permitted = true;
-      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
+      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY' || job.type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
       if (!permitted || job.attempt >= job.maxAttempts) {
         await settleInTransaction(tx,tenantId,job.reservationId,'RELEASE',job.correlationId);
         await tx.update(jobs).set({status:'FAILED',errorCode:permitted ? 'PROVIDER_UNAVAILABLE' : 'NOT_AUTHORIZED',finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null}).where(jobWhere(tenantId,id));
@@ -72,6 +86,11 @@ export class JobRepository {
       return claimed ?? null;
     });
   }
+  async prepareCommentReply(tenantId:string,id:string,leaseToken:string){return this.db.transaction(async tx=>{
+    await lockTenant(tx,tenantId);const job=await ownedJob(tx,tenantId,id,leaseToken);
+    if(job.type!=='DRAFT_COMMENT_REPLY')throw new DomainError('INVALID_INPUT');
+    await checkCommentReplySnapshot(tx,job,generationInputSchema.parse(job.input));
+  });}
   async heartbeat(tenantId:string,id:string,leaseToken:string) {
     const updated = await this.db.update(jobs).set({leaseExpiresAt:new Date(Date.now()+300_000)}).where(and(jobWhere(tenantId,id),eq(jobs.status,'RUNNING'),eq(jobs.leaseToken,leaseToken),sql`${jobs.leaseExpiresAt} > now()`)).returning({id:jobs.id});
     return updated.length === 1;
@@ -88,11 +107,30 @@ export class JobRepository {
   async complete(tenantId:string,id:string,leaseToken:string,output:GenerationOutput) {
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId); const job = await ownedJob(tx,tenantId,id,leaseToken);
-      await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY') ? 'strategy' : 'generate');
+      await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY' || job.type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate');
       if ((job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO')) throw new DomainError('INVALID_INPUT');
       const input = generationInputSchema.parse(job.input);
       let result: {internalId:string;version:number};
-      if(job.type==='OPTIMIZE_STRATEGY'){
+      if(job.type==='DRAFT_COMMENT_REPLY'){
+        result=await persistGeneratedCommentReply(tx,job,input,output);
+      }else if (job.type === 'GENERATE_CAROUSEL') {
+        const content = workflowSchemas.GENERATE_CAROUSEL.parse(output);
+        const [item] = await tx.insert(contentItems).values({tenantId,brandId:job.brandId,title:content.title,type:'CAROUSEL',status:'READY'}).returning();
+        const [carousel] = await tx.insert(carousels).values({tenantId,brandId:job.brandId,contentItemId:item!.id,platform:input.options.platform}).returning();
+        await tx.insert(carouselVersions).values({tenantId,carouselId:carousel!.id,version:1,content,jobId:id,createdBy:job.requestedBy});
+        result={internalId:carousel!.id,version:1};
+      } else if (job.type === 'GENERATE_POST') {
+        const content = workflowSchemas.GENERATE_POST.parse(output);
+        const [item] = await tx.insert(contentItems).values({tenantId,brandId:job.brandId,title:content.title,type:'POST',status:'READY'}).returning();
+        const [post] = await tx.insert(posts).values({tenantId,brandId:job.brandId,contentItemId:item!.id,platform:input.options.platform}).returning();
+        await tx.insert(postVersions).values({tenantId,postId:post!.id,version:1,content,jobId:id,createdBy:job.requestedBy});
+        result={internalId:post!.id,version:1};
+      } else if (job.type === 'REVIEW_SCRIPT') {
+        const parsed = validateBrandReview(output, input);
+        if (!parsed.success || !input.options.scriptId || !input.options.revision) throw new DomainError('PROVIDER_REJECTED',502);
+        await tx.insert(brandReviews).values({ tenantId, brandId: job.brandId, jobId: id, scriptId: input.options.scriptId, scriptVersion: input.options.revision, brandRevision: input.brandRevision, content: parsed.data });
+        result = { internalId: input.options.scriptId, version: input.options.revision };
+      } else if(job.type==='OPTIMIZE_STRATEGY'){
         result=await persistPerformance(tx,job,input,output);
       } else if (job.type === 'GENERATE_STRATEGY') {
         const content = workflowSchemas.GENERATE_STRATEGY.parse(output);
