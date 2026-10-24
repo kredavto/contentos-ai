@@ -130,6 +130,7 @@ async function dispatch(request: Request, context: RouteContext) {
               if(path[9]==='cancel')return ok(await commentImports.cancel(...scope,path[8],await readBody(request)));
             }
           }
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path[9]==='generation'&&path.length===10&&request.method==='GET')return ok(await commentReplies.generationStatus(...scope,path[7]));
           if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path.length===9){
             if(request.method==='GET')return ok(await commentReplies.history(...scope,path[7],Object.fromEntries(new URL(request.url).searchParams)));
             if(request.method==='POST')return ok(await commentReplies.save(...scope,path[7],await readBody(request),correlationId),201);

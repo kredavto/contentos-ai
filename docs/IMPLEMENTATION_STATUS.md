@@ -1375,3 +1375,15 @@ Pre-delivery OWASP-oriented review of the AI reply slice: mutation requests reta
 
 
 AI reply editor acceptance completed successfully: **739 tests / 100 files** (226.93s), migrations through 0086, workspace/test typechecks, lint, production build (22.035s), and **Chrome scenario passed** (31.6s suite). Browser evidence confirms generation through the real application/worker/queue/database, exactly one successful job with CAPTURED reservation, a third immutable AI draft version, and preservation of unsaved manual text until explicit loading. LLM output is the labeled mock; no live provider call or comment send. Source `/tmp/contentos-comment-ai-ui-full.log`; runner exited 0 and removed owned resources. Overall coverage remains **≈62%**; scoped job polling, approval and delivery are next.
+
+
+## Scoped AI reply status — 2026-10-24 (acceptance running)
+
+Replaced editor reliance on the last 50 brand jobs with GET `.../comments/:commentId/draft/generation`. The read reauthorizes the current tenant/brand/publication, verifies the stored comment, filters both publication and comment job targets, and returns only job ID/status/result. The editor polls this scope independently, cancels requests when closed, distinguishes unknown status from working, retries read failures and disables new generation while status is unavailable. Unsaved draft text is untouched by polling.
+
+Focused PostgreSQL verification passed **39 tests** (15.52s, `/tmp/contentos-comment-status-storage.log`), including a reply task excluded from 51 newer jobs, viewer reads and mismatched user/tenant/brand/publication denial. Workspace/test types passed. Full regression plus browser acceptance is running against frozen source (`/tmp/contentos-comment-status-full.log`). The browser now hides all jobs from the generic overview to prove the reply flow does not depend on it. Approval/send remain open; coverage **≈62%**.
+
+Previous commit `a5443e4f4df349d4f19a0264893a0e4af01527b0` verified Vercel **READY** in project contentos-ai/team digagency: https://contentos-o08m3c3ul-digagency.vercel.app (`dpl_BBdyxagBvhetv19Zrm9zT7UTa1as`, preview). GitHub CI 40055278413 was still in progress when checked. These remote results do not cover the scoped-status changes or establish production infrastructure readiness.
+
+
+Scoped-status acceptance passed: **741 tests / 100 files** (221.60s), workspace/test types, lint, production build (17.591s), and **Chrome scenario passed** (34.0s suite). The browser completed AI generation with all generic overview jobs hidden, retained unsaved text and loaded the stored AI version explicitly. No live LLM/provider send. Runner `/tmp/contentos-comment-status-full.log` exited 0 and removed owned resources. This closes the last-50-jobs status limitation documented above. Review confirmed the new endpoint is read-only, no-store, authenticated and scoped to existing tenant/brand/publication/comment authorization, with no credentials or source snapshots in the response. Approval and delivery remain next; overall **≈62%**.

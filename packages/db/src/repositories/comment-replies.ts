@@ -1,13 +1,19 @@
-import {and,desc,eq,lt} from 'drizzle-orm';
+import {and,desc,eq,lt,sql} from 'drizzle-orm';
 import {DomainError,commentReplyInputSchema,commentReplyEditSchema,type CommentReplyInput,type CommentReplyEdit} from '@contentos/types';
 import type {Database} from '../index';
-import {comments,brands,commentReplyDrafts,commentReplyVersions,auditLogs} from '../schema';
+import {comments,brands,jobs,commentReplyDrafts,commentReplyVersions,auditLogs} from '../schema';
 import {authorizeComment} from './comments';
 import {lockTenant} from './ledger';
 const scope=(tenantId:string,publicationId:string,commentId:string)=>and(eq(comments.tenantId,tenantId),eq(comments.publicationId,publicationId),eq(comments.id,commentId));
 const draftScope=(tenantId:string,publicationId:string,commentId:string)=>and(eq(commentReplyDrafts.tenantId,tenantId),eq(commentReplyDrafts.publicationId,publicationId),eq(commentReplyDrafts.commentId,commentId));
 export class CommentReplyRepository{
  constructor(private readonly db:Database){}
+ async generationStatus(userId:string,tenantId:string,brandId:string,publicationId:string,commentId:string){return this.db.transaction(async tx=>{
+  await authorizeComment(tx,userId,tenantId,brandId,publicationId);
+  const [comment]=await tx.select({id:comments.id}).from(comments).where(scope(tenantId,publicationId,commentId));if(!comment)throw new DomainError('NOT_FOUND',404);
+  const [job]=await tx.select({id:jobs.id,status:jobs.status,result:jobs.result}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId),eq(jobs.type,'DRAFT_COMMENT_REPLY'),sql`${jobs.input}->'options'->'commentReply'->>'publicationId' = ${publicationId}`,sql`${jobs.input}->'options'->'commentReply'->>'commentId' = ${commentId}`)).orderBy(desc(jobs.createdAt),desc(jobs.id)).limit(1);
+  return {job:job??null};
+ });}
  async history(userId:string,tenantId:string,brandId:string,publicationId:string,commentId:string,beforeVersion?:number){return this.db.transaction(async tx=>{
   await authorizeComment(tx,userId,tenantId,brandId,publicationId);
   const [comment]=await tx.select().from(comments).where(scope(tenantId,publicationId,commentId));if(!comment)throw new DomainError('NOT_FOUND',404);

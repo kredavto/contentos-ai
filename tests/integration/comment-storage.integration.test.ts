@@ -452,4 +452,19 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await expect(f.enqueue()).resolves.toMatchObject({status:'QUEUED'});
  });
 
+ it('finds scoped reply status beyond the latest 50 jobs and rejects mismatched scopes',async()=>{
+  const f=await generationFixture();expect(await replies.generationStatus(user,tenant,brand,f.publicationId,f.comment.id!)).toEqual({job:null});
+  const queued=await f.enqueue();
+  await new LedgerRepository(database.db).adjust(tenant,'AI_CREDITS',10000,randomUUID(),randomUUID());
+  const input={...f.input,options:generationOptionsSchema.parse({})};
+  for(let i=0;i<51;i++)await f.jobs.enqueue(user,tenant,brand,'GENERATE_STRATEGY',input,randomUUID(),'mock','mock-v1',randomUUID());
+  expect((await f.jobs.list(user,tenant,brand)).some(job=>job.id===queued.id)).toBe(false);
+  const viewer=await member('VIEWER'),result=await replies.generationStatus(viewer,tenant,brand,f.publicationId,f.comment.id!);
+  expect(result.job).toEqual({id:queued.id,status:'QUEUED',result:null});
+  await expect(replies.generationStatus(user,tenant,brand,await publication(),f.comment.id!)).rejects.toThrow('NOT_FOUND');
+  await expect(replies.generationStatus(user,tenant,randomUUID(),f.publicationId,f.comment.id!)).rejects.toThrow();
+  await expect(replies.generationStatus(user,randomUUID(),brand,f.publicationId,f.comment.id!)).rejects.toThrow();
+  await expect(replies.generationStatus(randomUUID(),tenant,brand,f.publicationId,f.comment.id!)).rejects.toThrow();
+ });
+
 });

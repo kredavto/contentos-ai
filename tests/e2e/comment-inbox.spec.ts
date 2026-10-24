@@ -47,6 +47,8 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await expect(editor.getByRole('heading',{name:'Версия 2 · Ручной черновик'})).toBeVisible();await expect(editor.getByText('Первый ручной ответ',{exact:true})).toBeVisible();
   expect((await database.client`select count(*)::int as count from comment_reply_versions where tenant_id=${tenant} and comment_id=${root}`)[0]?.count).toBe(2);
   await new LedgerRepository(database.db).adjust(tenant,'AI_CREDITS',20,randomUUID(),randomUUID());
+  // Simulate a busy brand where this task is absent from the bounded overview.
+  await page.route(`**${base}/content`,async route=>{const response=await route.fetch();const body=await response.json();body.data.jobs=[];await route.fulfill({response,json:body});});
   await editor.getByLabel('Текст черновика').fill('Несохранённая ручная правка');
   await editor.getByRole('button',{name:'Предложить AI-ответ',exact:false}).click();
   await expect(editor.getByText('AI-черновик готов.',{exact:false})).toBeVisible({timeout:60000});
