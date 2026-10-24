@@ -2,7 +2,7 @@
 
 Updated 2026-10-24.
 
-Estimated full-project coverage: **≈61%** (98/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
+Estimated full-project coverage: **≈62%** (99/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
 
 Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
 
@@ -1294,3 +1294,16 @@ Full comment-import regression completed successfully: **710 tests / 98 files**,
 
 
 Comment HTTP routes added for scoped listing with explicit sync/configuration state, revision-checked manual triage, polling and import request/resume/cancel. Focused API tests passed **10/10** across new comment routes and existing v1 auth contract (`/tmp/contentos-comment-routes-final-tests.log`). The initial run exposed a missing PATCH export and a GET-with-body test fixture; both were corrected before the successful rerun. Updated workspace/test typechecks and lint completed successfully after the corrections. UI/browser acceptance, build and deployment remain pending; estimate **≈61%**.
+
+
+## Comment inbox UI — 2026-10-24 (acceptance running)
+
+Added a brand studio Comments tab with selection among the latest 100 saved brand publications, explicit never-imported/incomplete/configuration states, bounded root/reply pagination, status filters, manual optimistic triage, import request/resume/cancel and active-job polling. The UI renders provider text as text, preserves read access without provider configuration, and hides management controls for read-only roles. Replies/suggestions/sending are still unavailable.
+
+UI workspace/test typecheck and lint passed before the browser fixture was added. A full local run including build and `tests/e2e/comment-inbox.spec.ts` was started (`/tmp/contentos-comment-inbox-browser.log`); completion is not yet confirmed. The browser fixture checks untrusted plain text, 26-reply pagination, persisted triage, a 390px viewport, viewer denial and foreign-publication rejection. No live provider calls or deployment. Overall coverage remains **98/160 ≈61%** pending acceptance.
+
+
+Comment inbox acceptance checkpoint: migrations, current workspace/test typechecks, lint and production build passed (build 22.006s). Vitest/browser stages are still running in the same local runner; no completion claim yet. Existing Vercel preview dpl_54mmGYHgYbaPr7skroCPc6zDxjTS remains READY in team team_T4Jm4ASQqZgd6ys8grG6emG4 / project prj_KMzoSu8fmoWhhWqTFWFG4lc0hpEB (contentos-ai); it predates these changes and is not acceptance evidence for the new inbox.
+
+
+Comment inbox acceptance completed: **715 tests in 99 files** (196.21s), current migrations/typechecks/lint, production build (22.006s), and **one Chrome browser scenario passed** (25.8s suite). Mobile screenshot was inspected; 390px width has no horizontal overflow. The test verifies persisted manual triage, raw-text rendering, pagination of 26 replies, no-import/incomplete states, viewer denial and foreign-publication rejection. Owned test resources were removed. Source: `/tmp/contentos-comment-inbox-browser.log`. Group 23 increases 1→2; total **99/160 ≈62%**. No live Google call or reply send. Import controls beyond disabled configuration still require browser acceptance; repository/processor tests cover their lifecycle. Preview delivery is the next step.
