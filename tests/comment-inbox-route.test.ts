@@ -1,10 +1,10 @@
 import {randomUUID} from 'node:crypto';
 import {beforeEach,expect,it,vi} from 'vitest';
 import {DomainError} from '../packages/types/src/index';
-const fixture=vi.hoisted(()=>({session:vi.fn(),throttle:vi.fn(),list:vi.fn(),triage:vi.fn(),latest:vi.fn(),request:vi.fn(),resume:vi.fn(),cancel:vi.fn()}));
+const fixture=vi.hoisted(()=>({history:vi.fn(),save:vi.fn(),session:vi.fn(),throttle:vi.fn(),list:vi.fn(),triage:vi.fn(),latest:vi.fn(),request:vi.fn(),resume:vi.fn(),cancel:vi.fn()}));
 vi.mock('../apps/web/node_modules/next/headers.js',()=>({cookies:async()=>({get:()=>({value:'fixture-session'})})}));
 vi.mock('../apps/web/src/server/services',()=>({sessionCookie:'session',services:()=>({
- auth:{session:fixture.session,throttle:fixture.throttle},comments:{list:fixture.list,triage:fixture.triage},commentImports:{latest:fixture.latest,request:fixture.request,resume:fixture.resume,cancel:fixture.cancel},env:{APP_URL:'https://contentos.example',NODE_ENV:'production'},
+ commentReplies:{history:fixture.history,save:fixture.save},auth:{session:fixture.session,throttle:fixture.throttle},comments:{list:fixture.list,triage:fixture.triage},commentImports:{latest:fixture.latest,request:fixture.request,resume:fixture.resume,cancel:fixture.cancel},env:{APP_URL:'https://contentos.example',NODE_ENV:'production'},
 })}));
 vi.mock('../apps/web/src/server/error-reporting',()=>({errorReporter:()=>({capture:vi.fn(),flush:async()=>true})}));
 import {GET,POST,PATCH} from '../apps/web/src/app/api/[...path]/route';
@@ -51,4 +51,15 @@ it('exposes polling without mutation and rejects unsupported suffixes or methods
  expect((await call(base+'/imports')).status).toBe(200);expect(fixture.latest).toHaveBeenCalledOnce();
  for(const [suffix,method] of [['/imports/extra','GET'],['/imports','PATCH'],[`/imports/${id}/unknown`,'POST'],[`/${id}/extra`,'PATCH']] as const)expect((await call(base+suffix,method,{})).status).toBe(404);
  for(const handler of [fixture.triage,fixture.request,fixture.resume,fixture.cancel])expect(handler).not.toHaveBeenCalled();
+});
+
+it('scopes draft history and versioned saves and rejects cross-origin writes',async()=>{
+ fixture.history.mockResolvedValue({draft:null,items:[],next:null});fixture.save.mockResolvedValue({id,revision:0,currentVersion:1});
+ expect((await call(`${base}/${id}/draft?beforeVersion=4`)).status).toBe(200);
+ expect(fixture.history).toHaveBeenCalledWith(user,tenant,brand,publication,id,{beforeVersion:'4'});
+ const input={revision:null,contentRevision:0,reviewRevision:0,reply:'Draft only'};
+ expect((await call(`${base}/${id}/draft`,'POST',input,false)).status).toBe(403);expect(fixture.save).not.toHaveBeenCalled();
+ expect((await call(`${base}/${id}/draft`,'POST',input)).status).toBe(201);
+ expect(fixture.save).toHaveBeenCalledWith(user,tenant,brand,publication,id,input,expect.any(String));
+ fixture.save.mockRejectedValue(new DomainError('CONFLICT',409));expect((await call(`${base}/${id}/draft`,'POST',input)).status).toBe(409);
 });

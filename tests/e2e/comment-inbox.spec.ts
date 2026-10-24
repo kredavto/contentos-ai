@@ -39,6 +39,14 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await panel.getByLabel('Разметка: Test author').selectOption('NEEDS_HUMAN');
   await expect(panel.getByLabel('Разметка: Test author')).toHaveValue('NEEDS_HUMAN');
   expect((await database.client`select status from comments where id=${root}`)[0]?.status).toBe('NEEDS_HUMAN');
+  await panel.getByRole('button',{name:'Черновик ответа и история',exact:true}).click();
+  const editor=panel.getByRole('region',{name:'Редактор черновика ответа',exact:true});
+  await editor.getByLabel('Текст черновика').fill('Первый ручной ответ');await editor.getByRole('button',{name:'Сохранить черновик',exact:true}).click();
+  await expect(editor.getByRole('heading',{name:'Версия 1 · Ручной черновик'})).toBeVisible();
+  await editor.getByLabel('Текст черновика').fill('Уточнённый ручной ответ');await editor.getByRole('button',{name:'Сохранить черновик',exact:true}).click();
+  await expect(editor.getByRole('heading',{name:'Версия 2 · Ручной черновик'})).toBeVisible();await expect(editor.getByText('Первый ручной ответ',{exact:true})).toBeVisible();
+  expect((await database.client`select count(*)::int as count from comment_reply_versions where tenant_id=${tenant} and comment_id=${root}`)[0]?.count).toBe(2);
+  await panel.getByRole('button',{name:'Закрыть черновик',exact:true}).click();
   await panel.getByRole('button',{name:'Показать ответы (26)'}).click();
   const replies=panel.getByRole('region',{name:'Ответы на комментарий',exact:true});await expect(replies.locator('article')).toHaveCount(25);
   await replies.getByRole('button',{name:'Следующая страница'}).click();await expect(replies.locator('article')).toHaveCount(1);
@@ -75,6 +83,9 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
   await page.reload();await panel.getByLabel('Публикация для комментариев').selectOption(publication);
   await expect(panel.getByText(text,{exact:true})).toBeVisible();await expect(panel.getByLabel('Разметка: Test author')).toHaveCount(0);await expect(panel.getByRole('button',{name:'Импортировать комментарии'})).toHaveCount(0);
+  await panel.getByRole('button',{name:'Черновик ответа и история',exact:true}).click();
+  await expect(editor.getByRole('heading',{name:'Версия 2 · Ручной черновик'})).toBeVisible();await expect(editor.getByLabel('Текст черновика')).toHaveCount(0);
+  expect((await page.request.post(`${endpoint}/${root}/draft`,{headers:{origin:baseURL!},data:{revision:1,contentRevision:0,reviewRevision:1,reply:'Forbidden edit'}})).status()).toBe(403);
   expect((await page.request.patch(`${endpoint}/${root}`,{headers:{origin:baseURL!},data:{revision:1,contentRevision:0,status:'RESOLVED'}})).status()).toBe(403);
   expect((await page.request.get(`${base}/publications/${randomUUID()}/comments`)).status()).toBe(404);
   expect(errors).toEqual([]);

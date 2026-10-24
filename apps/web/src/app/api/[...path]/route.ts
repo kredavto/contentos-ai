@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
@@ -129,6 +129,10 @@ async function dispatch(request: Request, context: RouteContext) {
               if(path[9]==='resume'){await auth.throttle('comment-import',user.userId);return ok(await commentImports.resume(...scope,path[8],await readBody(request)),202);}
               if(path[9]==='cancel')return ok(await commentImports.cancel(...scope,path[8],await readBody(request)));
             }
+          }
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path.length===9){
+            if(request.method==='GET')return ok(await commentReplies.history(...scope,path[7],Object.fromEntries(new URL(request.url).searchParams)));
+            if(request.method==='POST')return ok(await commentReplies.save(...scope,path[7],await readBody(request),correlationId),201);
           }
           if(path[7]&&path[7]!=='imports'&&path.length===8&&request.method==='PATCH')return ok(await comments.triage(...scope,path[7],await readBody(request),correlationId));
         }

@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import type {AnalyticsService,CommentService,CommentImportService} from '@contentos/core';
+import {CommentReplyEditor} from './comment-reply-editor';
 import {api} from '../lib/api-client';
 type List=Awaited<ReturnType<CommentService['list']>>;
 type Sync=Awaited<ReturnType<CommentImportService['latest']>>;
@@ -11,7 +12,7 @@ const states={QUEUED:'Импорт в очереди',RUNNING:'Получаем 
 export function CommentInbox({base,canManage}:{base:string;canManage:boolean}){
  const [rows,setRows]=useState<Awaited<ReturnType<AnalyticsService['overview']>>|null>(null),[selected,setSelected]=useState(''),[error,setError]=useState(''),[refresh,setRefresh]=useState(0);
  useEffect(()=>{const controller=new AbortController();api<Awaited<ReturnType<AnalyticsService['overview']>>>(`${base}/analytics`,'GET',undefined,controller.signal).then(data=>{setRows(data.filter(row=>row.provider==='youtube'));setError('');}).catch(error=>{if(!controller.signal.aborted)setError(error instanceof Error?error.message:'Не удалось загрузить публикации');});return()=>controller.abort();},[base,refresh]);
- return <section className="stack" aria-label="Комментарии YouTube"><h2>Комментарии</h2><p>Читайте комментарии и отмечайте вопросы для ручной обработки. Ответы и автоматическая отправка пока недоступны.</p>
+ return <section className="stack" aria-label="Комментарии YouTube"><h2>Комментарии</h2><p>Читайте комментарии и отмечайте вопросы для ручной обработки. Ответ можно подготовить как черновик; отправка пока недоступна.</p>
   {error?<p role="alert">{error}</p>:null}<button className="button secondary" onClick={()=>setRefresh(value=>value+1)}>Обновить публикации</button>
   {!rows&&!error?<p role="status">Загружаем публикации…</p>:null}
   {rows?.length===0?<p className="notice">Пока нет сохранённых публикаций YouTube этого бренда.</p>:null}
@@ -47,6 +48,7 @@ function CommentPages({endpoint,canManage,parentId}:{endpoint:string;canManage:b
   {data?.items.length===0?<p>В этой выборке нет сохранённых комментариев.{data.sync.job?.status!=='SUCCEEDED'?' Полнота импорта не подтверждена.':''}</p>:null}
   {data?.items.map(row=><article className="panel stack" key={row.id}><strong>{row.authorName||'Автор недоступен'}</strong><small>{new Date(row.providerCreatedAt).toLocaleString('ru')} · {labels[row.status]}</small><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{row.text||'Пустой текст комментария'}</p>
    {canManage?<label>Разметка комментария<select aria-label={`Разметка: ${row.authorName||'автор недоступен'}`} value={row.status} disabled={pending} onChange={event=>void perform(()=>api(`${endpoint}/${row.id}`,'PATCH',{revision:row.revision,contentRevision:row.contentRevision,status:event.target.value}))}>{Object.entries(labels).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select></label>:null}
+   <CommentReplyEditor endpoint={`${endpoint}/${row.id}/draft`} canManage={canManage} contentRevision={row.contentRevision} reviewRevision={row.revision}/>
    {!parentId?<><button className="text-button" aria-expanded={opened===row.id} onClick={()=>setOpened(opened===row.id?null:row.id)}>{opened===row.id?'Скрыть ответы':`Показать ответы (${row.replyCount??'неизвестно'})`}</button>{opened===row.id?<CommentPages key={row.id} endpoint={endpoint} canManage={canManage} parentId={row.id}/>:null}</>:null}
   </article>)}
   <div className="studio-actions">{cursor?<button className="button secondary" disabled={pending} onClick={()=>{setCursor(null);setOpened(null);}}>К началу списка</button>:null}{data?.next?<button className="button secondary" disabled={pending} onClick={()=>{setCursor(data.next);setOpened(null);}}>Следующая страница</button>:null}</div>

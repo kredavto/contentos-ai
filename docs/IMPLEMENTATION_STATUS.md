@@ -1340,3 +1340,16 @@ Added `comment_reply_drafts` and `comment_reply_versions` with tenant/publicatio
 Added scoped reply history and transactional manual version saving. The service validates UUIDs/input and obtains structured Brand Brain; the write transaction rechecks current management authorization, brand revision, comment content/review revisions and draft revision under tenant/row locks. Every edit appends a new version, never rewrites existing reply content, and records only safe audit metadata. Manual drafts retain explicit UNCERTAIN/human-review status and do not create approvals or send jobs.
 
 History uses descending version pagination (20 items) and a safe projection without full Brand Brain/source snapshots, generation job IDs or credentials. It marks changed comment content/review versions as stale. **34 PostgreSQL tests passed** (`/tmp/contentos-comment-reply-repository.log`, 13.25s), including concurrent creation, stale edits, viewer/cross-publication denial, retained history and 21-version pagination. The owned database was removed. Workspace/test typechecks and lint passed. HTTP/UI integration, generated draft job accounting and approval/send remain unfinished. Overall **≈62%**.
+
+
+## Reply draft API/editor — 2026-10-24 (acceptance pending)
+
+Added GET/POST `.../comments/:commentId/draft` through the shared session/Origin/tenant service boundary. The comment UI now opens a local-only editor/history, appends revisions, preserves the distinction between saving and sending, supports older history pages, warns about changed source revisions and allows viewers to read without edit controls. Explicitly loading the latest version replaces unsaved text; conflicts do not silently overwrite another version.
+
+Focused API checks passed **6 tests** (`/tmp/contentos-comment-draft-routes.log`), including scoped history/save, CSRF rejection and conflict propagation. Browser acceptance now includes two persisted draft versions and viewer edit denial; it has not run yet for this change. Generation queue integration, approval and external sending remain incomplete. Coverage **≈62%**.
+
+
+Remote CI verification: GitHub Actions run **40053254374** completed successfully for deployed preview commit **28b1bbf2427af18ed9c058fabf3f4c2a78f26420**. Later local draft commits/UI changes are not covered by that result. Current draft-editor local runner passed production build (18.846s) and is still running test/browser stages (`/tmp/contentos-comment-draft-editor-full.log`).
+
+
+Reply editor acceptance passed: **735 tests / 100 files** (214.80s), migrations through 0085, workspace/test typechecks, lint, production build (18.846s), and **Chrome scenario passed** (31.0s suite). The scenario persisted two manual reply versions through the real API/database, checked earlier text retention, viewer read/write boundaries, thread pagination and import controls (synthetic transport only for external import). No real LLM/Google write. Source: `/tmp/contentos-comment-draft-editor-full.log`; owned resources removed. Coverage remains **≈62%** because generation queue, approvals and sending are unfinished.
