@@ -1,11 +1,15 @@
 import {randomUUID} from 'node:crypto';
 import {beforeAll,describe,expect,it} from 'vitest';
 import {comments} from '../../packages/db/src/schema/comments';
+import {CommentRepository} from '../../packages/db/src/repositories/comments';
+import {CommentService} from '../../packages/core/src/comments';
 import {seedDevelopment,demoIds} from '../../packages/db/src/development-seed';
 import {isolatedTestDatabase} from '../helpers/isolated-database';
 const url=process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)('comment storage constraints',()=>{
  const database=isolatedTestDatabase(url),{user,tenant,brand}=demoIds;
+ const service=new CommentService(new CommentRepository(database.db));
+ async function member(role:string,disabled=false){const id=randomUUID();await database.client`insert into users(id,email,password_hash,name,email_verified_at,disabled_at) values(${id},${`${id}@example.test`},'unusable','Comment reviewer',now(),${disabled?new Date().toISOString():null})`;await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenant},${id},${role})`;return id;}
  beforeAll(async()=>{await seedDevelopment(database.db,`scrypt:v1:${'0'.repeat(32)}:${'0'.repeat(128)}`);});
  async function publication(){
   const content=randomUUID(),connection=randomUUID(),calendar=randomUUID(),job=randomUUID(),id=randomUUID(),now=new Date().toISOString();
@@ -56,4 +60,41 @@ describe.skipIf(!url)('comment storage constraints',()=>{
    {...input,replyCount:null},
   ])await expect(insert(invalid)).rejects.toThrow();
  });
+ it('paginates roots with a stable tie breaker and keeps replies in their parent view',async()=>{
+  const publicationId=await publication(),roots=Array.from({length:27},()=>record(publicationId));
+  await database.db.insert(comments).values(roots);
+  const parent=roots[0]!;await insert({...record(publicationId),parentId:parent.id!,externalThreadId:parent.externalThreadId,replyCount:null,canReply:null,isPublic:null});
+  const first=await service.list(user,tenant,brand,publicationId,{});expect(first.items).toHaveLength(25);expect(first.next).not.toBeNull();
+  const second=await service.list(user,tenant,brand,publicationId,first.next!);expect(second.items).toHaveLength(2);expect(second.next).toBeNull();expect(new Set([...first.items,...second.items].map(row=>row.id)).size).toBe(27);
+  const replies=await service.list(user,tenant,brand,publicationId,{parentId:parent.id});expect(replies.items).toHaveLength(1);expect(replies.items[0]?.parentId).toBe(parent.id);
+  await expect(service.list(user,tenant,brand,publicationId,{parentId:replies.items[0]!.id})).rejects.toThrow('NOT_FOUND');
+  expect(()=>service.list(user,tenant,brand,publicationId,{afterId:randomUUID()})).toThrow();
+ });
+ it('requires current membership and the owning brand for every read and review',async()=>{
+  const publicationId=await publication(),input=record(publicationId);await insert(input);
+  const viewer=await member('VIEWER'),editor=await member('EDITOR'),disabled=await member('MANAGER',true),otherBrand=randomUUID();
+  await database.client`insert into brands(id,tenant_id,workspace_id,name) values(${otherBrand},${tenant},${demoIds.workspace},'Other comments brand')`;
+  expect((await service.list(viewer,tenant,brand,publicationId,{})).items).toHaveLength(1);
+  for(const actor of [viewer,editor])await expect(service.triage(actor,tenant,brand,publicationId,input.id!,{revision:0,contentRevision:0,status:'RESOLVED'},randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+  await expect(service.list(disabled,tenant,brand,publicationId,{})).rejects.toThrow('NOT_FOUND');
+  await expect(service.list(randomUUID(),tenant,brand,publicationId,{})).rejects.toThrow('NOT_FOUND');
+  await expect(service.list(user,randomUUID(),brand,publicationId,{})).rejects.toThrow('NOT_FOUND');
+  await expect(service.list(user,tenant,otherBrand,publicationId,{})).rejects.toThrow('NOT_FOUND');
+  await expect(service.triage(user,tenant,otherBrand,publicationId,input.id!,{revision:0,contentRevision:0,status:'RESOLVED'},randomUUID())).rejects.toThrow('NOT_FOUND');
+  await expect(service.list(user,tenant,brand,await publication(),{parentId:input.id})).rejects.toThrow('NOT_FOUND');
+ });
+ it('audits human triage without comment payloads and fences concurrent and stale review',async()=>{
+  const publicationId=await publication(),input=record(publicationId);await insert(input);const manager=await member('MANAGER');
+  const outcomes=await Promise.allSettled(['RESOLVED','NEEDS_HUMAN'].map(status=>service.triage(manager,tenant,brand,publicationId,input.id!,{revision:0,contentRevision:0,status},randomUUID())));
+  expect(outcomes.filter(result=>result.status==='fulfilled')).toHaveLength(1);expect(outcomes.filter(result=>result.status==='rejected')).toHaveLength(1);
+  const row=(await service.list(user,tenant,brand,publicationId,{})).items[0]!;expect(row.revision).toBe(1);expect(row.sentiment).toBeNull();
+  const audits=await database.client`select metadata from audit_logs where resource_id=${input.id!} and action='COMMENT_TRIAGED'`;expect(audits).toHaveLength(1);expect(JSON.stringify(audits)).not.toContain(input.text);
+  const unchanged=await service.triage(manager,tenant,brand,publicationId,input.id!,{revision:1,contentRevision:0,status:row.status},randomUUID());expect(unchanged.revision).toBe(1);
+  await database.client`update comments set content_revision=1,text='Provider edited text' where id=${input.id!}`;
+  await expect(service.triage(manager,tenant,brand,publicationId,input.id!,{revision:1,contentRevision:0,status:'NEW'},randomUUID())).rejects.toThrow('CONFLICT');
+  await service.triage(manager,tenant,brand,publicationId,input.id!,{revision:1,contentRevision:1,status:'NEW'},randomUUID());
+  expect((await service.list(user,tenant,brand,publicationId,{status:'NEW'})).items).toHaveLength(1);
+  expect((await service.list(user,tenant,brand,publicationId,{status:'RESOLVED'})).items).toHaveLength(0);
+ });
+
 });

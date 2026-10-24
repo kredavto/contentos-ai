@@ -66,3 +66,5 @@ export * from './repositories/approvals';
 export * from './repositories/notification-preferences';
 export * from './repositories/notification-email';
 export * from './repositories/provider-keys';
+
+export * from './repositories/comments';

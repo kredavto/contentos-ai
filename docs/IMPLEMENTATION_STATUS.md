@@ -1230,3 +1230,12 @@ Delivery confirmation: versioned API and acceptance commit d738f1a00d820e5c350cb
 ## Optional YouTube comments permission acceptance (2026-10-24)
 
 The fb9b571 OAuth/UI checkpoint passed migration 0081, workspace/test types, lint, production build, 673 tests in 95 files and all three Chrome YouTube/onboarding/MVP scenarios (4.4 minutes). Runner exited 0 and removed its disposable resources. The mobile channel-card screenshot was inspected without overflow. This acceptance does not cover the later storage migrations 0082/0083, which have their own four passing database tests, nor does it complete an inbox/import/send workflow. No user Google permission, paid operation or production infrastructure was changed.
+
+## Comment read and manual triage service (2026-10-24, in progress)
+
+- Added strict service inputs and tenant/brand/publication-scoped repository reads. Roots and replies are separate, ordered by provider creation time plus UUID with 25-row keyset pages. A reply view requires a stored root in the same publication. Unknown members, disabled users and another brand's publication are denied; historical stored reads do not require an active provider credential.
+- Manual triage is restricted to verified OWNER/ADMIN/MANAGER through current membership checks. Tenant and row locks plus local/content revision checks fence concurrent decisions and provider edits. Audits contain status/revisions only, never comment text or author identity. A same-status action is a no-op. No generated sentiment, reply approval or send behavior is implied.
+- Seven storage/repository integration cases passed (5.97 s) against an independently migrated disposable database, including pagination, tenant/brand/role boundaries, concurrent triage, stale content and safe audit payloads. First run had six successes and a test incorrectly expecting an asynchronous Zod error; fixed to assert the synchronous validation boundary. All owned test resources were removed. Workspace/test types and lint are still running; full regression after adding this service remains pending.
+- There is no HTTP/UI exposure yet: durable import and explicit synchronization state must be added so an unsynchronized publication is not shown as an empty successful inbox. Overall scope remains 97/160 (approximately 61%).
+
+- Read/triage slice workspace and test-source typecheck exited 0 (nine workspace tasks successful), and repository lint exited 0. A full local regression through migration 0083 is the remaining gate before integrating these comments changes into the delivery branch.

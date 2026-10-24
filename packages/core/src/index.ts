@@ -58,3 +58,5 @@ export * from './approvals';
 export * from './notification-preferences';
 export * from './notification-email';
 export * from './provider-keys';
+
+export * from './comments';
