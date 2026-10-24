@@ -3,7 +3,10 @@ import {beforeAll,describe,expect,it} from 'vitest';
 import {comments} from '../../packages/db/src/schema/comments';
 import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
 import {CommentRepository} from '../../packages/db/src/repositories/comments';
+import {CommentImportRepository} from '../../packages/db/src/repositories/comment-imports';
+import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {CommentService} from '../../packages/core/src/comments';
+import {CommentImportService} from '../../packages/core/src/comment-imports';
 import {seedDevelopment,demoIds} from '../../packages/db/src/development-seed';
 import {isolatedTestDatabase} from '../helpers/isolated-database';
 const url=process.env.TEST_DATABASE_URL;
@@ -129,6 +132,73 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await expect(database.db.insert(commentImportPages).values({...receipt,cursorHash:'b'.repeat(64)})).rejects.toThrow();
   await expect(database.db.insert(commentImportPages).values({...receipt,tenantId:randomUUID(),ordinal:2})).rejects.toThrow();
   await expect(database.db.insert(commentImportPages).values({...receipt,scope:randomUUID(),ordinal:2})).resolves.toBeDefined();
+ });
+
+ async function queueFixture(actor=user){
+  const publicationId=await publication(),input=await importRecord(publicationId),connectionId=input.connectionId;
+  const vault=new CredentialVault(JSON.stringify({fixture:Buffer.alloc(32,9).toString('base64')}),'fixture');
+  const credential=vault.encrypt('synthetic unusable comment-import credential',{tenantId:tenant,brandId:brand,connectionId,provider:'youtube'});
+  await database.client`update social_connections set status='ACTIVE',credential=${JSON.stringify(credential)}::jsonb,reference=jsonb_set(reference,'{metadata,commentsAuthorized}','true'::jsonb) where id=${connectionId}`;
+  let now=new Date('2035-01-01T00:00:00Z');const repo=new CommentImportRepository(database.db,()=>now);
+  const request=(key=randomUUID())=>repo.request(actor,tenant,brand,publicationId,key,randomUUID());
+  return {repo,publicationId,connectionId,request,advance:(ms:number)=>{now=new Date(now.getTime()+ms);}};
+ }
+ it('deduplicates import intent, enforces active/cooldown limits and exposes safe progress only',async()=>{
+  const f=await queueFixture(),key=randomUUID();expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toBeNull();
+  const [a,b]=await Promise.all([f.request(key),f.request(key)]);expect(a.id).toBe(b.id);expect(a.status).toBe('QUEUED');
+  const view=await f.repo.latest(user,tenant,brand,f.publicationId);expect(view?.id).toBe(a.id);expect(JSON.stringify(view)).not.toMatch(/position|cursor|credential|channelId/);
+  await expect(f.request()).rejects.toThrow('CONFLICT');
+  await expect(f.repo.request(user,tenant,brand,await publication(),key,randomUUID())).rejects.toThrow('CONFLICT');
+  await f.repo.cancel(user,tenant,brand,f.publicationId,a.id,0);await expect(f.request()).rejects.toThrow('RATE_LIMITED');
+  f.advance(61000);expect((await f.request()).id).not.toBe(a.id);
+  const audits=await database.client`select metadata from audit_logs where resource_id=${a.id}`;expect(JSON.stringify(audits)).not.toMatch(/credential|cursor|ciphertext/);
+ });
+ it('fences lease takeover and caps retry attempts without accepting a stale executor',async()=>{
+  const f=await queueFixture(),run=await f.request();
+  const claims=await Promise.all([f.repo.claim(tenant,run.id),f.repo.claim(tenant,run.id)]),first=claims.find(Boolean)!;
+  expect(claims.filter(Boolean)).toHaveLength(1);expect(first.attempt).toBe(1);await f.repo.prepare(first);
+  f.advance(120001);const second=(await f.repo.claim(tenant,run.id))!;expect(second.attempt).toBe(2);expect(second.leaseToken).not.toBe(first.leaseToken);
+  await expect(f.repo.prepare(first)).rejects.toThrow('CONFLICT');await f.repo.fail(first,'PROVIDER_UNAVAILABLE');expect((await f.repo.prepare(second)).status).toBe('RUNNING');
+  await f.repo.fail(second,'PROVIDER_UNAVAILABLE');expect((await f.repo.due()).some(job=>job.id===run.id)).toBe(false);
+  f.advance(20001);const third=(await f.repo.claim(tenant,run.id))!;expect(third.attempt).toBe(3);await f.repo.fail(third,'PROVIDER_UNAVAILABLE');
+  expect((await f.repo.latest(user,tenant,brand,f.publicationId))?.status).toBe('FAILED');expect(await f.repo.claim(tenant,run.id)).toBeNull();
+ });
+ it('rechecks actor permissions and credential versions immediately before provider work',async()=>{
+  const actor=await member('MANAGER'),f=await queueFixture(actor),run=await f.request(),job=(await f.repo.claim(tenant,run.id))!;
+  await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${actor}`;
+  await expect(f.repo.prepare(job)).rejects.toThrow('NOT_AUTHORIZED');await f.repo.fail(job,'NOT_AUTHORIZED');
+  expect((await f.repo.latest(user,tenant,brand,f.publicationId))?.status).toBe('CANCELLED');
+  const other=await queueFixture(),otherRun=await other.request(),otherJob=(await other.repo.claim(tenant,otherRun.id))!;
+  await database.client`update social_connections set credential_version=credential_version+1 where id=${other.connectionId}`;
+  await expect(other.repo.prepare(otherJob)).rejects.toThrow('SOCIAL_TOKEN_EXPIRED');await other.repo.fail(otherJob,'SOCIAL_TOKEN_EXPIRED');
+  expect((await other.repo.latest(user,tenant,brand,other.publicationId))?.status).toBe('CANCELLED');
+  await expect(other.repo.request(actor,tenant,brand,other.publicationId,randomUUID(),randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+  const scopeLost=await queueFixture(),scopeRun=await scopeLost.request(),scopeJob=(await scopeLost.repo.claim(tenant,scopeRun.id))!;
+  await database.client`update social_connections set reference=jsonb_set(reference,'{metadata,commentsAuthorized}','false'::jsonb) where id=${scopeLost.connectionId}`;
+  await expect(scopeLost.repo.prepare(scopeJob)).rejects.toThrow('NOT_AUTHORIZED');
+ });
+ it('resumes only the current requester and invalidates running work on cancellation',async()=>{
+  const f=await queueFixture(),run=await f.request(),manager=await member('MANAGER');
+  await database.client`update comment_imports set status='PARTIAL',remaining_pages=0,position='{"kind":"THREADS","cursor":"retained-token"}'::jsonb where id=${run.id}`;
+  await expect(f.repo.resume(manager,tenant,brand,f.publicationId,run.id,0)).rejects.toThrow('NOT_AUTHORIZED');
+  await expect(f.repo.resume(user,tenant,brand,f.publicationId,run.id,1)).rejects.toThrow('CONFLICT');
+  const resumed=await f.repo.resume(user,tenant,brand,f.publicationId,run.id,0);expect(resumed).toMatchObject({status:'QUEUED',revision:1,remainingPages:200});
+  const job=(await f.repo.claim(tenant,run.id))!;expect(job.position).toEqual({kind:'THREADS',cursor:'retained-token'});
+  await expect(f.repo.cancel(manager,tenant,brand,f.publicationId,run.id,0)).rejects.toThrow('CONFLICT');
+  await f.repo.cancel(manager,tenant,brand,f.publicationId,run.id,job.revision);await expect(f.repo.prepare(job)).rejects.toThrow('CONFLICT');
+  expect((await f.repo.cancel(manager,tenant,brand,f.publicationId,run.id,0)).status).toBe('CANCELLED');
+ });
+ it('fails malformed persisted positions explicitly instead of retrying them forever',async()=>{
+  const f=await queueFixture(),run=await f.request();await database.client`update comment_imports set position='{"kind":"THREADS","cursor":"invalid cursor"}'::jsonb where id=${run.id}`;
+  expect(await f.repo.claim(tenant,run.id)).toBeNull();expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toMatchObject({status:'FAILED',errorCode:'PROVIDER_REJECTED'});
+ });
+
+ it('reports missing import configuration explicitly while preserving read and cancellation access',async()=>{
+  const f=await queueFixture(),service=new CommentImportService(f.repo,false);
+  expect(await service.latest(user,tenant,brand,f.publicationId)).toMatchObject({job:null,configuration:{ready:false,status:'CONFIGURATION_REQUIRED'}});
+  expect(()=>service.request(user,tenant,brand,f.publicationId,{idempotencyKey:randomUUID()},randomUUID())).toThrow('CONFIGURATION_REQUIRED');
+  expect(()=>new CommentImportService(f.repo,true).request(user,tenant,brand,f.publicationId,{idempotencyKey:'bad'},randomUUID())).toThrow();
+  const run=await f.request();expect((await service.cancel(user,tenant,brand,f.publicationId,run.id,{revision:0})).status).toBe('CANCELLED');
  });
 
 });

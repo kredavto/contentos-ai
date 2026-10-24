@@ -60,3 +60,5 @@ export * from './notification-email';
 export * from './provider-keys';
 
 export * from './comments';
+
+export * from './comment-imports';

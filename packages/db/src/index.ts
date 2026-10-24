@@ -68,3 +68,5 @@ export * from './repositories/notification-email';
 export * from './repositories/provider-keys';
 
 export * from './repositories/comments';
+
+export * from './repositories/comment-imports';
