@@ -2,7 +2,7 @@
 
 Updated 2026-10-24.
 
-Estimated full-project coverage: **≈61%** (97/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
+Estimated full-project coverage: **≈61%** (98/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
 
 Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
 
@@ -1253,3 +1253,19 @@ The fb9b571 OAuth/UI checkpoint passed migration 0081, workspace/test types, lin
 - Sixteen isolated integration cases passed before the last capability-denial addition (10.29 s); typecheck and lint also passed before that final addition. Fresh focused acceptance for the final gate is running. The separate full regression remains live; it must not be treated as a frozen final-source acceptance because this lifecycle work overlapped it. Provider page persistence, post-read authorization under the commit lock, receipt cycle checks, worker dispatch and inbox UI remain incomplete. Overall coverage stays approximately 61%.
 
 - Final capability-denial focused acceptance passed all 16 database/service cases (10.00 s), exit 0 with owned database cleanup. Final workspace typecheck tasks passed; test-source typecheck and lint command has not yet returned. The overlapping full regression reported one failing capability-revocation case while source was changing; final failure diagnostics are not yet available. This run is not acceptance evidence for the frozen final source and must finish before a clean retry. No deployment occurred.
+
+## Comment foundation integration and frozen verification (2026-10-24)
+
+- Comment commits through isolated 5f981e3 were integrated into codex/subscription-billing as 2fbd305. Application/package/test/script sources match exactly; differences are only pre-existing API acceptance documentation. The documentation conflict retained both API delivery evidence and the new comments history. Nothing from these commits has been pushed yet.
+- The overlapping regression finished with 693/694 tests passing; its lone failure expected the newly added capability-denial guard but received the old successful prepare behavior. Current source contains the guard and its focused 16-test run passed. This is consistent with mixed source loaded during the overlapping edit, not proof of final acceptance. Owned services were removed and runner exited 1.
+- Final standalone workspace/test types and lint exited 0. A new full local run on frozen isolated commit 5f981e3 is live; neither its sources nor tests are being edited. Delivery remains gated on that result. Checklist §81 now correctly says PARTIAL, and §83 distinguishes manual NEEDS_HUMAN status from the still-absent automatic reply safety workflow.
+
+- Remote evidence refreshed: GitHub CI run 40048795199 for d738f1a (versioned API) and run 40031566528 for 7310565 (deletion inspection/clock fix) both report completed/success. These checks apply to the previously delivered commits, not the new comment foundation.
+
+## Frozen comment foundation regression (2026-10-24)
+
+Frozen isolated commit 5f981e3 passed migration 0084, workspace/test types, lint and all 694 tests in 97 files (186.32 s). Runner exited 0 and removed owned resources. The capability-revocation case passed without further source edits. Primary branch 2fbd305 has byte-identical application/package/test/script sources; only delivery documentation differs. Production build of the integrated branch is the remaining delivery gate. The unchanged OAuth UI previously passed three Chrome scenarios including full MVP; this latest non-browser regression does not claim a new browser run.
+
+Rubric group 23 increases 0→1 for verified adapter/data/service groundwork, making 98/160 (61.25%, rounded approximately 61%). Runtime import page commits/worker wiring and inbox UI remain absent; no generated replies or live provider acceptance is claimed.
+
+- Integrated primary production build passed (26.417 s), exit 0. The previous Vercel API deployment was independently checked via the connected Vercel tool and reports READY. Comment source is ready for preview delivery; production infrastructure and end-to-end comment import remain incomplete.
