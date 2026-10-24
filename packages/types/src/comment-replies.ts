@@ -31,3 +31,7 @@ export function validateCommentReply(raw:unknown,input:CommentReplyInput){
 export function commentReplyReview(output:CommentReplyOutput){
  return {requiresApproval:true as const,requiresHuman:output.reply===null||output.risks.length>0,autoSendAllowed:false as const};
 }
+
+export const commentReplyEditSchema=z.object({revision:z.number().int().nonnegative().nullable(),contentRevision:z.number().int().nonnegative(),reviewRevision:z.number().int().nonnegative(),reply:nonempty(2000)}).strict();
+export type CommentReplyEdit=z.infer<typeof commentReplyEditSchema>;
+export const commentReplyHistorySchema=z.object({beforeVersion:z.coerce.number().int().positive().optional()}).strict();

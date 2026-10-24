@@ -64,3 +64,5 @@ export * from './comments';
 export * from './comment-imports';
 
 export * from './comment-import-processor';
+
+export * from './comment-replies';

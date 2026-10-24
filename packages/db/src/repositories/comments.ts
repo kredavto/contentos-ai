@@ -5,7 +5,7 @@ import {comments,publications,publishingJobs,auditLogs} from '../schema';
 import {authorizeSocial} from './social';
 import {lockTenant,type Transaction} from './ledger';
 const publicationWhere=(tenantId:string,publicationId:string)=>and(eq(comments.tenantId,tenantId),eq(comments.publicationId,publicationId));
-async function authorize(tx:Transaction,userId:string,tenantId:string,brandId:string,publicationId:string,manage=false){
+export async function authorizeComment(tx:Transaction,userId:string,tenantId:string,brandId:string,publicationId:string,manage=false){
  await authorizeSocial(tx,userId,tenantId,brandId,manage);
  const [publication]=await tx.select({id:publications.id}).from(publications).innerJoin(publishingJobs,and(eq(publishingJobs.tenantId,publications.tenantId),eq(publishingJobs.id,publications.jobId))).where(and(eq(publications.tenantId,tenantId),eq(publications.id,publicationId),eq(publishingJobs.brandId,brandId),eq(publications.provider,'youtube'),eq(publishingJobs.provider,'youtube')));
  if(!publication)throw new DomainError('NOT_FOUND',404);
@@ -15,7 +15,7 @@ export class CommentRepository{
  constructor(private readonly db:Database){}
  async list(userId:string,tenantId:string,brandId:string,publicationId:string,input:CommentListInput){
   return this.db.transaction(async tx=>{
-   await authorize(tx,userId,tenantId,brandId,publicationId);
+   await authorizeComment(tx,userId,tenantId,brandId,publicationId);
    if(input.parentId){
     const [parent]=await tx.select({id:comments.id}).from(comments).where(and(publicationWhere(tenantId,publicationId),eq(comments.id,input.parentId),isNull(comments.parentId)));
     if(!parent)throw new DomainError('NOT_FOUND',404);
@@ -28,7 +28,7 @@ export class CommentRepository{
  }
  async triage(userId:string,tenantId:string,brandId:string,publicationId:string,id:string,input:CommentTriageInput,correlationId:string){
   return this.db.transaction(async tx=>{
-   await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId,publicationId,true);
+   await lockTenant(tx,tenantId);await authorizeComment(tx,userId,tenantId,brandId,publicationId,true);
    const condition=and(publicationWhere(tenantId,publicationId),eq(comments.id,id));
    const [current]=await tx.select().from(comments).where(condition).for('update');
    if(!current)throw new DomainError('NOT_FOUND',404);

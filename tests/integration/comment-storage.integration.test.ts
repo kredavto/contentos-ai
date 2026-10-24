@@ -4,6 +4,9 @@ import {commentReplyDrafts,commentReplyVersions} from '../../packages/db/src/sch
 import {emptyOnboarding} from '../../packages/types/src/index';
 import {comments} from '../../packages/db/src/schema/comments';
 import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
+import {CommentReplyRepository} from '../../packages/db/src/repositories/comment-replies';
+import {BrandRepository} from '../../packages/db/src/repositories/brands';
+import {CommentReplyService} from '../../packages/core/src/comment-replies';
 import {CommentRepository} from '../../packages/db/src/repositories/comments';
 import {CommentImportRepository,type CommentImportJob} from '../../packages/db/src/repositories/comment-imports';
 import {CommentImportPageRepository} from '../../packages/db/src/repositories/comment-import-pages';
@@ -359,6 +362,45 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await expect(database.client`update comment_reply_versions set input=input #- '{comment,reviewRevision}' where draft_id=${f.draft.id}`).rejects.toThrow();
   await expect(database.client`update comment_reply_versions set content=content-'risks' where draft_id=${f.draft.id}`).rejects.toThrow();
   await expect(database.client`update comment_reply_versions set content=jsonb_set(content,'{reply}',to_jsonb(${''.padEnd(2001,'x')}::text)) where draft_id=${f.draft.id}`).rejects.toThrow();
+ });
+
+ const replies=new CommentReplyService(new CommentReplyRepository(database.db),new BrandRepository(database.db));
+ it('appends manual reply versions, marks stale sources and omits private snapshots from history',async()=>{
+  const publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  expect(await replies.history(user,tenant,brand,publicationId,comment.id!,{})).toEqual({draft:null,items:[],next:null});
+  const first=await replies.save(user,tenant,brand,publicationId,comment.id!,{revision:null,contentRevision:0,reviewRevision:0,reply:'First draft'},randomUUID());
+  await replies.save(user,tenant,brand,publicationId,comment.id!,{revision:first.revision,contentRevision:0,reviewRevision:0,reply:'Second draft'},randomUUID());
+  const history=await replies.history(user,tenant,brand,publicationId,comment.id!,{});
+  expect(history.draft).toMatchObject({currentVersion:2,revision:1});expect(history.items.map(row=>row.content.reply)).toEqual(['Second draft','First draft']);
+  expect(history.items[0]).not.toHaveProperty('input');expect(history.items[0]).not.toHaveProperty('jobId');expect(history.items[0]?.stale).toBe(false);
+  expect(history.items[0]?.content.risks[0]?.category).toBe('UNCERTAIN');
+  await service.triage(user,tenant,brand,publicationId,comment.id!,{revision:0,contentRevision:0,status:'NEEDS_HUMAN'},randomUUID());
+  expect((await replies.history(user,tenant,brand,publicationId,comment.id!,{})).items.every(row=>row.stale)).toBe(true);
+  const audit=await database.client`select metadata from audit_logs where resource_id=${first.id} and action='COMMENT_REPLY_DRAFT_SAVED'`;expect(audit).toHaveLength(2);expect(JSON.stringify(audit)).not.toContain('draft');
+ });
+ it('serializes concurrent manual edits and rejects stale comment or draft revisions',async()=>{
+  const publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  const input={revision:null,contentRevision:0,reviewRevision:0,reply:'Draft'};
+  const outcomes=await Promise.allSettled([1,2].map(()=>replies.save(user,tenant,brand,publicationId,comment.id!,input,randomUUID())));
+  expect(outcomes.filter(value=>value.status==='fulfilled')).toHaveLength(1);expect(outcomes.filter(value=>value.status==='rejected')).toHaveLength(1);
+  await database.client`update comments set content_revision=1 where id=${comment.id!}`;
+  await expect(replies.save(user,tenant,brand,publicationId,comment.id!,{...input,revision:0},randomUUID())).rejects.toThrow('CONFLICT');
+  expect((await replies.history(user,tenant,brand,publicationId,comment.id!,{})).items).toHaveLength(1);
+ });
+ it('denies cross-publication writes and viewer edits while allowing authorized history reads',async()=>{
+  const viewer=await member('VIEWER'),publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  const input={revision:null,contentRevision:0,reviewRevision:0,reply:'Draft'};
+  await expect(replies.save(viewer,tenant,brand,publicationId,comment.id!,input,randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+  await expect(replies.save(user,tenant,brand,await publication(),comment.id!,input,randomUUID())).rejects.toThrow('NOT_FOUND');
+  await replies.save(user,tenant,brand,publicationId,comment.id!,input,randomUUID());
+  expect((await replies.history(viewer,tenant,brand,publicationId,comment.id!,{})).items).toHaveLength(1);
+  await expect(replies.history(viewer,tenant,randomUUID(),publicationId,comment.id!,{})).rejects.toThrow();
+ });
+ it('paginates reply history with stable descending version cursors',async()=>{
+  const publicationId=await publication(),comment=record(publicationId);await insert(comment);
+  for(let i=0;i<21;i++)await replies.save(user,tenant,brand,publicationId,comment.id!,{revision:i===0?null:i-1,contentRevision:0,reviewRevision:0,reply:`Draft ${i}`},randomUUID());
+  const first=await replies.history(user,tenant,brand,publicationId,comment.id!,{});expect(first.items).toHaveLength(20);expect(first.next).toEqual({beforeVersion:2});
+  const last=await replies.history(user,tenant,brand,publicationId,comment.id!,first.next);expect(last.items.map(row=>row.version)).toEqual([1]);expect(last.next).toBeNull();
  });
 
 });
