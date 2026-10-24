@@ -444,4 +444,12 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await other.jobs.fail(tenant,j.id,j.leaseToken!,'PROVIDER_REJECTED',false);
  });
 
+ it('allows only one active generated reply per comment across distinct intents',async()=>{
+  const f=await generationFixture(),outcomes=await Promise.allSettled([f.enqueue(),f.enqueue()]);
+  expect(outcomes.filter(row=>row.status==='fulfilled')).toHaveLength(1);expect(outcomes.filter(row=>row.status==='rejected')).toHaveLength(1);
+  const [job]=await database.client`select id from jobs where tenant_id=${tenant} and input->'options'->'commentReply'->>'commentId'=${f.comment.id!}`;
+  const claimed=(await f.jobs.claim(tenant,job!.id))!;await f.jobs.fail(tenant,claimed.id,claimed.leaseToken!,'PROVIDER_REJECTED',false);
+  await expect(f.enqueue()).resolves.toMatchObject({status:'QUEUED'});
+ });
+
 });

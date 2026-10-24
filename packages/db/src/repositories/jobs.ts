@@ -1,6 +1,6 @@
 import {snapshotCommentReply,checkCommentReplySnapshot,persistGeneratedCommentReply} from './comment-reply-generation';
 import { randomUUID, createHash } from 'node:crypto';
-import { and, eq, sql, desc } from 'drizzle-orm';
+import { and, eq, sql, desc, inArray } from 'drizzle-orm';
 import { DomainError, validateBrandReview, type GenerationInput, type WorkflowType, type GenerationOutput, workflowSchemas, generationInputSchema } from '@contentos/types';
 import type { Database } from '../index';
 import { aiCalls, jobs, outbox, brands, usagePolicies, auditLogs, strategies, strategyVersions, ideas, contentItems, scripts, scriptVersions, brandReviews, posts, postVersions, carousels, carouselVersions } from '../schema';
@@ -48,6 +48,8 @@ export class JobRepository {
       }else if(input.options.analysisDays!==undefined||input.performance)throw new DomainError('INVALID_INPUT');
       if(type==='DRAFT_COMMENT_REPLY'){
         if(!input.options.commentReply||input.options.scriptId||input.options.ideaId||input.options.revision!==undefined||input.options.edit!=='GENERATE')throw new DomainError('INVALID_INPUT');
+        const [active]=await tx.select({id:jobs.id}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId),eq(jobs.type,'DRAFT_COMMENT_REPLY'),inArray(jobs.status,['QUEUED','RUNNING','RETRY']),sql`${jobs.input}->'options'->'commentReply'->>'commentId' = ${input.options.commentReply.commentId}`)).limit(1);
+        if(active)throw new DomainError('CONFLICT',409);
         input={...input,commentReply:await snapshotCommentReply(tx,userId,tenantId,brandId,input.options.commentReply)};
       }else if(input.options.commentReply||input.commentReply)throw new DomainError('INVALID_INPUT');
       const [policy] = await tx.select().from(usagePolicies).where(eq(usagePolicies.operation,type));
@@ -61,7 +63,7 @@ export class JobRepository {
     });
   }
   async list(userId: string, tenantId: string, brandId: string) {
-    return this.db.transaction(async tx => { await assertMembership(tx,userId,tenantId); return tx.select({id:jobs.id,type:jobs.type,status:jobs.status,progress:jobs.progress,attempt:jobs.attempt,errorCode:jobs.errorCode,result:jobs.result,createdAt:jobs.createdAt,provider:jobs.provider}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId))).orderBy(desc(jobs.createdAt)).limit(50); });
+    return this.db.transaction(async tx => { await assertMembership(tx,userId,tenantId); return tx.select({commentId:sql<string|null>`case when ${jobs.type}='DRAFT_COMMENT_REPLY' then ${jobs.input}->'options'->'commentReply'->>'commentId' else null end`,id:jobs.id,type:jobs.type,status:jobs.status,progress:jobs.progress,attempt:jobs.attempt,errorCode:jobs.errorCode,result:jobs.result,createdAt:jobs.createdAt,provider:jobs.provider}).from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.brandId,brandId))).orderBy(desc(jobs.createdAt)).limit(50); });
   }
   async due() {
     return this.db.select({tenantId:jobs.tenantId,id:jobs.id,type:jobs.type}).from(jobs).innerJoin(outbox,and(eq(outbox.tenantId,jobs.tenantId),eq(outbox.jobId,jobs.id))).where(sql`((${jobs.status} in ('QUEUED','RETRY','WAITING_EXTERNAL') and ${jobs.nextAttemptAt} <= now()) or (${jobs.status} = 'RUNNING' and ${jobs.leaseExpiresAt} <= now())) and (${outbox.lastDispatchedAt} is null or ${outbox.lastDispatchedAt} < now() - interval '30 seconds')`).limit(100);

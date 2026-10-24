@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
-import {createDatabase,BrandRepository} from '../../packages/db/src/index';
+import {createDatabase,BrandRepository,LedgerRepository} from '../../packages/db/src/index';
 import {BrandService} from '../../packages/core/src/brands';
 import {comments} from '../../packages/db/src/schema/comments';
 import {emptyOnboarding} from '../../packages/types/src/index';
@@ -46,6 +46,16 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await editor.getByLabel('Текст черновика').fill('Уточнённый ручной ответ');await editor.getByRole('button',{name:'Сохранить черновик',exact:true}).click();
   await expect(editor.getByRole('heading',{name:'Версия 2 · Ручной черновик'})).toBeVisible();await expect(editor.getByText('Первый ручной ответ',{exact:true})).toBeVisible();
   expect((await database.client`select count(*)::int as count from comment_reply_versions where tenant_id=${tenant} and comment_id=${root}`)[0]?.count).toBe(2);
+  await new LedgerRepository(database.db).adjust(tenant,'AI_CREDITS',20,randomUUID(),randomUUID());
+  await editor.getByLabel('Текст черновика').fill('Несохранённая ручная правка');
+  await editor.getByRole('button',{name:'Предложить AI-ответ',exact:false}).click();
+  await expect(editor.getByText('AI-черновик готов.',{exact:false})).toBeVisible({timeout:60000});
+  await expect(editor.getByLabel('Текст черновика')).toHaveValue('Несохранённая ручная правка');
+  await editor.getByRole('button',{name:'Загрузить последнюю версию',exact:true}).click();
+  await expect(editor.getByRole('heading',{name:'Версия 3 · AI-предложение'})).toBeVisible();
+  await expect(editor.getByLabel('Текст черновика')).toHaveValue('[ДЕМО] Спасибо за ваш комментарий. Ответ требует проверки.');
+  const generated=await database.client`select j.status,r.status as reservation_status from jobs j join usage_reservations r on r.id=j.reservation_id and r.tenant_id=j.tenant_id where j.tenant_id=${tenant} and j.brand_id=${brand} and j.type='DRAFT_COMMENT_REPLY'`;
+  expect(generated).toHaveLength(1);expect(generated[0]).toMatchObject({status:'SUCCEEDED',reservation_status:'CAPTURED'});
   await panel.getByRole('button',{name:'Закрыть черновик',exact:true}).click();
   await panel.getByRole('button',{name:'Показать ответы (26)'}).click();
   const replies=panel.getByRole('region',{name:'Ответы на комментарий',exact:true});await expect(replies.locator('article')).toHaveCount(25);

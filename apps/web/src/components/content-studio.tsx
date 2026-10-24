@@ -72,7 +72,7 @@ export function ContentStudio({tenantId,brandId,brandName,role,verified,initialT
     {tab==='posts'&&data?<PostStudio base={base} posts={data.posts} canWrite={canGenerate} canApprove={canApprove} ready={data.configuration.ready} cost={cost('GENERATE_POST')} onRefresh={refresh} onPlan={post=>{setPostPlan(post);setTab('calendar');}}/>:null}
     {tab==='analytics'&&data?<section className="stack"><PerformanceStudio base={base} canManage={canStrategy} overview={data}/><AnalyticsStudio base={base} canManage={canStrategy}/></section>:null}
     {tab==='publishing'?<PublishingStudio base={base} canPublish={canStrategy}/>:null}
-      {tab==='comments'?<CommentInbox key={base} base={base} canManage={canStrategy}/>:null}
+      {tab==='comments'?<CommentInbox key={base} base={base} canManage={canStrategy} generation={data}/>:null}
       {tab==='integrations'?<SocialIntegrations base={base} canManage={canStrategy}/>:null}
     {tab==='funnels'?<FunnelStudio key={base} base={base} canWrite={canGenerate} canManage={canStrategy}/>:null}
     {tab==='utm'?<UtmStudio key={base} base={base} canWrite={canGenerate}/>:null}
