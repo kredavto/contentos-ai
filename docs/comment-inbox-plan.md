@@ -59,3 +59,15 @@ Canonical scope: `/api/v1/organizations/:tenantId/brands/:brandId/publications/:
 - POST `/imports/:importId/cancel` cancels using `revision` and the current management role.
 
 All routes reuse authenticated sessions, tenant/brand/publication service authorization, normalized envelopes, no-store responses and Origin checks for mutations. Import requests/resumes also use the auth throttle in addition to durable per-publication cooldown and active-run limits. Inbox UI and browser acceptance remain pending. These routes neither suggest nor send replies.
+
+## Next implementation: generated reply drafts and approval
+
+The existing GenerationOrchestrator already provides strict structured output, repair, model routing and call accounting, while JobRepository reserves/captures/releases credits in its job transaction. Reuse those boundaries for a dedicated reply workflow; do not call the LLM inside a route or run a provider directly from UI. Extend the typed job union, configured pricing, database constraints and persisted workflow result together.
+
+A reply draft must reference the tenant/publication/root comment plus both provider content revision and local review revision, and preserve an immutable input snapshot with the selected Brand Brain revision. A generated result is a suggestion only. Model output includes bounded reply text and advisory risk categories; unknown or unvalidated output fails closed. Legal/medical/financial claims, conflict, complaints, personal data, sensitive topics and uncertainty require human review. A model's empty risk list cannot by itself authorize automatic sending.
+
+Persist draft revisions append-only, with current editable draft selection separate from approval. Editing text, changing the source comment, changing the approved policy or losing current authorization invalidates approval. Approval explicitly binds exact text/version, source revisions, actor, channel and credential generation. SUGGEST_ONLY remains the default; drafting and manual triage do not create a send job. AUTO_REPLY requires its separate explicit opt-in, feature flag and execution-time policy checks and is not enabled by Google OAuth scope.
+
+Delivery needs its own outbox and reconciliation-aware state machine. Verify current official YouTube insert capabilities before implementing the write adapter. Record an attempted remote write before dispatch; an unknown result cannot be blindly retried. No live reply send is authorized by test coverage or by enabling comment reads. Until that complete path exists, the UI continues to state that sending is unavailable.
+
+Required acceptance: current tenant/role checks at request and execution; concurrent credit reservation/capture/release; stale comment/draft approval rejection; safe prompt treatment of external comment text; all human-review categories; bounded schema repair; provider failures and unknown outcomes; browser draft/edit/approve flow without real external sends.

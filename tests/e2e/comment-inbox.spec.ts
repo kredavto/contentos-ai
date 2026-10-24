@@ -46,6 +46,32 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await page.setViewportSize({width:390,height:844});await expect(panel.getByText(text,{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.screenshot({path:testInfo.outputPath('comment-inbox-mobile.png'),fullPage:true});
+  await panel.getByRole('button',{name:'Скрыть ответы',exact:true}).click();
+  // Synthetic HTTP transport exercises controls without a Google grant or remote import.
+  const snapshot=(await (await page.request.get(endpoint)).json()).data;
+  const importId=randomUUID();let phase:'NONE'|'QUEUED'|'PARTIAL'|'CANCELLED'='NONE',revision=0,requests=0;
+  const keys:string[]=[];
+  await page.route(`**${endpoint}**`,async route=>{
+   const request=route.request(),path=new URL(request.url()).pathname;
+   if(request.method()==='GET'&&path===endpoint){await route.fulfill({json:{data:{...snapshot,sync:{configuration:{ready:true,status:'CONFIGURED'},job:phase==='NONE'?null:{id:importId,status:phase,revision,completedPages:phase==='PARTIAL'?200:0,errorCode:null}}}}});return;}
+   if(request.method()==='POST'&&path===`${endpoint}/imports`){
+    const input=request.postDataJSON();keys.push(input.idempotencyKey);requests++;
+    if(requests===1){await route.fulfill({status:503,json:{error:{message:'Synthetic retryable failure'}}});return;}
+    phase='QUEUED';revision++;await route.fulfill({status:202,json:{data:{id:importId}}});return;
+   }
+   if(request.method()==='POST'&&path===`${endpoint}/imports/${importId}/resume`){expect(request.postDataJSON()).toEqual({revision});phase='QUEUED';revision++;await route.fulfill({status:202,json:{data:{id:importId}}});return;}
+   if(request.method()==='POST'&&path===`${endpoint}/imports/${importId}/cancel`){expect(request.postDataJSON()).toEqual({revision});phase='CANCELLED';revision++;await route.fulfill({json:{data:{id:importId}}});return;}
+   await route.continue();
+  });
+  await list.getByRole('button',{name:'Обновить список',exact:true}).click();
+  const start=panel.getByRole('button',{name:'Импортировать комментарии',exact:true});await expect(start).toBeEnabled();await start.click();
+  await expect(panel.getByRole('alert')).toHaveText('Synthetic retryable failure');await start.click();
+  await expect(panel.getByText('Импорт в очереди',{exact:false})).toBeVisible();expect(keys).toHaveLength(2);expect(keys[0]).toBe(keys[1]);await expect(start).toBeDisabled();
+  phase='PARTIAL';revision++;await list.getByRole('button',{name:'Обновить список',exact:true}).click();
+  await expect(panel.getByText('Импорт частично выполнен',{exact:false})).toBeVisible();await expect(start).toBeDisabled();
+  await panel.getByRole('button',{name:'Продолжить импорт',exact:true}).click();await expect(panel.getByText('Импорт в очереди',{exact:false})).toBeVisible();
+  await panel.getByRole('button',{name:'Остановить импорт',exact:true}).click();await expect(panel.getByText('Импорт остановлен',{exact:false})).toBeVisible();await expect(start).toBeEnabled();
+  await page.unroute(`**${endpoint}**`);
   await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${user}`;
   await page.reload();await panel.getByLabel('Публикация для комментариев').selectOption(publication);
   await expect(panel.getByText(text,{exact:true})).toBeVisible();await expect(panel.getByLabel('Разметка: Test author')).toHaveCount(0);await expect(panel.getByRole('button',{name:'Импортировать комментарии'})).toHaveCount(0);

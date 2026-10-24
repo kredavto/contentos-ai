@@ -1307,3 +1307,22 @@ Comment inbox acceptance checkpoint: migrations, current workspace/test typechec
 
 
 Comment inbox acceptance completed: **715 tests in 99 files** (196.21s), current migrations/typechecks/lint, production build (22.006s), and **one Chrome browser scenario passed** (25.8s suite). Mobile screenshot was inspected; 390px width has no horizontal overflow. The test verifies persisted manual triage, raw-text rendering, pagination of 26 replies, no-import/incomplete states, viewer denial and foreign-publication rejection. Owned test resources were removed. Source: `/tmp/contentos-comment-inbox-browser.log`. Group 23 increases 1→2; total **99/160 ≈62%**. No live Google call or reply send. Import controls beyond disabled configuration still require browser acceptance; repository/processor tests cover their lifecycle. Preview delivery is the next step.
+
+
+Expanded comment browser acceptance now exercises import initiation, stable idempotency key on retry, PARTIAL resume and cancellation through explicitly synthetic HTTP responses. Real Google remains untouched. The new full runner is active (`/tmp/contentos-comment-inbox-controls.log`); no result yet. The reply-draft integration plan now identifies reuse of existing generation accounting, immutable input/draft revisions, approval invalidation and separate reconciliation-aware send state. No drafting/send implementation is claimed.
+
+
+Vercel preview delivery verified READY for commit `28b1bbf2427af18ed9c058fabf3f4c2a78f26420`: https://contentos-mg5v48b5p-digagency.vercel.app, deployment `dpl_DqDsQeX4mpPhzwWis1JfPUsrpxmQ`, team digagency, project contentos-ai, Next.js. This is a preview web build, not confirmation of production database/worker/live-provider readiness. GitHub CI run 40053254374 was still in progress at the last check; no remote CI success claim.
+
+
+Expanded controls acceptance first run: 715/715 tests passed (135.31s), browser failed at an ambiguous refresh-button locator while replies were expanded. The fixture now closes the reply section before exercising import controls. No production-code failure was established; the corrected browser run still needs confirmation. Owned resources from the failed run were removed.
+
+
+Corrected import-controls acceptance passed: full local runner completed successfully, including 715 tests, types/lint/build and Chrome (17.3s browser suite). Start/retry with stable key, partial resume and cancel were verified using synthetic HTTP; original persisted triage/viewer/thread checks remain. Source: `/tmp/contentos-comment-inbox-controls-final.log`; owned resources removed. New advisory reply schema/orchestrator method is being added after this frozen checkpoint and is not covered by that full result.
+
+
+## Reply suggestion contract — 2026-10-24 (local foundation)
+
+Added strict reply input/output schemas and an advisory GenerationOrchestrator method using existing bounded repair and metered-call recording. Input binds the source comment ID/content/review revisions and Brand Brain revision. Output permits only bounded reply text (or withheld reply), nullable advisory sentiment and eight risk categories with exact source quotes or explicitly contextual reasons. Generated output cannot carry approval or auto-send fields. Risk-free suggestions still require approval; all risk categories/withheld replies require a human. This is a prompt/schema boundary, not proof that a model reliably detects every risk, and does not authorize automatic sending.
+
+Focused tests: **19 passed across 2 files** (`/tmp/contentos-comment-draft-tests.log`), covering all risk categories, fabricated evidence, unexpected approval fields, bounded repair and metered call recording. Workspace/test typechecks and lint passed. Draft persistence, paid-job reservation/settlement integration, UI, approval and delivery are not yet implemented; no real LLM call. Overall estimate stays **≈62%**.
