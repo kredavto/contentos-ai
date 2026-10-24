@@ -4,8 +4,8 @@ import { createServer } from 'node:http';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { parseServerEnvironment } from '@contentos/config';
-import { NotificationEmailRepository, YouTubeResolutionRepository, PublicationAnalyticsRepository, YouTubeUploadRepository, YouTubeOAuthRepository, SocialRepository, LibraryMediaRepository, ImageRepository, CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
-import { YouTubeResolutionService, YouTubeResolutionProcessor, PublicationAnalyticsProcessor, YouTubePublishingProcessor, YouTubeService, LibraryMediaProcessor, ImageProcessor, reportError, CoverProcessor, NotificationEmailProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
+import { CommentImportRepository, CommentImportPageRepository, NotificationEmailRepository, YouTubeResolutionRepository, PublicationAnalyticsRepository, YouTubeUploadRepository, YouTubeOAuthRepository, SocialRepository, LibraryMediaRepository, ImageRepository, CoverRepository, EmailRepository, NotificationRepository, RenewalBillingRepository, PaymentWebhookRepository, BillingRepository, PaymentTaskRepository, ChannelAnalyticsRepository, createDatabase, JobRepository, AICallRepository, MediaRepository, AvatarRepository, VideoRepository, PublishingRepository } from '@contentos/db';
+import { CommentImportProcessor, YouTubeResolutionService, YouTubeResolutionProcessor, PublicationAnalyticsProcessor, YouTubePublishingProcessor, YouTubeService, LibraryMediaProcessor, ImageProcessor, reportError, CoverProcessor, NotificationEmailProcessor, EmailProcessor, PaymentWebhookProcessor, PaymentProcessor, ChannelAnalyticsProcessor, MediaService, AvatarService, AvatarProcessor, VideoProcessor, VideoService, PublishingProcessor, credentialVaultFromEnvironment } from '@contentos/core';
 import { DomainError, workflowSchemas, generationInputSchema, validatePerformanceOutput, validateBrandReview, type JobType } from '@contentos/types';
 import { GenerationOrchestrator } from '@contentos/ai';
 import {  youtubePublishingFromEnvironment, FFmpegMediaPreparation, SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, imageFromEnvironment, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
@@ -85,6 +85,14 @@ const publicationAnalyticsProcessor=new PublicationAnalyticsProcessor(publicatio
 const publicationAnalyticsQueue=new Queue('contentos-publication-analytics',{connection});
 const publicationAnalyticsWorker=new Worker<{tenantId:string;id:string}>('contentos-publication-analytics',delivery=>publicationAnalyticsProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
 publicationAnalyticsWorker.on('error',error=>operationalError('publication_analytics_worker_error','QUEUE_UNAVAILABLE',error));
+const commentImports=new CommentImportRepository(database.db);
+const commentPages=new CommentImportPageRepository(database.db);
+// The publishing demo provider has no comment reads; never present synthetic inbox data as imported.
+const commentProvider=youtubeProvider&&'commentThreads' in youtubeProvider?youtubeProvider:null;
+const commentProcessor=new CommentImportProcessor(commentImports,commentPages,youtubeAccess,commentProvider,errors);
+const commentQueue=new Queue('contentos-comment-imports',{connection});
+const commentWorker=new Worker<{tenantId:string;id:string}>('contentos-comment-imports',delivery=>commentProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:2});
+commentWorker.on('error',error=>operationalError('comment_import_worker_error','QUEUE_UNAVAILABLE',error));
 youtubeWorker.on('error',error=>operationalError('youtube_worker_error','QUEUE_UNAVAILABLE',error));
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];
 const orchestrator = new GenerationOrchestrator(routes);
@@ -117,7 +125,7 @@ const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-g
 },{connection,concurrency:3});
 worker.on('error',error=>operationalError('worker_error','QUEUE_UNAVAILABLE',error));
 connection.on('error',error=>operationalError('redis_error','QUEUE_UNAVAILABLE',error));
-for(const backgroundWorker of [worker,youtubeResolutionWorker,publicationAnalyticsWorker,youtubeWorker,libraryMediaWorker,imageWorker,coverWorker,publishingWorker,analyticsWorker,paymentWorker]){
+for(const backgroundWorker of [worker,commentWorker,youtubeResolutionWorker,publicationAnalyticsWorker,youtubeWorker,libraryMediaWorker,imageWorker,coverWorker,publishingWorker,analyticsWorker,paymentWorker]){
   backgroundWorker.on('failed',(delivery,error)=>{const id=delivery?.data?.id;reportError(errors,error,{correlationId:randomUUID(),...(typeof id==='string'?{jobId:id}:{})});});
 }
 let dispatching = false;
@@ -143,6 +151,10 @@ async function dispatch() {
     for(const job of await youtubeResolutionRepository.dueTasks()){
       await youtubeResolutionQueue.add('resolve',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
       await youtubeResolutionRepository.taskDispatched(job.tenantId,job.id);
+    }
+    for(const job of await commentImports.due()){
+      await commentQueue.add('fetch',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
+      await commentImports.dispatched(job.tenantId,job.id);
     }
     for(const job of await publicationAnalyticsRepository.due()){
       await publicationAnalyticsQueue.add('fetch',job,{jobId:job.id,attempts:3,backoff:{type:'exponential',delay:5000},removeOnComplete:true,removeOnFail:true});
@@ -177,7 +189,7 @@ async function dispatch() {
 }
 const health = process.env.WORKER_HEALTH_PORT ? createServer((request,response)=> {
   if (request.url !== '/health') {response.writeHead(404);response.end();return;}
-  const ready = connection.status === 'ready' && worker.isRunning() && youtubeResolutionWorker.isRunning() && publicationAnalyticsWorker.isRunning() && youtubeWorker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning() && paymentWorker.isRunning() && coverWorker.isRunning() && imageWorker.isRunning() && libraryMediaWorker.isRunning();
+  const ready = connection.status === 'ready' && commentWorker.isRunning() && worker.isRunning() && youtubeResolutionWorker.isRunning() && publicationAnalyticsWorker.isRunning() && youtubeWorker.isRunning() && publishingWorker.isRunning() && analyticsWorker.isRunning() && paymentWorker.isRunning() && coverWorker.isRunning() && imageWorker.isRunning() && libraryMediaWorker.isRunning();
   response.writeHead(ready?200:503, {'Content-Type':'application/json'});response.end(JSON.stringify({status:ready?'ok':'unavailable'}));
 }) : null;
 if (health) health.listen(Number(process.env.WORKER_HEALTH_PORT),'127.0.0.1');
@@ -202,7 +214,7 @@ const emailTimer=setInterval(()=>{if(mailing)return;mailing=true;emailTask=email
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await worker.close(); await youtubeResolutionWorker.close(); await publicationAnalyticsWorker.close(); await youtubeWorker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await imageWorker.close(); await libraryMediaWorker.close(); await cleanupTask; await queue.close(); await youtubeResolutionQueue.close(); await publicationAnalyticsQueue.close(); await youtubeQueue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await imageQueue.close(); await libraryMediaQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
+  clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await commentWorker.close(); await worker.close(); await youtubeResolutionWorker.close(); await publicationAnalyticsWorker.close(); await youtubeWorker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await imageWorker.close(); await libraryMediaWorker.close(); await cleanupTask; await commentQueue.close(); await queue.close(); await youtubeResolutionQueue.close(); await publicationAnalyticsQueue.close(); await youtubeQueue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await imageQueue.close(); await libraryMediaQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
 console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));

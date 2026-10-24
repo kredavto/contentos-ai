@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto';
-import {and,asc,desc,eq,gte,inArray,lte,or} from 'drizzle-orm';
+import {and,asc,desc,eq,gte,inArray,isNull,lte,or} from 'drizzle-orm';
 import {DomainError,commentImportPositionSchema,commentImportRequestSchema,youtubeVideoIdSchema,youtubeChannelIdSchema,type ErrorCode} from '@contentos/types';
 import type {Database} from '../index';
-import {commentImports,publications,publishingJobs,socialConnections,auditLogs} from '../schema';
+import {commentImports,publications,publishingJobs,socialConnections,auditLogs,comments} from '../schema';
 import {authorizeSocial} from './social';
 import {lockTenant,type Transaction} from './ledger';
 export type CommentImportJob=typeof commentImports.$inferSelect;
@@ -79,6 +79,17 @@ export class CommentImportRepository{
   await this.audit(tx,{...job,attempt:job.attempt+1},'RUNNING',null);return claimed!;
  });}
  async prepare(job:CommentImportJob){return this.db.transaction(async tx=>{await lockTenant(tx,job.tenantId);const current=await ownedCommentImport(tx,job,this.now());await permittedCommentImport(tx,current);return current;});}
+ /** Resolve reply identity only under the current lease and publication authorization. */
+ async preparePage(job:CommentImportJob){return this.db.transaction(async tx=>{
+  await lockTenant(tx,job.tenantId);const current=await ownedCommentImport(tx,job,this.now());await permittedCommentImport(tx,current);
+  if(current.revision!==job.revision)throw new DomainError('CONFLICT',409);
+  const parsed=commentImportPositionSchema.safeParse(current.position);if(!parsed.success)throw new DomainError('PROVIDER_REJECTED',502);
+  const position=parsed.data;
+  if(position.kind==='THREADS')return {position,externalId:current.videoId,channelId:current.channelId};
+  const [parent]=await tx.select({externalId:comments.externalCommentId}).from(comments).where(and(eq(comments.tenantId,current.tenantId),eq(comments.publicationId,current.publicationId),eq(comments.provider,'youtube'),eq(comments.id,position.parentId),isNull(comments.parentId)));
+  if(!parent)throw new DomainError('PROVIDER_REJECTED',502);
+  return {position,externalId:parent.externalId,channelId:current.channelId};
+ });}
  async fail(job:CommentImportJob,code:ErrorCode){return this.db.transaction(async tx=>{
   await lockTenant(tx,job.tenantId);const [current]=await tx.select().from(commentImports).where(commentImportWhere(job.tenantId,job.id)).for('update');const now=this.now();
   if(!current||current.status!=='RUNNING'||current.leaseToken!==job.leaseToken||!current.leaseExpiresAt||current.leaseExpiresAt<=now)return;

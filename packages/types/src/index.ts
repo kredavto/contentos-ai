@@ -68,3 +68,5 @@ export * from './approvals';
 export * from './provider-keys';
 
 export * from './comment-inbox';
+
+export * from './comment-pages';

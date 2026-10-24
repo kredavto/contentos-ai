@@ -62,3 +62,5 @@ export * from './provider-keys';
 export * from './comments';
 
 export * from './comment-imports';
+
+export * from './comment-import-processor';

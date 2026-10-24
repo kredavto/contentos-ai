@@ -1,11 +1,15 @@
 import {randomUUID} from 'node:crypto';
-import {beforeAll,describe,expect,it} from 'vitest';
+import {beforeAll,describe,expect,it,vi} from 'vitest';
 import {comments} from '../../packages/db/src/schema/comments';
 import {commentImports,commentImportPages} from '../../packages/db/src/schema/comment-imports';
 import {CommentRepository} from '../../packages/db/src/repositories/comments';
-import {CommentImportRepository} from '../../packages/db/src/repositories/comment-imports';
+import {CommentImportRepository,type CommentImportJob} from '../../packages/db/src/repositories/comment-imports';
+import {CommentImportPageRepository} from '../../packages/db/src/repositories/comment-import-pages';
+import {advanceCommentThreads,advanceCommentReplies} from '../../packages/core/src/comment-import-position';
+import {DomainError,type YouTubeCommentsProvider,type CommentImportPosition,type ImportedComment} from '../../packages/types/src/index';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {CommentService} from '../../packages/core/src/comments';
+import {CommentImportProcessor} from '../../packages/core/src/comment-import-processor';
 import {CommentImportService} from '../../packages/core/src/comment-imports';
 import {seedDevelopment,demoIds} from '../../packages/db/src/development-seed';
 import {isolatedTestDatabase} from '../helpers/isolated-database';
@@ -141,7 +145,7 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   await database.client`update social_connections set status='ACTIVE',credential=${JSON.stringify(credential)}::jsonb,reference=jsonb_set(reference,'{metadata,commentsAuthorized}','true'::jsonb) where id=${connectionId}`;
   let now=new Date('2035-01-01T00:00:00Z');const repo=new CommentImportRepository(database.db,()=>now);
   const request=(key=randomUUID())=>repo.request(actor,tenant,brand,publicationId,key,randomUUID());
-  return {repo,publicationId,connectionId,request,advance:(ms:number)=>{now=new Date(now.getTime()+ms);}};
+  return {repo,publicationId,connectionId,request,clock:()=>now,advance:(ms:number)=>{now=new Date(now.getTime()+ms);}};
  }
  it('deduplicates import intent, enforces active/cooldown limits and exposes safe progress only',async()=>{
   const f=await queueFixture(),key=randomUUID();expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toBeNull();
@@ -199,6 +203,129 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   expect(()=>service.request(user,tenant,brand,f.publicationId,{idempotencyKey:randomUUID()},randomUUID())).toThrow('CONFIGURATION_REQUIRED');
   expect(()=>new CommentImportService(f.repo,true).request(user,tenant,brand,f.publicationId,{idempotencyKey:'bad'},randomUUID())).toThrow();
   const run=await f.request();expect((await service.cancel(user,tenant,brand,f.publicationId,run.id,{revision:0})).status).toBe('CANCELLED');
+ });
+
+ const plan=(position:CommentImportPosition,nextCursor:string|null,parentIds:string[])=>position.kind==='THREADS'?advanceCommentThreads(position,{nextCursor,parentIds}):advanceCommentReplies(position,{nextCursor});
+ const imported=(externalId:string,parentExternalId:string|null=null):ImportedComment=>({externalId,parentExternalId,authorExternalId:null,authorName:null,text:'Untrusted <script>text</script>',publishedAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-02T00:00:00.000Z'});
+ const threadItem=(id:string,count=0)=>({externalId:'thread-'+id,comment:imported(id),replyCount:count,canReply:true,isPublic:true});
+ const threadPage=(job:CommentImportJob,items:ReturnType<typeof threadItem>[],nextCursor:string|null=null)=>({reference:{provider:'youtube',internalId:job.id,externalId:job.videoId,metadata:{kind:'comment-threads',channelId:job.channelId}},observedAt:job.startedAt!.toISOString(),nextCursor,items});
+ const replyPage=(job:CommentImportJob,parent:string,items:ImportedComment[],nextCursor:string|null=null)=>({reference:{provider:'youtube',internalId:job.id,externalId:parent,metadata:{kind:'comment-replies',channelId:job.channelId}},observedAt:job.startedAt!.toISOString(),nextCursor,items});
+ it('atomically imports threads and all reply pages while preserving local triage across provider edits',async()=>{
+  const f=await queueFixture(),pages=new CommentImportPageRepository(database.db,f.clock),run=await f.request(),first=(await f.repo.claim(tenant,run.id))!;
+  expect(await pages.complete(first,threadPage(first,[threadItem('root',2)]),plan)).toMatchObject({status:'QUEUED',completedPages:1});
+  const root=(await service.list(user,tenant,brand,f.publicationId,{})).items[0]!;
+  await service.triage(user,tenant,brand,f.publicationId,root.id,{revision:0,contentRevision:0,status:'NEEDS_HUMAN'},randomUUID());
+  const second=(await f.repo.claim(tenant,run.id))!;await pages.complete(second,replyPage(second,'root',[imported('reply-one','root')],'next-replies'),plan);
+  const third=(await f.repo.claim(tenant,run.id))!;expect(await pages.complete(third,replyPage(third,'root',[imported('reply-two','root')]),plan)).toMatchObject({status:'SUCCEEDED',completedPages:3});
+  await expect(pages.complete(third,replyPage(third,'root',[]),plan)).rejects.toThrow('CONFLICT');
+  expect((await service.list(user,tenant,brand,f.publicationId,{parentId:root.id})).items).toHaveLength(2);
+  f.advance(61000);const update=await f.request(),updateJob=(await f.repo.claim(tenant,update.id))!,item=threadItem('root');item.comment={...item.comment,text:'Edited question',updatedAt:'2026-01-03T00:00:00.000Z'};
+  await pages.complete(updateJob,threadPage(updateJob,[item]),plan);
+  expect((await service.list(user,tenant,brand,f.publicationId,{})).items[0]).toMatchObject({id:root.id,status:'NEEDS_HUMAN',revision:1,contentRevision:1,text:'Edited question',sentiment:null});
+  await expect(service.triage(user,tenant,brand,f.publicationId,root.id,{revision:1,contentRevision:0,status:'RESOLVED'},randomUUID())).rejects.toThrow('CONFLICT');
+  expect((await service.list(user,tenant,brand,f.publicationId,{parentId:root.id})).items).toHaveLength(2);
+  const audits=await database.client`select metadata from audit_logs where resource_id=${run.id} and action='COMMENT_IMPORT_PAGE_SAVED'`;expect(audits).toHaveLength(3);expect(JSON.stringify(audits)).not.toContain('Untrusted');
+  f.advance(61000);const stale=await f.request(),staleJob=(await f.repo.claim(tenant,stale.id))!;await pages.complete(staleJob,threadPage(staleJob,[threadItem('root')]),plan);
+  expect((await service.list(user,tenant,brand,f.publicationId,{})).items[0]).toMatchObject({text:'Edited question',contentRevision:1,status:'NEEDS_HUMAN'});
+ });
+ it('rolls back every imported row and receipt when a later item tries to change an existing association',async()=>{
+  const f=await queueFixture(),pages=new CommentImportPageRepository(database.db,f.clock),original=record(f.publicationId);original.externalCommentId='existing';await insert(original);
+  const run=await f.request(),job=(await f.repo.claim(tenant,run.id))!;
+  await expect(pages.complete(job,threadPage(job,[threadItem('new-first'),threadItem('existing')]),plan)).rejects.toThrow('PROVIDER_REJECTED');
+  expect((await service.list(user,tenant,brand,f.publicationId,{})).items).toHaveLength(1);
+  expect((await database.client`select count(*)::int as count from comment_import_pages where import_id=${run.id}`)[0]?.count).toBe(0);
+ });
+ it('rechecks access after the remote read and rejects a mismatched channel before saving',async()=>{
+  const actor=await member('MANAGER'),f=await queueFixture(actor),pages=new CommentImportPageRepository(database.db,f.clock),run=await f.request(),job=(await f.repo.claim(tenant,run.id))!,result=threadPage(job,[threadItem('unwritten')]);
+  await expect(pages.complete(job,{...result,reference:{...result.reference,metadata:{...result.reference.metadata,channelId:'UC'+'z'.repeat(22)}}},plan)).rejects.toThrow('PROVIDER_REJECTED');
+  await database.client`update organization_members set role='VIEWER' where tenant_id=${tenant} and user_id=${actor}`;
+  await expect(pages.complete(job,result,plan)).rejects.toThrow('NOT_AUTHORIZED');
+  expect((await service.list(user,tenant,brand,f.publicationId,{})).items).toHaveLength(0);
+ });
+ it('detects longer cursor cycles and rolls back the page that would enter the cycle',async()=>{
+  const f=await queueFixture(),pages=new CommentImportPageRepository(database.db,f.clock),run=await f.request();
+  for(const cursor of ['A','B']){const job=(await f.repo.claim(tenant,run.id))!;await pages.complete(job,threadPage(job,[],cursor),plan);}
+  const job=(await f.repo.claim(tenant,run.id))!;await expect(pages.complete(job,threadPage(job,[threadItem('cycle-row')],'A'),plan)).rejects.toThrow('PROVIDER_REJECTED');
+  expect((await service.list(user,tenant,brand,f.publicationId,{})).items).toHaveLength(0);
+  expect((await database.client`select count(*)::int as count from comment_import_pages where import_id=${run.id}`)[0]?.count).toBe(2);
+ });
+ it('resumes the exact unread reply position after reaching the page budget',async()=>{
+  const f=await queueFixture(),pages=new CommentImportPageRepository(database.db,f.clock),run=await f.request();await database.client`update comment_imports set remaining_pages=1 where id=${run.id}`;
+  const job=(await f.repo.claim(tenant,run.id))!;expect(await pages.complete(job,threadPage(job,[threadItem('budget-root',1)]),plan)).toMatchObject({status:'PARTIAL'});
+  expect(await f.repo.claim(tenant,run.id)).toBeNull();const partial=(await f.repo.latest(user,tenant,brand,f.publicationId))!;
+  await f.repo.resume(user,tenant,brand,f.publicationId,run.id,partial.revision);const next=(await f.repo.claim(tenant,run.id))!;expect(next.position?.kind).toBe('REPLIES');
+  expect(await pages.complete(next,replyPage(next,'budget-root',[]),plan)).toMatchObject({status:'SUCCEEDED',completedPages:2});
+ });
+
+ it('rejects another run or video and observations outside the leased read window',async()=>{
+  const f=await queueFixture(),pages=new CommentImportPageRepository(database.db,f.clock),run=await f.request(),job=(await f.repo.claim(tenant,run.id))!,result=threadPage(job,[threadItem('scope-root')]);
+  for(const reference of [{...result.reference,internalId:randomUUID()},{...result.reference,externalId:'zyxwvutsrqp'}])await expect(pages.complete(job,{...result,reference},plan)).rejects.toThrow('PROVIDER_REJECTED');
+  for(const offset of [-1,5001])await expect(pages.complete(job,{...result,observedAt:new Date(f.clock().getTime()+offset).toISOString()},plan)).rejects.toThrow('CONFLICT');
+  await database.client`update social_connections set credential_version=credential_version+1 where id=${f.connectionId}`;
+  await expect(pages.complete(job,result,plan)).rejects.toThrow('SOCIAL_TOKEN_EXPIRED');
+  expect((await service.list(user,tenant,brand,f.publicationId,{})).items).toHaveLength(0);
+ });
+
+ async function processorFixture(){
+  const f=await queueFixture(),run=await f.request();
+  const [connection]=await database.client<{reference:{externalId:string}}[]>`select reference from social_connections where id=${f.connectionId}`;
+  const channelId=connection!.reference.externalId;
+  const access={accessForComments:vi.fn(async()=>({accessToken:'synthetic-token',channelId}))};
+  const provider:YouTubeCommentsProvider={
+   commentThreads:vi.fn(async(_token,video,channel,_cursor,context)=>({reference:{provider:'youtube',internalId:context.internalId,externalId:video,metadata:{kind:'comment-threads',channelId:channel}},observedAt:f.clock().toISOString(),nextCursor:null,items:[threadItem('processor-root',1)]})),
+   commentReplies:vi.fn(async(_token,parent,channel,_cursor,context)=>({reference:{provider:'youtube',internalId:context.internalId,externalId:parent,metadata:{kind:'comment-replies',channelId:channel}},observedAt:f.clock().toISOString(),nextCursor:null,items:[imported('processor-reply',parent)]})),
+  };
+  const pages=new CommentImportPageRepository(database.db,f.clock),processor=new CommentImportProcessor(f.repo,pages,access,provider);
+  return {...f,run,channelId,access,provider,pages,processor};
+ }
+ it('processes one page per lease and resolves stored root identities for replies',async()=>{
+  const f=await processorFixture();await f.processor.run(tenant,f.run.id);
+  expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toMatchObject({status:'QUEUED',completedPages:1});
+  expect(f.provider.commentReplies).not.toHaveBeenCalled();
+  await f.processor.run(tenant,f.run.id);
+  expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toMatchObject({status:'SUCCEEDED',completedPages:2});
+  expect(f.provider.commentReplies).toHaveBeenCalledWith('synthetic-token','processor-root',f.channelId,null,expect.objectContaining({internalId:f.run.id,tenantId:tenant}));
+  expect(f.access.accessForComments).toHaveBeenCalledTimes(4);
+  const root=(await service.list(user,tenant,brand,f.publicationId,{})).items[0]!;
+  expect((await service.list(user,tenant,brand,f.publicationId,{parentId:root.id})).items).toHaveLength(1);
+  await f.processor.run(tenant,f.run.id);expect(f.provider.commentThreads).toHaveBeenCalledTimes(1);
+ });
+ it('discards a remotely read page when encrypted scope authorization is revoked',async()=>{
+  const f=await processorFixture();f.access.accessForComments.mockRejectedValueOnce(new DomainError('NOT_AUTHORIZED',403));
+  await f.processor.run(tenant,f.run.id);expect(f.provider.commentThreads).not.toHaveBeenCalled();
+  expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toMatchObject({status:'CANCELLED',errorCode:'NOT_AUTHORIZED'});
+  const after=await processorFixture();after.access.accessForComments.mockResolvedValueOnce({accessToken:'synthetic-token',channelId:after.channelId}).mockRejectedValueOnce(new DomainError('NOT_AUTHORIZED',403));
+  await after.processor.run(tenant,after.run.id);expect(after.provider.commentThreads).toHaveBeenCalledTimes(1);
+  expect(await after.repo.latest(user,tenant,brand,after.publicationId)).toMatchObject({status:'CANCELLED',completedPages:0});
+  expect((await service.list(user,tenant,brand,after.publicationId,{})).items).toHaveLength(0);
+ });
+ it('rejects a changed channel and missing provider without remote reads',async()=>{
+  const f=await processorFixture();f.access.accessForComments.mockResolvedValue({accessToken:'synthetic-token',channelId:'UC'+'z'.repeat(22)});
+  await f.processor.run(tenant,f.run.id);expect(f.provider.commentThreads).not.toHaveBeenCalled();
+  expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toMatchObject({status:'CANCELLED',errorCode:'NOT_AUTHORIZED'});
+  const missing=await processorFixture();await new CommentImportProcessor(missing.repo,missing.pages,missing.access,null).run(tenant,missing.run.id);
+  expect(await missing.repo.latest(user,tenant,brand,missing.publicationId)).toMatchObject({status:'FAILED',errorCode:'CONFIGURATION_REQUIRED'});
+  expect(missing.access.accessForComments).not.toHaveBeenCalled();
+ });
+ it('persists retry state without exposing raw provider exceptions to the reporter',async()=>{
+  const f=await processorFixture();vi.mocked(f.provider.commentThreads).mockRejectedValue(new Error('sensitive-provider-payload'));
+  const capture=vi.fn(),processor=new CommentImportProcessor(f.repo,f.pages,f.access,f.provider,{capture});
+  await processor.run(tenant,f.run.id);
+  expect(await f.repo.latest(user,tenant,brand,f.publicationId)).toMatchObject({status:'QUEUED',errorCode:'PROVIDER_UNAVAILABLE',completedPages:0,attempt:1});
+  expect(capture.mock.calls[0]?.[0].message).toBe('PROVIDER_UNAVAILABLE');
+  await processor.run(tenant,f.run.id);expect(f.provider.commentThreads).toHaveBeenCalledTimes(1);
+ });
+
+ it('refuses reply positions pointing outside the publication or to another reply',async()=>{
+  const f=await processorFixture(),other=record(await publication());await insert(other);
+  const root=record(f.publicationId);await insert(root);
+  const child={...record(f.publicationId),parentId:root.id!,externalThreadId:root.externalThreadId,replyCount:null,canReply:null,isPublic:null};await insert(child);
+  const job=(await f.repo.claim(tenant,f.run.id))!;
+  for(const parentId of [other.id!,child.id!,randomUUID()]){
+   const position={kind:'REPLIES' as const,cursor:null,parentId,pendingParentIds:[],nextThreadCursor:null};
+   await database.client`update comment_imports set position=${JSON.stringify(position)}::jsonb where id=${job.id}`;
+   await expect(f.repo.preparePage({...job,position})).rejects.toThrow('PROVIDER_REJECTED');
+  }
  });
 
 });

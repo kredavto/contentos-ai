@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
@@ -114,6 +114,23 @@ async function dispatch(request: Request, context: RouteContext) {
         if(path[3]&&path[4]==='performance'&&path.length===5){
           if(request.method==='GET')return ok(await performance.list(user.userId,tenantId,path[3]));
           if(request.method==='POST')return ok(await performance.decide(user.userId,tenantId,path[3],await readBody(request),correlationId));
+        }
+        if(path[3]&&path[4]==='publications'&&path[5]&&path[6]==='comments'){
+          const scope=[user.userId,tenantId,path[3],path[5]] as const;
+          if(path.length===7&&request.method==='GET'){
+            const query=Object.fromEntries(new URL(request.url).searchParams);
+            const data=await comments.list(...scope,query),sync=await commentImports.latest(...scope);
+            return ok({...data,sync});
+          }
+          if(path[7]==='imports'){
+            if(path.length===8&&request.method==='GET')return ok(await commentImports.latest(...scope));
+            if(path.length===8&&request.method==='POST'){await auth.throttle('comment-import',user.userId);return ok(await commentImports.request(...scope,await readBody(request),correlationId),202);}
+            if(path[8]&&path.length===10&&request.method==='POST'){
+              if(path[9]==='resume'){await auth.throttle('comment-import',user.userId);return ok(await commentImports.resume(...scope,path[8],await readBody(request)),202);}
+              if(path[9]==='cancel')return ok(await commentImports.cancel(...scope,path[8],await readBody(request)));
+            }
+          }
+          if(path[7]&&path[7]!=='imports'&&path.length===8&&request.method==='PATCH')return ok(await comments.triage(...scope,path[7],await readBody(request),correlationId));
         }
         if(path[3]&&path[4]==='publication-analytics'&&path.length===5){
           if(request.method==='GET')return ok(await publicationAnalytics.overview(user.userId,tenantId,path[3]));
@@ -292,3 +309,5 @@ async function dispatch(request: Request, context: RouteContext) {
 export const GET = dispatch;
 export const POST = dispatch;
 export const PUT = dispatch;
+
+export const PATCH = dispatch;

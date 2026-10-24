@@ -70,3 +70,5 @@ export * from './repositories/provider-keys';
 export * from './repositories/comments';
 
 export * from './repositories/comment-imports';
+
+export * from './repositories/comment-import-pages';

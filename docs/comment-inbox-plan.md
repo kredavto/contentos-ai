@@ -43,3 +43,19 @@ Store each comment with an internal UUID, tenant/publication association, provid
 Use a durable import run plus bounded page tasks: save each validated page and its next cursor atomically with the next outbox event. A lease token fences page completion. Record visited cursors per run to reject longer cycles, not just identical consecutive tokens. Fetch replies independently for every known thread with replies; a thread-list completion does not imply reply completion. A bounded run that reaches its page/time budget exposes PARTIAL with a resumable cursor, never SUCCEEDED with an apparently complete inbox. Missing rows from a refresh are not deletions; confirmed unavailable objects need explicit evidence and a retained review history.
 
 These are design constraints for the next migration/service slice, not implemented storage or execution guarantees.
+
+
+## Implemented import boundary and HTTP surface (2026-10-24)
+
+The storage, import lifecycle, transactional page persistence, processor and worker queue described above are now implemented locally. Full regression before HTTP wiring passed 710 tests in 98 files. No live Google read or comment send was performed.
+
+Canonical scope: `/api/v1/organizations/:tenantId/brands/:brandId/publications/:publicationId/comments`.
+
+- GET lists roots or replies using optional `parentId`, `status` and paired `afterCreatedAt`/`afterId`. Response includes `items`, `next`, and `sync: {job, configuration}`. A null job means never imported, not confirmed empty. Partial/failed/cancelled jobs do not establish completeness; successful imports are snapshots and retain previously observed comments.
+- PATCH `/:commentId` changes local triage only, with `revision`, `contentRevision` and `status`.
+- GET `/imports` polls safe job progress and configuration, without credentials or cursors.
+- POST `/imports` creates an idempotent import intent using `idempotencyKey`.
+- POST `/imports/:importId/resume` resumes a PARTIAL import at the saved position using `revision`; only the original requester can resume.
+- POST `/imports/:importId/cancel` cancels using `revision` and the current management role.
+
+All routes reuse authenticated sessions, tenant/brand/publication service authorization, normalized envelopes, no-store responses and Origin checks for mutations. Import requests/resumes also use the auth throttle in addition to durable per-publication cooldown and active-run limits. Inbox UI and browser acceptance remain pending. These routes neither suggest nor send replies.

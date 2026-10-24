@@ -1269,3 +1269,28 @@ Frozen isolated commit 5f981e3 passed migration 0084, workspace/test types, lint
 Rubric group 23 increases 0→1 for verified adapter/data/service groundwork, making 98/160 (61.25%, rounded approximately 61%). Runtime import page commits/worker wiring and inbox UI remain absent; no generated replies or live provider acceptance is claimed.
 
 - Integrated primary production build passed (26.417 s), exit 0. The previous Vercel API deployment was independently checked via the connected Vercel tool and reports READY. Comment source is ready for preview delivery; production infrastructure and end-to-end comment import remain incomplete.
+
+- Delivery confirmed: commit 31e399821b1c0bf8de4a7c59f2aa96e70825345f was pushed to codex/subscription-billing. Connected Vercel reports READY for deployment dpl_54mmGYHgYbaPr7skroCPc6zDxjTS at https://contentos-n8p1bjsrj-digagency.vercel.app, with the matching Git SHA and Preview target. GitHub CI run 40051929575 was still in progress when read; no completed CI result is claimed for this commit.
+- The completed youtube-comment-inbox worktree was archived and its archived artifact was verified; all source commits are integrated in the primary checkout. Mobile evidence was preserved at /tmp/contentos-youtube-comments-mobile.png, and verification logs remain outside the archived worktree. Further development uses /Users/urijlebedinskij/Documents/CODEX/CONTENTOS AI explicitly. The progress rubric was mechanically checked: 40 groups, 98/160 points, 61.25%.
+
+
+## Comment import page persistence — 2026-10-24 (local, not deployed)
+
+Added strict normalized thread/reply page validation and transactional page persistence. A page commit rechecks the current lease, actor permissions, connection generation, publication/channel identity and observation freshness. Comments, cursor receipts and import progress commit together; invalid associations or cursor cycles roll back the entire page. Provider edits preserve manual triage state, stale provider content cannot overwrite newer content, and exhausting the page budget leaves a resumable PARTIAL import. Missing comments are not treated as deletions.
+
+Verification: 22 PostgreSQL integration tests passed (`/tmp/contentos-comment-page-final-tests.log`); 10 page-boundary/position unit tests passed (`/tmp/contentos-comment-page-boundary.log`); workspace/test typechecks and ESLint completed successfully (`/tmp/contentos-comment-page-final-checks.log`). These are focused local checks, not a fresh full regression, browser acceptance or deployment. The worker processor and user-facing inbox remain outstanding. Overall coverage stays **98/160 ≈61%**.
+
+Progress reporting: include the overall functional coverage estimate, verified changes and the next unfinished step in each substantial stage report. Do not increase the percentage merely because a commit or test run completed.
+
+
+## Comment import processor and worker wiring — 2026-10-24 (local)
+
+Added a one-page processor that resolves reply parents under the lease and publication authorization, checks encrypted OAuth scope before and after provider reads, and delegates atomic persistence to the page repository. Provider failures use durable bounded retry state and safe reporting. Worker wiring now includes a dedicated BullMQ queue, database outbox dispatch, health/error reporting and shutdown; the publishing demo adapter does not supply synthetic comments.
+
+Focused PostgreSQL verification: **27 tests passed** (`/tmp/contentos-comment-processor-final-tests.log`), including thread-to-reply execution, post-read scope loss, mismatched channel, missing configuration, safe retry errors and rejection of foreign-publication/non-root parent positions. Full regression was started with output at `/tmp/contentos-comment-import-worker-full.log`; its completion is not yet confirmed. No browser/live YouTube acceptance or deployment of this slice has occurred. User-facing inbox/API and reply workflows remain outstanding; overall coverage remains **≈61%**.
+
+
+Full comment-import regression completed successfully: **710 tests / 98 files**, migrations through 0084, workspace/test typechecks and lint (`/tmp/contentos-comment-import-worker-full.log`, 121.96 seconds for tests). Owned test resources were removed. This checkpoint includes worker wiring but predates the new HTTP routes; it does not include a browser/live-provider acceptance or deployment.
+
+
+Comment HTTP routes added for scoped listing with explicit sync/configuration state, revision-checked manual triage, polling and import request/resume/cancel. Focused API tests passed **10/10** across new comment routes and existing v1 auth contract (`/tmp/contentos-comment-routes-final-tests.log`). The initial run exposed a missing PATCH export and a GET-with-body test fixture; both were corrected before the successful rerun. Updated workspace/test typechecks and lint completed successfully after the corrections. UI/browser acceptance, build and deployment remain pending; estimate **≈61%**.
