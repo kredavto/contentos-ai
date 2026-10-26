@@ -208,6 +208,9 @@ importers:
       '@sentry/node':
         specifier: ^11.6.0
         version: 11.6.0
+      ioredis:
+        specifier: ^5.0.0
+        version: 5.11.1
       nodemailer:
         specifier: ^10.0.14
         version: 10.0.14

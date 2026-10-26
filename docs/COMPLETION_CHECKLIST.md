@@ -148,7 +148,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 130 | SEARCH | Implemented 2026-10-22: tenant-scoped brand/idea/current-script/content/publication search with literal matching, keyset pages and dashboard UI; 570 tests and Chrome search scenario passed. Large-tenant performance, direct entity selection and broader UX review remain — docs/search.md. | PARTIAL |
 | 131 | OBSERVABILITY | See TECH_SPEC.md §131; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 132 | STRUCTURED LOGGING | See TECH_SPEC.md §132; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 133 | HEALTH ENDPOINTS | Source audit 2026-10-26: web liveness exists at /api/health; dependency readiness route /api/health/ready is absent and must be implemented/tested. | PARTIAL |
+| 133 | HEALTH ENDPOINTS | Separate Node /api/health/ready probes PostgreSQL/Redis/private S3, with 200/503/no-store, native cancellation, coalescing, monotonic caching and no external-provider coupling. Full 830-test checkpoint, full MVP/readiness browsers and final 16-test/wire/HTTP acceptance passed — readiness.md. Production configuration/acceptance remains separate. | LOCAL_VERIFIED |
 | 134 | PROVIDER CIRCUIT BREAKER | Source audit 2026-10-26: LLM requests have explicit timeouts and no SDK retries, but no CLOSED/OPEN/HALF_OPEN breaker implementation exists. | MISSING |
 | 135 | TIMEOUT | See TECH_SPEC.md §135; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 136 | DATABASE INDEXES | See TECH_SPEC.md §136; current implementation evidence must be inspected | AUDIT_REQUIRED |

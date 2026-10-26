@@ -16,6 +16,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1146.0",
     "@contentos/types": "workspace:*",
     "@sentry/node": "^11.6.0",
+    "ioredis": "^5.0.0",
     "nodemailer": "^10.0.14",
     "openai": "^7.27.0",
     "zod": "^4.3.6"

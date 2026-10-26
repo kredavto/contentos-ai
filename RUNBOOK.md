@@ -16,7 +16,7 @@ docker compose -p "$CONTENTOS_COMPOSE_PROJECT" -f deploy/compose.production.yml 
 
 A stopped worker is not proof that an external operation did not happen. Retain durable send/submission markers and allow leases to expire through the state machine. Block new admission through the relevant deployment switch/policy while diagnosing. Scope-specific rollout exceptions override less-specific rules; a GLOBAL policy alone is not an absolute kill switch. Environment switches and pausing the exact worker are the deployment controls. Existing external requests, queued mail already marked for sending and published material cannot be recalled by a toggle.
 
-`/api/health` is public web-process liveness only. Worker `/health` covers its queue workers/Redis connection. Neither proves database/storage/provider readiness. Specification §133's dependency readiness route is still pending at this checkpoint; use separately bounded database, Redis and private-storage checks from the approved infrastructure console. AI/provider availability must be reported separately from core infrastructure.
+`/api/health` is public web-process liveness only. `/api/health/ready` separately checks PostgreSQL SELECT 1, Redis PING and signed S3 HeadBucket, returning only 200/503 with coarse dependency states. Its per-process cache can lag a change by five seconds plus the bounded fresh check. Worker `/health` covers its queue workers/Redis connection. Core readiness does not establish migration/write/KMS/provider correctness; verify those separately. See [readiness.md](docs/readiness.md) for permissions, deadlines and acceptance limits.
 
 ## Database unavailable
 

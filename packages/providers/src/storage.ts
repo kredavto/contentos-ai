@@ -1,4 +1,4 @@
-import { S3Client,PutObjectCommand,GetObjectCommand,DeleteObjectCommand,HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client,PutObjectCommand,GetObjectCommand,DeleteObjectCommand,HeadObjectCommand,HeadBucketCommand } from '@aws-sdk/client-s3';
 import {createPresignedPost} from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { z } from 'zod';
@@ -90,6 +90,10 @@ export class S3StorageProvider implements RangeStorageProvider,DirectUploadProvi
     });
   }
   async delete(key:string,context:OperationContext){this.key(key,context);await this.operation('delete',context,signal=>this.client.send(new DeleteObjectCommand({Bucket:this.settings.bucket,Key:key}),{abortSignal:signal}));}
+  async ready(signal:AbortSignal){
+    signal.throwIfAborted();
+    await this.client.send(new HeadBucketCommand({Bucket:this.settings.bucket}),{abortSignal:AbortSignal.any([signal,AbortSignal.timeout(1200)])});
+  }
   close(){this.client.destroy();}
 }
 

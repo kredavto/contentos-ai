@@ -9,9 +9,12 @@ if(!process.env.MOCK_VIDEO_FILE||!process.env.FFMPEG_PATH)throw new Error('Video
 await promisify(execFile)(process.env.FFMPEG_PATH,['-nostdin','-v','error','-y','-f','lavfi','-i','color=c=green:s=320x240:r=30:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-map','0:v','-map','1:a','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart',process.env.MOCK_VIDEO_FILE]);
 if(process.env.MOCK_IMAGE_FILE)for(const [width,height] of [[1024,1024],[1024,1536],[1536,1024]])await sharp({create:{width:width!,height:height!,channels:3,background:'#aacdbf'}}).png().toFile(process.env.MOCK_IMAGE_FILE.replace('{size}',`${width}x${height}`));
 const objects = new Map<string,{bytes:Buffer;mime:string}>();
+let bucketAvailable=true;
 const server = createServer(async(request,response)=>{
   const path = new URL(request.url ?? '/', 'http://127.0.0.1:8027').pathname;
   if (path === '/health') {response.end('ok');return;}
+  if(request.method==='POST'&&(path==='/__fixture/storage/off'||path==='/__fixture/storage/on')){bucketAvailable=path.endsWith('/on');response.end('ok');return;}
+  if((path==='/contentos-e2e'||path==='/contentos-e2e/')&&request.method==='HEAD'){response.writeHead(bucketAvailable?200:403);response.end();return;}
   if(path==='/contentos-e2e'&&request.method==='POST'){
     try{
       const chunks:Buffer[]=[];let size=0;
