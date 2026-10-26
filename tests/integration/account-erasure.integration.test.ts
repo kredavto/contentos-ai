@@ -71,10 +71,14 @@ describe.skipIf(!url)('explicit account authentication-data erasure',()=>{
    expect(await repository.eligibility(f.id)).toMatchObject({eligible:false,mailReview:true});await expect(f.confirm()).rejects.toThrow('CONFLICT');expect(await database.client`select id from email_outbox where id=${f.mail}`).toHaveLength(1);
   }
  });
- it('fences cancellation, password changes and another account request',async()=>{
+ it('fences a canceled erasure intake',async()=>{
   const f=await fixture();await intake.cancel(f.id,{requestId:f.request.id,revision:f.request.revision},randomUUID());await expect(f.confirm()).rejects.toThrow('CONFLICT');
-  const g=await fixture();await database.client`update users set password_hash='changed' where id=${g.id}`;await expect(repository.request(g.id,proof,g.input,randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
-  const h=await fixture();await expect(repository.request(h.id,proof,{...h.input,requestId:f.request.id},randomUUID())).rejects.toThrow('CONFLICT');
+ });
+ it('fences a changed password proof',async()=>{
+  const f=await fixture();await database.client`update users set password_hash='changed' where id=${f.id}`;await expect(repository.request(f.id,proof,f.input,randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+ });
+ it('rejects another account erasure intake',async()=>{
+  const f=await fixture(),other=await fixture();await expect(repository.request(other.id,proof,{...other.input,requestId:f.request.id},randomUUID())).rejects.toThrow('CONFLICT');
  });
  it('blocks stale-session organization creation and late membership insertion after access closure',async()=>{
   const f=await fixture();await f.confirm();const other=await fixture(),organization=await new BrandRepository(database.db).createOrganization(other.id,'Other organization','UTC',randomUUID());

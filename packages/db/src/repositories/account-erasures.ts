@@ -6,13 +6,14 @@ import type {Transaction} from './ledger';
 const allowedReferences=new Set(['sessions.user_id','auth_tokens.user_id','audit_logs.user_id','account_deletion_requests.user_id','account_erasures.user_id']);
 /** Fail closed on every other direct user FK, including newly added product modules. */
 export async function accountErasureDependencies(tx:Transaction,userId:string){
- const references=await tx.execute<{schema_name:string;table_name:string;column_name:string;key_count:number}>(sql`
-  select ns.nspname as schema_name,cl.relname as table_name,at.attname as column_name,cardinality(fk.conkey) as key_count
+ const references=await tx.execute<{schema_name:string;table_name:string;column_name:string;target_column:string;key_count:number}>(sql`
+  select ns.nspname as schema_name,cl.relname as table_name,at.attname as column_name,target_attr.attname as target_column,cardinality(fk.conkey) as key_count
   from pg_constraint fk join pg_class cl on cl.oid=fk.conrelid join pg_namespace ns on ns.oid=cl.relnamespace
   join pg_attribute at on at.attrelid=fk.conrelid and at.attnum=fk.conkey[1]
+  join pg_attribute target_attr on target_attr.attrelid=fk.confrelid and target_attr.attnum=fk.confkey[1]
   where fk.contype='f' and fk.confrelid='public.users'::regclass`);
  for(const reference of references){
-  if(reference.key_count!==1)throw new DomainError('CONFIGURATION_REQUIRED',503);
+  if(reference.key_count!==1||reference.target_column!=='id')throw new DomainError('CONFIGURATION_REQUIRED',503);
   if(reference.schema_name==='public'&&allowedReferences.has(reference.table_name+'.'+reference.column_name))continue;
   const [row]=await tx.execute<{present:boolean}>(sql`select exists(select 1 from ${sql.identifier(reference.schema_name)}.${sql.identifier(reference.table_name)} where ${sql.identifier(reference.column_name)}=${userId}::uuid) as present`);
   if(row?.present)return true;

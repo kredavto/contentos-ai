@@ -151,7 +151,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 133 | HEALTH ENDPOINTS | Separate Node /api/health/ready probes PostgreSQL/Redis/private S3, with 200/503/no-store, native cancellation, coalescing, monotonic caching and no external-provider coupling. Full 830-test checkpoint, full MVP/readiness browsers and final 16-test/wire/HTTP acceptance passed — readiness.md. Production configuration/acceptance remains separate. | LOCAL_VERIFIED |
 | 134 | PROVIDER CIRCUIT BREAKER | Source audit 2026-10-26: LLM requests have explicit timeouts and no SDK retries, but no CLOSED/OPEN/HALF_OPEN breaker implementation exists. | MISSING |
 | 135 | TIMEOUT | See TECH_SPEC.md §135; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 136 | DATABASE INDEXES | See TECH_SPEC.md §136; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 136 | DATABASE INDEXES | Migration 0095 and database-index-audit.md cover user-reference and tenant read paths; production load/p95 remains unverified | PARTIAL |
 | 137 | UNIQUE CONSTRAINTS | See TECH_SPEC.md §137; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 138 | DATABASE TRANSACTIONS | See TECH_SPEC.md §138; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 139 | AI PROMPT VERSIONING | Source audit 2026-10-26: workflow instructions are code constants; prompt_templates and persisted generation prompt-version binding are absent. | MISSING |

@@ -34,7 +34,15 @@ test(`${kind} library runs through API, S3, BullMQ, FFmpeg, browser playback and
   expect((await page.request.post(`${base}/${intent.id}/confirm`,{headers})).status()).toBe(202);
   expect((await page.request.post(`${base}/${intent.id}/confirm`,{headers})).status()).toBe(202);
   await expect.poll(async()=>(await database.client`select status from library_media where id=${intent.id}`)[0]?.status,{timeout:60000}).toBe('READY');
-  const [row]=await database.client`select * from library_media where id=${intent.id}`;expect(row).toMatchObject({attempt:1,mime_type:kind==='video'?'video/mp4':'audio/mpeg',width:kind==='video'?320:null,height:kind==='video'?240:null,has_audio:true});expect(row!.duration_ms).toBeGreaterThanOrEqual(1000);
+  const [row]=await database.client`select * from library_media where id=${intent.id}`;expect(row).toMatchObject({mime_type:kind==='video'?'video/mp4':'audio/mpeg',width:kind==='video'?320:null,height:kind==='video'?240:null,has_audio:true});expect(row!.duration_ms).toBeGreaterThanOrEqual(1000);
+  // The worker intentionally retries transient transport failures. Verify bounded
+  // execution and exactly one completion rather than assuming a first-attempt success.
+  expect(row!.attempt).toBeGreaterThanOrEqual(1);expect(row!.attempt).toBeLessThanOrEqual(3);
+  const history=await database.client<{action:string;count:number}[]>`select action,count(*)::int as count from audit_logs where tenant_id=${tenant} and resource_id=${intent.id} and action in ('LIBRARY_MEDIA_RUNNING','LIBRARY_MEDIA_RETRY','LIBRARY_MEDIA_READY','LIBRARY_MEDIA_FAILED') group by action`;
+  const counts=Object.fromEntries(history.map(event=>[event.action,event.count]));
+  expect(counts).toMatchObject({LIBRARY_MEDIA_RUNNING:row!.attempt,LIBRARY_MEDIA_READY:1});
+  expect(counts.LIBRARY_MEDIA_RETRY??0).toBe(row!.attempt-1);expect(counts.LIBRARY_MEDIA_FAILED??0).toBe(0);
+  expect(row!.storage_key).toBe(`${tenant}/library/${intent.id}/${row!.attempt}.${kind==='video'?'mp4':'mp3'}`);
   const download=await page.request.get(`${base}/${intent.id}/download`);expect(download.status()).toBe(200);const signed=(await download.json()).data.url;
   const file=await request.get(signed);expect(file.status()).toBe(200);expect((await file.body()).length).toBeGreaterThan(100);if(kind==='video')expect((await file.body()).toString('ascii',4,8)).toBe('ftyp');
   const overview=(await (await page.request.get(base)).json()).data;expect(overview.assets).toHaveLength(1);expect(JSON.stringify(overview)).not.toContain('sourceKey');expect(JSON.stringify(overview)).not.toContain('storageKey');

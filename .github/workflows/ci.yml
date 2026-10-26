@@ -28,6 +28,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://contentos:ci-test-only@localhost:5432/contentos_test
       TEST_DATABASE_URL: postgresql://contentos:ci-test-only@localhost:5432/contentos_test
+      TEST_REDIS_URL: redis://localhost:6379/14
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
