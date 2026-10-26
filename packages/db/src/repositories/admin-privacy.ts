@@ -1,4 +1,4 @@
-import {eq,sql} from 'drizzle-orm';
+import {desc,eq,sql} from 'drizzle-orm';
 import {DomainError} from '@contentos/types';
 import type {Database} from '../index';
 import * as s from '../schema';
@@ -10,7 +10,7 @@ export class AdminPrivacyRepository {
  async inspect(userId:string,requestId:string,correlationId:string){
   return this.db.transaction(async tx=>{
    await tx.execute(sql`set local statement_timeout = '5s'`);
-   await assertPlatformOperator(tx,userId);
+   const operator=await assertPlatformOperator(tx,userId);
    const [request]=await tx.select({id:s.accountDeletionRequests.id,userId:s.accountDeletionRequests.userId,status:s.accountDeletionRequests.status,revision:s.accountDeletionRequests.revision,createdAt:s.accountDeletionRequests.createdAt,cancelledAt:s.accountDeletionRequests.cancelledAt}).from(s.accountDeletionRequests).where(eq(s.accountDeletionRequests.id,requestId));
    if(!request)throw new DomainError('NOT_FOUND',404);
    const subject=request.userId;
@@ -32,8 +32,9 @@ export class AdminPrivacyRepository {
    }).from(s.users).where(eq(s.users.id,subject));
    if(!inventory)throw new Error('Privacy inventory unavailable');
    await tx.insert(s.auditLogs).values({userId,action:'ADMIN_DELETION_INSPECTED',resourceId:requestId,correlationId});
-   const [execution]=await tx.select({id:s.accountErasures.id,status:s.accountErasures.status,scope:s.accountErasures.consentVersion,createdAt:s.accountErasures.createdAt,completedAt:s.accountErasures.completedAt,errorCode:s.accountErasures.errorCode}).from(s.accountErasures).where(eq(s.accountErasures.requestId,requestId));
-   return {request,inventory,execution:execution??null,inspectedAt:new Date().toISOString(),executionAvailable:false as const};
+   const [execution]=await tx.select({id:s.accountErasures.id,status:s.accountErasures.status,scope:s.accountErasures.consentVersion,recoveryId:s.accountErasures.recoveryId,createdAt:s.accountErasures.createdAt,completedAt:s.accountErasures.completedAt,errorCode:s.accountErasures.errorCode}).from(s.accountErasures).where(eq(s.accountErasures.requestId,requestId));
+   const history=execution?await tx.select({id:s.accountErasureRecoveries.id,reason:s.accountErasureRecoveries.reason,ticket:s.accountErasureRecoveries.ticket,previousAttempt:s.accountErasureRecoveries.previousAttempt,previousErrorCode:s.accountErasureRecoveries.previousErrorCode,createdAt:s.accountErasureRecoveries.createdAt}).from(s.accountErasureRecoveries).where(eq(s.accountErasureRecoveries.erasureId,execution.id)).orderBy(desc(s.accountErasureRecoveries.createdAt),desc(s.accountErasureRecoveries.id)).limit(11):[];
+   return {request,inventory,recoveries:history.slice(0,10),hasMoreRecoveries:history.length>10,execution:execution??null,recoveryAvailable:operator.role==='ADMIN'&&execution?.status==='BLOCKED',inspectedAt:new Date().toISOString(),executionAvailable:false as const};
   },{isolationLevel:'repeatable read'});
  }
 }

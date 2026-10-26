@@ -74,3 +74,5 @@ export * from './comment-deliveries';
 export * from './comment-delivery-resolution';
 
 export * from './account-erasures';
+
+export * from './account-erasure-recovery';

@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { accountErasure, commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { accountErasureRecovery, accountErasure, commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
@@ -45,6 +45,7 @@ async function dispatch(request: Request, context: RouteContext) {
     if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
+      if(path[1]==='account-erasures'&&path[2]&&path[3]==='retry'&&path.length===4&&request.method==='POST'){await auth.throttle('account-erasure-recovery',user.userId);return ok(await accountErasureRecovery.retry(user.userId,path[2],await readBody(request),correlationId),202);}
       if(path[1]==='deletion-requests'&&path[2]&&path.length===3&&request.method==='GET'){await auth.throttle('admin-privacy',user.userId);return ok(await admin.inspectDeletion(user.userId,path[2],correlationId));}
       if(key==='admin/comment-delivery-resolution'&&request.method==='POST'){await auth.throttle('comment-delivery-resolution',user.userId);return ok(await commentDeliveryResolution.resolve(user.userId,await readBody(request),correlationId));}
       if(key==='admin/youtube-resolution'&&request.method==='POST'){await auth.throttle('youtube-resolution',user.userId);return ok(await youtubeResolutions.request(user.userId,await readBody(request),correlationId),202);}

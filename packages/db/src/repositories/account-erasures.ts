@@ -5,7 +5,7 @@ import {users,sessions,authTokens,emailOutbox,accountDeletionRequests,accountEra
 import type {Transaction} from './ledger';
 const allowedReferences=new Set(['sessions.user_id','auth_tokens.user_id','audit_logs.user_id','account_deletion_requests.user_id','account_erasures.user_id']);
 /** Fail closed on every other direct user FK, including newly added product modules. */
-async function dependencies(tx:Transaction,userId:string){
+export async function accountErasureDependencies(tx:Transaction,userId:string){
  const references=await tx.execute<{schema_name:string;table_name:string;column_name:string;key_count:number}>(sql`
   select ns.nspname as schema_name,cl.relname as table_name,at.attname as column_name,cardinality(fk.conkey) as key_count
   from pg_constraint fk join pg_class cl on cl.oid=fk.conrelid join pg_namespace ns on ns.oid=cl.relnamespace
@@ -19,7 +19,7 @@ async function dependencies(tx:Transaction,userId:string){
  }
  return false;
 }
-async function lockMail(tx:Transaction,userId:string){
+export async function lockAccountErasureMail(tx:Transaction,userId:string){
  const rows=await tx.select({status:emailOutbox.status}).from(emailOutbox).where(and(eq(emailOutbox.userId,userId),inArray(emailOutbox.status,['PENDING','SENDING','RECONCILIATION']))).limit(1001).for('update');
  return rows.length>1000||rows.some(row=>row.status==='SENDING'||row.status==='RECONCILIATION');
 }
@@ -28,7 +28,7 @@ export class AccountErasureRepository{
  async eligibility(userId:string){return this.db.transaction(async tx=>{
   await tx.execute(sql`set local statement_timeout='5s'`);
   const [user]=await tx.select({id:users.id}).from(users).where(and(eq(users.id,userId),isNull(users.disabledAt),isNotNull(users.emailVerifiedAt))).for('share');if(!user)throw new DomainError('NOT_AUTHORIZED',403);
-  const resourceReview=await dependencies(tx,userId),mailReview=await tx.select({id:emailOutbox.id}).from(emailOutbox).where(and(eq(emailOutbox.userId,userId),inArray(emailOutbox.status,['SENDING','RECONCILIATION']))).limit(1);
+  const resourceReview=await accountErasureDependencies(tx,userId),mailReview=await tx.select({id:emailOutbox.id}).from(emailOutbox).where(and(eq(emailOutbox.userId,userId),inArray(emailOutbox.status,['SENDING','RECONCILIATION']))).limit(1);
   return {eligible:!resourceReview&&!mailReview.length,resourceReview,mailReview:mailReview.length>0};
  });}
  async request(userId:string,passwordHash:string,input:{requestId:string;revision:string;idempotencyKey:string},correlationId:string){return this.db.transaction(async tx=>{
@@ -40,7 +40,7 @@ export class AccountErasureRepository{
   if(user.disabledAt||!user.emailVerifiedAt||user.passwordHash!==passwordHash)throw new DomainError('NOT_AUTHORIZED',403);
   const [request]=await tx.select().from(accountDeletionRequests).where(and(eq(accountDeletionRequests.id,input.requestId),eq(accountDeletionRequests.userId,userId))).for('update');
   if(!request||request.status!=='REQUESTED'||request.revision!==input.revision)throw new DomainError('CONFLICT',409);
-  if(await dependencies(tx,userId)||await lockMail(tx,userId))throw new DomainError('CONFLICT',409);
+  if(await accountErasureDependencies(tx,userId)||await lockAccountErasureMail(tx,userId))throw new DomainError('CONFLICT',409);
   const [execution]=await tx.insert(accountErasures).values({userId,requestId:request.id,requestKey:input.idempotencyKey,consentVersion:'ACCOUNT_AUTH_DATA_V1',correlationId}).returning();
   await tx.update(users).set({disabledAt:sql`clock_timestamp()`}).where(eq(users.id,userId));
   await tx.delete(sessions).where(eq(sessions.userId,userId));
@@ -56,7 +56,7 @@ export class AccountErasureRepository{
   const [user]=await tx.select().from(users).where(eq(users.id,candidate.userId)).for('update');
   const [job]=await tx.select().from(accountErasures).where(eq(accountErasures.id,id)).for('update');if(!job||job.status!=='QUEUED')return;
   if(!user||!user.disabledAt||user.erasedAt)throw new DomainError('CONFLICT',409);
-  if(await dependencies(tx,user.id)||await lockMail(tx,user.id)){
+  if(await accountErasureDependencies(tx,user.id)||await lockAccountErasureMail(tx,user.id)){
    await tx.update(accountErasures).set({status:'BLOCKED',errorCode:'RESOURCE_REVIEW_REQUIRED'}).where(eq(accountErasures.id,id));
    await tx.insert(auditLogs).values({userId:user.id,resourceId:id,action:'ACCOUNT_AUTH_ERASURE_BLOCKED',correlationId:job.correlationId});return;
   }

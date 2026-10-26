@@ -47,7 +47,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();
     await expect(review.getByRole('status')).toContainText('ожидает обработки');
     await expect(review.getByText('Сначала требуется решить вопрос владения организациями.',{exact:false})).toBeVisible();
-    await expect(review.getByText('Этот экран не разрешает стирание.',{exact:false})).toBeVisible();
+    await expect(review.getByText('Проверка зависимостей не разрешает стирание.',{exact:false})).toBeVisible();
     await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await review.screenshot({path:testInfo.outputPath('deletion-review-mobile.png')});await page.setViewportSize({width:1280,height:900});
     await database.client`update account_deletion_requests set status='CANCELLED',cancelled_at=now(),revision=${randomUUID()} where id=${deletion}`;
     await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();await expect(review.getByRole('status')).toContainText('отменён');
@@ -138,4 +138,43 @@ test('ADMIN publishes a priced version while SUPPORT stays read-only', async ({ 
     await database.client`update platform_operators set revoked_at=now() where user_id=${actor}`;
     await database.client`delete from sessions where user_id=${actor}`;
   }
+});
+
+test('ADMIN resumes a blocked self-confirmed profile erasure without extending its scope',async({page,context,baseURL})=>{
+ const actor=randomUUID(),subject=randomUUID(),request=randomUUID(),job={id:randomUUID()},token=randomBytes(32).toString('base64url');
+ for(const id of [actor,subject])await database.client`insert into users(id,email,name,password_hash,email_verified_at) values(${id},${id+'@example.test'},'Recovery browser fixture','unusable-test-proof',now())`;
+ await database.client`insert into sessions(user_id,token_hash,expires_at) values(${actor},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+ await database.client`insert into platform_operators(user_id,role) values(${actor},'SUPPORT')`;
+ // Synthetic consent fixture is already blocked when it becomes visible to the real worker.
+ await database.client.begin(async tx=>{
+  await tx`insert into account_deletion_requests(id,user_id,request_key) values(${request},${subject},${randomUUID()})`;
+  await tx`update users set disabled_at=now() where id=${subject}`;
+  await tx`insert into account_erasures(id,user_id,request_id,request_key,consent_version,correlation_id,status,attempt,error_code) values(${job.id},${subject},${request},${randomUUID()},'ACCOUNT_AUTH_DATA_V1',${randomUUID()},'BLOCKED',3,'ERASURE_FAILED')`;
+ });
+ try{
+ await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
+ await page.goto('/admin');
+ await page.getByLabel('Раздел администрирования',{exact:true}).selectOption('deletion_requests');
+ const review=page.getByRole('region',{name:'Проверка запроса удаления'});
+ await review.getByLabel('Запрос для проверки',{exact:true}).selectOption(request);await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();
+ await expect(review.getByText('Отдельная операция удаления профиля и данных входа:',{exact:false})).toContainText('требует ручной проверки');
+ await expect(review.getByRole('button',{name:'Возобновить удаление профиля',exact:true})).toHaveCount(0);
+ const headers={origin:baseURL!},input={expectedRecoveryId:null,idempotencyKey:randomUUID(),reason:'TRANSIENT_FAILURE_RESOLVED',ticket:'BROWSER-RECOVERY',acknowledgeOriginalScope:true};
+ expect((await page.request.post(`/api/v1/admin/account-erasures/${job.id}/retry`,{headers,data:input})).status()).toBe(403);
+ await database.client`update platform_operators set role='ADMIN' where user_id=${actor}`;
+ await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();
+ const form=review.getByRole('form',{name:'Возобновление удаления профиля'});
+ await form.getByLabel('Причина',{exact:true}).selectOption('TRANSIENT_FAILURE_RESOLVED');await form.getByLabel('Номер обращения',{exact:true}).fill('BROWSER-RECOVERY');
+ await expect(form.getByRole('button',{name:'Возобновить удаление профиля',exact:true})).toBeDisabled();
+ await form.getByRole('checkbox').check();await form.getByRole('button',{name:'Возобновить удаление профиля',exact:true}).click();
+ await expect(review.getByRole('heading',{name:'Последние возобновления',exact:true})).toBeVisible();
+ await expect.poll(async()=>String((await database.client`select status from account_erasures where id=${job.id}`)[0]?.status),{timeout:30000}).toBe('COMPLETED');
+ await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();await expect(review.getByText('Отдельная операция удаления профиля и данных входа:',{exact:false})).toContainText('выполнена');
+ expect((await database.client`select email from users where id=${subject}`)[0]?.email).toBe(`deleted+${subject}@account.invalid`);
+ expect(await database.client`select id from account_erasure_recoveries where erasure_id=${job.id}`).toHaveLength(1);
+ }finally{
+  // Preserve immutable consent/recovery evidence; remove the fixture's active authority.
+  await database.client`update platform_operators set revoked_at=now() where user_id=${actor}`;
+  await database.client`delete from sessions where user_id=${actor}`;
+ }
 });

@@ -1,6 +1,7 @@
 'use client';
 import {useState} from 'react';
 import type {AdminService} from '@contentos/core';
+import {AccountErasureRecovery} from './account-erasure-recovery';
 import {api} from '../lib/api-client';
 type Inspection=Awaited<ReturnType<AdminService['inspectDeletion']>>;
 const labels:Record<keyof Inspection['inventory'],string>={
@@ -20,8 +21,10 @@ export function AdminDeletionReview({requestIds}:{requestIds:string[]}){
    {data.inventory.ownedOrganizations!=='0'?<p className="notice warning">Сначала требуется решить вопрос владения организациями. Удаление аккаунта не должно оставлять организацию без владельца.</p>:null}
    <dl>{(Object.keys(labels) as Array<keyof typeof labels>).map(key=><div className="summary-row" key={key}><dt>{labels[key]}</dt><dd>{data.inventory[key]}</dd></div>)}</dl>
    {data.execution?<p role="status">Отдельная операция удаления профиля и данных входа: {data.execution.status==='COMPLETED'?'выполнена':data.execution.status==='BLOCKED'?'требует ручной проверки':'в очереди'} · ID {data.execution.id}</p>:null}
+   {data.recoveries.length?<><h3>Последние возобновления</h3><ul>{data.recoveries.map(item=><li key={item.id}>{item.ticket} · {item.reason==='DEPENDENCIES_RESOLVED'?'Зависимости устранены':'Временный сбой устранён'} · {new Date(item.createdAt).toLocaleString('ru-RU')} · предыдущая ошибка: {item.previousErrorCode??'нет'}</li>)}</ul>{data.hasMoreRecoveries?<p>Показаны последние 10 записей. Полная история сохранена.</p>:null}</>:null}
+   {data.recoveryAvailable&&data.execution?<AccountErasureRecovery key={`${data.execution.id}/${data.execution.recoveryId??'initial'}`} id={data.execution.id} recoveryId={data.execution.recoveryId} onRecovered={inspect}/>:null}
    <p className="notice warning">Автор загрузки или согласия не обязательно является человеком на фото или владельцем ресурса. Подключение могло перейти другому владельцу. Сначала нужно определить состав удаляемых данных и проверить внешние операции.</p>
-   <p>Нулевые счётчики не подтверждают отсутствие всех персональных данных: содержимое материалов, образы и голоса, публикации и платёжные документы требуют отдельной проверки. Этот экран не разрешает стирание. Подтверждение удаления профиля и данных входа выполняет сам пользователь отдельным действием.</p>
+   <p>Нулевые счётчики не подтверждают отсутствие всех персональных данных: содержимое материалов, образы и голоса, публикации и платёжные документы требуют отдельной проверки. Проверка зависимостей не разрешает стирание. Подтверждение удаления профиля и данных входа выполняет сам пользователь отдельным действием. Администратор может возобновить только такую уже подтверждённую заблокированную операцию.</p>
   </>:null}
  </section>;
 }

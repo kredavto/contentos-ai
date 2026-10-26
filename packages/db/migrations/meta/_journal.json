@@ -652,6 +652,13 @@
       "when": 1793017725255,
       "tag": "0092_reserve_erased_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1793020950234,
+      "tag": "0093_account_erasure_recovery",
+      "breakpoints": true
     }
   ]
 }
