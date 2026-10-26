@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { accountErasure, commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
@@ -40,6 +40,8 @@ async function dispatch(request: Request, context: RouteContext) {
     }
     if (key === 'privacy' && request.method === 'GET') return ok(await privacy.overview(user.userId));
     if (key === 'privacy/export' && request.method === 'POST') { await auth.throttle('account-export', user.userId); return ok(await privacy.exportAccount(user.userId, await readBody(request), correlationId)); }
+    if(key==='privacy/erasure'&&request.method==='GET'){await auth.throttle('account-erasure-read',user.userId);return ok(await accountErasure.eligibility(user.userId));}
+    if(key==='privacy/erasure'&&request.method==='POST'){await auth.throttle('account-erasure',user.userId);const result=await accountErasure.request(user.userId,await readBody(request),correlationId);jar.delete(sessionCookie);return ok(result,202);}
     if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {

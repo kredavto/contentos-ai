@@ -20,6 +20,8 @@ export class BrandRepository {
   }
   async createOrganization(userId: string, name: string, timezone: string, correlationId: string) {
     return this.db.transaction(async tx => {
+      const [actor]=await tx.select({id:s.users.id}).from(s.users).where(and(eq(s.users.id,userId),isNull(s.users.disabledAt))).for('share');
+      if(!actor)throw new DomainError('NOT_AUTHORIZED',403);
       const [organization] = await tx.insert(s.organizations).values({ name }).returning();
       if (!organization) throw new Error('Organization insert failed');
       await tx.insert(s.organizationMembers).values({ userId, tenantId: organization.id, role: 'OWNER' });

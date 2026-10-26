@@ -4,7 +4,7 @@ const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull(
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(), email: text('email').notNull(), passwordHash: text('password_hash').notNull(),
   name: text('name').notNull(), emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
-  disabledAt: timestamp('disabled_at', { withTimezone: true }), createdAt: createdAt(),
+  disabledAt: timestamp('disabled_at', { withTimezone: true }), erasedAt:timestamp('erased_at',{withTimezone:true}), createdAt: createdAt(),
 }, t => [uniqueIndex('users_email_uq').on(t.email), check('users_email_normalized', sql`${t.email} = lower(trim(${t.email}))`)]);
 export const sessions = pgTable('sessions', {
   id: uuid('id').primaryKey().defaultRandom(), userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

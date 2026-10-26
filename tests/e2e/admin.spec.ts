@@ -47,7 +47,7 @@ test('platform operator reads safe data and revokes sessions with an audit recor
     await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();
     await expect(review.getByRole('status')).toContainText('ожидает обработки');
     await expect(review.getByText('Сначала требуется решить вопрос владения организациями.',{exact:false})).toBeVisible();
-    await expect(review.getByText('Автоматическое удаление пока не подключено.',{exact:false})).toBeVisible();
+    await expect(review.getByText('Этот экран не разрешает стирание.',{exact:false})).toBeVisible();
     await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await review.screenshot({path:testInfo.outputPath('deletion-review-mobile.png')});await page.setViewportSize({width:1280,height:900});
     await database.client`update account_deletion_requests set status='CANCELLED',cancelled_at=now(),revision=${randomUUID()} where id=${deletion}`;
     await review.getByRole('button',{name:'Проверить зависимости',exact:true}).click();await expect(review.getByRole('status')).toContainText('отменён');

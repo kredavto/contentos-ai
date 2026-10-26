@@ -56,3 +56,7 @@ Agency mode is gated by `AGENCY_MODE_ENABLED` (default `false`) and explicit own
 `PLATFORM_ADMIN_ENABLED` defaults to `false`. Enabling it does not grant anyone operator rights: a trusted host operator must explicitly provision an existing verified account. The console exposes only selected configuration names/statuses, never environment credentials. See [platform administration](docs/platform-admin.md).
 
 Server-only monitoring: ERROR_REPORTING_PROVIDER defaults to disabled. Set sentry plus SENTRY_DSN and optional SENTRY_RELEASE in web and worker secrets to enable metadata-only reports. Invalid DSN is CONFIGURATION_REQUIRED in operator readiness; see [error monitoring](docs/error-monitoring.md). Never expose these as NEXT_PUBLIC settings.
+
+### Resource-free authentication/profile erasure
+
+`ACCOUNT_ERASURE_ENABLED=false` is the default. Setting it to true admits only the separate self-confirmed ACCOUNT_AUTH_DATA_V1 flow, after current-password and dependency checks. It does not reinterpret historical deletion requests or permit organization/media/provider erasure. Confirmed durable executions continue in the worker even after admission is disabled. Apply all migrations through 0092 before starting this worker version. The worker performs database-only transactions and does not require a provider cleanup credential for this limited scope.

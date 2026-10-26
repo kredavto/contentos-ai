@@ -72,3 +72,5 @@ export * from './comment-delivery-processor';
 export * from './comment-deliveries';
 
 export * from './comment-delivery-resolution';
+
+export * from './account-erasures';

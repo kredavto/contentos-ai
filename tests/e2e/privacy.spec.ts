@@ -52,7 +52,7 @@ test('privacy center registers and cancels a request and revokes every session',
     await expect(page.getByLabel('Текущий пароль', { exact: true })).toHaveValue('');
     await page.getByLabel('Текущий пароль', { exact: true }).fill(password);
     page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Запросить удаление аккаунта', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('Запрос зарегистрирован');
+    await expect(page.getByRole('status').filter({hasText:'Запрос зарегистрирован'})).toContainText('Запрос зарегистрирован');
     await page.reload();
     await expect(page.getByRole('button', { name: 'Отменить запрос', exact: true })).toBeVisible();
     expect(await database.client`select id from account_deletion_requests where user_id=${user} and status='REQUESTED'`).toHaveLength(1);
@@ -68,4 +68,32 @@ test('privacy center registers and cancels a request and revokes every session',
     await expect(page).toHaveURL(/\/login$/); expect((await second.request.get('/api/v1/auth/session')).status()).toBe(401);
     expect(errors).toEqual([]);
   } finally { await second.close(); await database.client`delete from sessions where user_id=${user}`; }
+});
+
+test('resource-free account explicitly erases authentication data without reinterpreting intake consent',async({page,context,baseURL},testInfo)=>{
+ const user=randomUUID(),email=user+'@example.test',password='Disposable browser erasure 123!',token=randomBytes(32).toString('base64url');
+ await database.client`insert into users(id,email,name,password_hash,email_verified_at) values(${user},${email},'Erasure browser fixture',${await hashPassword(password)},now())`;
+ await database.client`insert into sessions(user_id,token_hash,expires_at) values(${user},${createHash('sha256').update(token).digest('hex')},now()+interval '1 hour')`;
+ await database.client`insert into auth_tokens(user_id,token_hash,type,expires_at) values(${user},${randomUUID()},'RESET_PASSWORD',now()+interval '1 hour')`;
+ await context.addCookies([{name:'contentos_session',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
+ try{
+  await page.goto('/privacy');await page.getByLabel('Текущий пароль',{exact:true}).fill(password);
+  await page.getByLabel('Я понимаю, что отправляю запрос, а удаление ещё не выполнено.',{exact:true}).check();
+  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Запросить удаление аккаунта',exact:true}).click();
+  const panel=page.getByRole('region',{name:'Удаление профиля и данных входа',exact:true});await expect(panel).toBeVisible();
+  expect(await database.client`select id from account_erasures where user_id=${user}`).toHaveLength(0);
+  expect((await page.request.post('/api/v1/privacy/erasure',{data:{}})).status()).toBe(403);
+  const submit=panel.getByRole('button',{name:'Закрыть аккаунт и удалить данные входа',exact:true});await expect(submit).toBeDisabled();
+  await panel.getByLabel('Пароль для закрытия аккаунта',{exact:true}).fill(password);
+  await panel.getByLabel('Подтверждаю необратимое удаление профиля и данных входа и выход на всех устройствах',{exact:true}).check();await expect(submit).toBeDisabled();
+  await panel.getByLabel('Понимаю состав удаления и сохранение технического журнала и общих данных',{exact:true}).check();await expect(submit).toBeEnabled();await submit.click();
+  await expect(page.getByRole('heading',{name:'Доступ к аккаунту закрыт',exact:true})).toBeVisible();
+  expect((await page.request.get('/api/v1/me')).status()).toBe(401);
+  await expect.poll(async()=>{const [row]=await database.client`select status from account_erasures where user_id=${user}`;return row?.status;},{timeout:30000}).toBe('COMPLETED');
+  const [profile]=await database.client`select email,name,email_verified_at,erased_at from users where id=${user}`;
+  expect(profile).toMatchObject({email:`deleted+${user}@account.invalid`,name:'Удалённый аккаунт',email_verified_at:null});expect(profile?.erased_at).not.toBeNull();
+  expect(await database.client`select id from sessions where user_id=${user}`).toHaveLength(0);expect(await database.client`select id from auth_tokens where user_id=${user}`).toHaveLength(0);
+  expect(await database.client`select id from audit_logs where user_id=${user} and action='ACCOUNT_AUTH_ERASURE_COMPLETED'`).toHaveLength(1);
+  await page.screenshot({path:testInfo.outputPath('account-auth-erasure.png'),fullPage:true});
+ }finally{await database.client`delete from sessions where user_id=${user}`;}
 });

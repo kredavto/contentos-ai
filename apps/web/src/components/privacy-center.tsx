@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { PrivacyService } from '@contentos/core';
+import {AccountAuthErasure} from './account-auth-erasure';
 import { api } from '../lib/api-client';
 type Overview = Awaited<ReturnType<PrivacyService['overview']>>;
 type Organization = { id: string; name: string; role: string };
@@ -9,6 +10,7 @@ type Brand = { id: string; name: string; onboardingCompletedAt: string | null };
 export function PrivacyCenter() {
   const [data, setData] = useState<Overview | null>(null), [organizations, setOrganizations] = useState<Organization[]>([]);
   const [tenant, setTenant] = useState(''), [brands, setBrands] = useState<Brand[]>([]), [brand, setBrand] = useState('');
+  const [closed,setClosed]=useState('');
   const [exportPassword, setExportPassword] = useState('');
   const [password, setPassword] = useState(''), [acknowledged, setAcknowledged] = useState(false), [intent, setIntent] = useState('');
   const [pending, setPending] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
@@ -45,6 +47,8 @@ export function PrivacyCenter() {
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось завершить сессии'); setPending(false); }
   }
   const selectedBrand = brands.find(item => item.id === brand);
+  const activeDeletionRequest=data?.requests.find(request=>request.status==='REQUESTED');
+  if(closed)return <div className="page-container"><h1>Доступ к аккаунту закрыт</h1><p role="status">Все сессии завершены. Данные профиля и входа поставлены в очередь удаления.</p><p>ID операции: {closed}</p><p>Пока обработка не завершена, это не подтверждение полного удаления всех данных. Статус операции доступен оператору поддержки.</p><Link href="/login">К странице входа</Link></div>;
   return <div className="page-container"><Link className="back-link" href="/dashboard">В рабочее пространство</Link><div className="page-eyebrow">ДАННЫЕ И ДОСТУП</div><h1>Приватность</h1>
     {error ? <p className="notice error" role="alert">{error}</p> : null}{message ? <p className="saved-message" role="status">{message}</p> : null}
     {!data ? <p>Загружаем настройки приватности…</p> : <>
@@ -67,6 +71,7 @@ export function PrivacyCenter() {
         </form> : null}
         <h3>Последние 20 запросов</h3>{!data.requests.length ? <p>Запросов нет.</p> : data.requests.map(request => <article key={request.id}><p>{request.status === 'REQUESTED' ? 'Ожидает обработки' : 'Отменён'} · {new Date(String(request.createdAt)).toLocaleString('ru-RU')}</p><small>ID: {request.id}</small>{request.status === 'REQUESTED' ? <p><button className="button secondary" disabled={pending} onClick={() => void cancel(request)}>Отменить запрос</button></p> : null}</article>)}
       </section>
+      {data.user.verifiedAt&&activeDeletionRequest?<AccountAuthErasure key={activeDeletionRequest.id} request={activeDeletionRequest} onClosed={setClosed}/>:null}
     </>}
   </div>;
 }

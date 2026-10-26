@@ -31,7 +31,7 @@ const url=process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)('comment storage constraints',()=>{
  const database=isolatedTestDatabase(url),{user,tenant,brand}=demoIds;
  const service=new CommentService(new CommentRepository(database.db));
- async function member(role:string,disabled=false){const id=randomUUID();await database.client`insert into users(id,email,password_hash,name,email_verified_at,disabled_at) values(${id},${`${id}@example.test`},'unusable','Comment reviewer',now(),${disabled?new Date().toISOString():null})`;await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenant},${id},${role})`;return id;}
+ async function member(role:string,disabled=false){const id=randomUUID();await database.client`insert into users(id,email,password_hash,name,email_verified_at,disabled_at) values(${id},${`${id}@example.test`},'unusable','Comment reviewer',now(),null)`;await database.client`insert into organization_members(tenant_id,user_id,role) values(${tenant},${id},${role})`;if(disabled)await database.client`update users set disabled_at=now() where id=${id}`;return id;}
  beforeAll(async()=>{await seedDevelopment(database.db,`scrypt:v1:${'0'.repeat(32)}:${'0'.repeat(128)}`);});
  async function publication(){
   const content=randomUUID(),connection=randomUUID(),calendar=randomUUID(),job=randomUUID(),id=randomUUID(),now=new Date().toISOString();

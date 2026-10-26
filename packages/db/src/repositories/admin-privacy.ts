@@ -32,7 +32,8 @@ export class AdminPrivacyRepository {
    }).from(s.users).where(eq(s.users.id,subject));
    if(!inventory)throw new Error('Privacy inventory unavailable');
    await tx.insert(s.auditLogs).values({userId,action:'ADMIN_DELETION_INSPECTED',resourceId:requestId,correlationId});
-   return {request,inventory,inspectedAt:new Date().toISOString(),executionAvailable:false as const};
+   const [execution]=await tx.select({id:s.accountErasures.id,status:s.accountErasures.status,scope:s.accountErasures.consentVersion,createdAt:s.accountErasures.createdAt,completedAt:s.accountErasures.completedAt,errorCode:s.accountErasures.errorCode}).from(s.accountErasures).where(eq(s.accountErasures.requestId,requestId));
+   return {request,inventory,execution:execution??null,inspectedAt:new Date().toISOString(),executionAvailable:false as const};
   },{isolationLevel:'repeatable read'});
  }
 }
