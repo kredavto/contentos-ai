@@ -82,3 +82,5 @@ export * from './repositories/comment-deliveries';
 export * from './repositories/account-erasures';
 
 export * from './repositories/account-erasure-recovery';
+
+export * from './repositories/feature-policy';

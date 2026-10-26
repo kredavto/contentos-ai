@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {createHash} from 'node:crypto';
 import {and,desc,eq} from 'drizzle-orm';
 import {DomainError,commentReplyApprovalSchema,commentReplyApprovalBindingSchema,type CommentReplyApproval} from '@contentos/types';
@@ -30,7 +31,7 @@ export class CommentReplyApprovalRepository{
  async approve(userId:string,tenantId:string,brandId:string,publicationId:string,commentId:string,raw:CommentReplyApproval,correlationId:string){
   const input=commentReplyApprovalSchema.parse(raw),inputHash=createHash('sha256').update(JSON.stringify({brandId,publicationId,commentId,...input})).digest('hex');
   return this.db.transaction(async tx=>{
-   await lockTenant(tx,tenantId);await authorizeComment(tx,userId,tenantId,brandId,publicationId);await assertMembership(tx,userId,tenantId,'approve');
+   await lockTenant(tx,tenantId);await authorizeComment(tx,userId,tenantId,brandId,publicationId);await assertMembership(tx,userId,tenantId,'approve');await assertManagedFeature(tx,'comments',userId,tenantId);
    const [existing]=await tx.select().from(commentReplyApprovals).where(and(eq(commentReplyApprovals.tenantId,tenantId),eq(commentReplyApprovals.idempotencyKey,input.idempotencyKey)));
    if(existing){if(existing.approvedBy!==userId||existing.inputHash!==inputHash)throw new DomainError('CONFLICT',409);return {id:existing.id,version:existing.version};}
    const target=await commentReplyApprovalBinding(tx,userId,tenantId,brandId,publicationId,commentId,input.version,input.revision);

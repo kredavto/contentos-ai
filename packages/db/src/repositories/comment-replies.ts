@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {and,desc,eq,lt,sql} from 'drizzle-orm';
 import {DomainError,commentReplyInputSchema,commentReplyEditSchema,type CommentReplyInput,type CommentReplyEdit} from '@contentos/types';
 import type {Database} from '../index';
@@ -26,7 +27,7 @@ export class CommentReplyRepository{
  async save(userId:string,tenantId:string,brandId:string,publicationId:string,commentId:string,raw:CommentReplyEdit,brain:Pick<CommentReplyInput,'brain'|'brandRevision'>,correlationId:string){
   const input=commentReplyEditSchema.parse(raw);
   return this.db.transaction(async tx=>{
-   await lockTenant(tx,tenantId);await authorizeComment(tx,userId,tenantId,brandId,publicationId,true);
+   await lockTenant(tx,tenantId);await authorizeComment(tx,userId,tenantId,brandId,publicationId,true);await assertManagedFeature(tx,'comments',userId,tenantId);
    const [brand]=await tx.select().from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))).for('share');
    if(!brand||brand.revision!==brain.brandRevision)throw new DomainError('CONFLICT',409);
    const [comment]=await tx.select().from(comments).where(scope(tenantId,publicationId,commentId)).for('update');if(!comment)throw new DomainError('NOT_FOUND',404);

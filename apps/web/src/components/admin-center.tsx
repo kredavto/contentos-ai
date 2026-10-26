@@ -5,6 +5,7 @@ import { adminCategories, adminListSchema, adminRevokeSessionsSchema, type Admin
 import { api } from '../lib/api-client';
 import {CommentDeliveryResolution} from './comment-delivery-resolution';
 import {YouTubeResolution} from './youtube-resolution';
+import {AdminFeaturePolicy} from './admin-feature-policy';
 import {AdminDeletionReview} from './admin-deletion-review';
 import { AdminFinance } from './admin-finance';
 import { AdminPricing } from './admin-pricing';
@@ -57,7 +58,7 @@ export function AdminCenter() {
       {category==='deletion_requests'&&page?<AdminDeletionReview key={page.rows.map(row=>row.id).join(':')} requestIds={page.rows.map(row=>String(row.id))}/>:null}
       <AdminFinance />
       {category==='publishing_reconciliation'&&access.role==='ADMIN'?<YouTubeResolution ready={access.configuration.some(item=>item.name==='Сверка YouTube'&&item.status==='CONFIGURED')} onResolved={()=>void load(category,null,appliedFilter)}/>:null}
-      <AdminPricing />
+      <AdminFeaturePolicy/><AdminPricing />
       <section className="panel brand-profile-editor"><h2>Завершить сессии пользователя</h2><p className="muted">Используйте ID пользователя и номер обращения. Пароль не меняется; новые входы остаются доступны. Для аккаунтов операторов используйте собственный выход из всех сессий.</p><form onSubmit={event => { event.preventDefault(); void revoke(); }} className="admin-support-form"><div><label htmlFor="admin-target">ID пользователя для отзыва сессий</label><input id="admin-target" required maxLength={36} value={target} disabled={pending || loading} onChange={event => { setTarget(event.target.value); setIntent(''); }} /></div><div><label htmlFor="admin-reason">Причина</label><select id="admin-reason" value={reason} disabled={pending || loading} onChange={event => { setReason(event.target.value); setIntent(''); }}><option value="USER_REQUEST">Запрос пользователя</option><option value="SECURITY_INCIDENT">Инцидент безопасности</option><option value="SUPPORT_CASE">Обращение в поддержку</option></select></div><div><label htmlFor="admin-ticket">Номер обращения</label><input id="admin-ticket" required minLength={3} maxLength={80} value={ticket} disabled={pending || loading} onChange={event => { setTicket(event.target.value); setIntent(''); }} /></div><button className="button secondary" disabled={pending || loading}>Отозвать сессии</button><button type="button" className="button secondary" disabled={pending || loading} onClick={() => { setTarget(''); setTicket(''); setIntent(''); setMessage(''); }}>Новое обращение</button></form></section>
     </> : null}
   </div>;

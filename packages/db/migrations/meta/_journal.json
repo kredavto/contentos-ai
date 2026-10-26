@@ -659,6 +659,13 @@
       "when": 1793020950234,
       "tag": "0093_account_erasure_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1793023880683,
+      "tag": "0094_scoped_feature_policies",
+      "breakpoints": true
     }
   ]
 }

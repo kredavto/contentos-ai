@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {randomUUID} from 'node:crypto';
 import {and,asc,desc,eq,lte,or,sql,inArray} from 'drizzle-orm';
 import {DomainError,commentReplyApprovalBindingSchema,youtubeCommentReplyInputSchema} from '@contentos/types';
@@ -15,6 +16,7 @@ async function approvedTarget(tx:Transaction,actorId:string,tenantId:string,bran
  const [approval]=await tx.select().from(commentReplyApprovals).where(and(eq(commentReplyApprovals.tenantId,tenantId),eq(commentReplyApprovals.id,approvalId)));
  if(!approval)throw new DomainError('NOT_FOUND',404);
  await authorizeCommentImport(tx,actorId,tenantId,brandId,approval.publicationId,true);
+ if(!receiptOnly)await assertManagedFeature(tx,'comments',actorId,tenantId);
  const [revoked]=await tx.select({id:commentReplyApprovalRevocations.id}).from(commentReplyApprovalRevocations).where(and(eq(commentReplyApprovalRevocations.tenantId,tenantId),eq(commentReplyApprovalRevocations.approvalId,approvalId)));
  if(revoked&&!receiptOnly)throw new DomainError('CONFLICT',409);
  // Recording a historical remote fact must not revive or require a current approval.

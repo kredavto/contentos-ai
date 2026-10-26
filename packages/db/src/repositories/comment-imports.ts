@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {randomUUID} from 'node:crypto';
 import {and,asc,desc,eq,gte,inArray,isNull,lte,or} from 'drizzle-orm';
 import {DomainError,commentImportPositionSchema,commentImportRequestSchema,youtubeVideoIdSchema,youtubeChannelIdSchema,type ErrorCode} from '@contentos/types';
@@ -17,6 +18,7 @@ export async function authorizeCommentImport(tx:Transaction,userId:string,tenant
 }
 async function target(tx:Transaction,userId:string,tenantId:string,brandId:string,publicationId:string){
  const row=await authorizeCommentImport(tx,userId,tenantId,brandId,publicationId,true);
+ await assertManagedFeature(tx,'comments',userId,tenantId);
  const [connection]=await tx.select().from(socialConnections).where(and(eq(socialConnections.tenantId,tenantId),eq(socialConnections.id,row.job.connectionId),eq(socialConnections.brandId,brandId)));
  if(!connection||connection.provider!=='youtube'||connection.reference.provider!=='youtube'||connection.reference.metadata.demo===true)throw new DomainError('CONFIGURATION_REQUIRED',503);
  if(connection.status!=='ACTIVE'||!connection.credential)throw new DomainError('SOCIAL_TOKEN_EXPIRED',409);

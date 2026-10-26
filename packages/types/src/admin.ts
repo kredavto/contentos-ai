@@ -28,7 +28,7 @@ export const adminPlanSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['amountMinor'], message: 'FREE must be zero; paid plans require a positive price' });
 });
 export type AdminPlanInput = z.infer<typeof adminPlanSchema>;
-export type AdminPlan = { code: string; name: string; enabled: boolean; version: number; planVersionId: string | null; amountMinor: number; currency: string; aiCredits: number; videoSeconds: number };
+export type AdminPlan = { planId?:string; code: string; name: string; enabled: boolean; version: number; planVersionId: string | null; amountMinor: number; currency: string; aiCredits: number; videoSeconds: number };
 export const adminFinanceSchema = z.object({
   from: z.string().datetime({ offset: true }), to: z.string().datetime({ offset: true }),
   tenantId: z.uuid().optional(), paymentMode: z.enum(['LIVE', 'TEST']).default('LIVE'),

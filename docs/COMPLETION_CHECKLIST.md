@@ -114,7 +114,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 96 | PROVIDER COSTS | See TECH_SPEC.md §96; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 97 | UNIT ECONOMICS DASHBOARD | See TECH_SPEC.md §97; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 98 | AUDIT LOG | See TECH_SPEC.md §98; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 99 | FEATURE FLAGS | See TECH_SPEC.md §99; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 99 | FEATURE FLAGS | Scoped GLOBAL/PLAN/ORGANIZATION/USER rollout governance, current-plan resolution, immutable operator evidence, effective API/admin UI and runtime admission/queue gates implemented. Full regression checkpoint plus 30 focused storage/worker tests, all 36 Chromium scenarios, final 17 policy/pricing tests and 4 admin/policy browsers passed — feature-policies.md. Deployment/provider readiness and unsupported features remain separate. | LOCAL_VERIFIED |
 | 100 | BYOK | Encrypted storage, owner management API/HeyGen UI, explicit authentication check, scoped public voice catalog with editor connection selection/pagination, immutable avatar/video API/worker binding with explicit creation UI, revision fencing, revoke and account creation-evidence export; see provider-key-storage.md. Private voices, OpenAI routing, safe key rebinding, full erasure and live verification remain. | PARTIAL |
 | 101 | SECURITY | See TECH_SPEC.md §101; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 102 | TENANT ISOLATION | See TECH_SPEC.md §102; current implementation evidence must be inspected | AUDIT_REQUIRED |
@@ -148,13 +148,13 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 130 | SEARCH | Implemented 2026-10-22: tenant-scoped brand/idea/current-script/content/publication search with literal matching, keyset pages and dashboard UI; 570 tests and Chrome search scenario passed. Large-tenant performance, direct entity selection and broader UX review remain — docs/search.md. | PARTIAL |
 | 131 | OBSERVABILITY | See TECH_SPEC.md §131; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 132 | STRUCTURED LOGGING | See TECH_SPEC.md §132; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 133 | HEALTH ENDPOINTS | See TECH_SPEC.md §133; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 134 | PROVIDER CIRCUIT BREAKER | See TECH_SPEC.md §134; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 133 | HEALTH ENDPOINTS | Source audit 2026-10-26: web liveness exists at /api/health; dependency readiness route /api/health/ready is absent and must be implemented/tested. | PARTIAL |
+| 134 | PROVIDER CIRCUIT BREAKER | Source audit 2026-10-26: LLM requests have explicit timeouts and no SDK retries, but no CLOSED/OPEN/HALF_OPEN breaker implementation exists. | MISSING |
 | 135 | TIMEOUT | See TECH_SPEC.md §135; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 136 | DATABASE INDEXES | See TECH_SPEC.md §136; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 137 | UNIQUE CONSTRAINTS | See TECH_SPEC.md §137; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 138 | DATABASE TRANSACTIONS | See TECH_SPEC.md §138; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 139 | AI PROMPT VERSIONING | See TECH_SPEC.md §139; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 139 | AI PROMPT VERSIONING | Source audit 2026-10-26: workflow instructions are code constants; prompt_templates and persisted generation prompt-version binding are absent. | MISSING |
 | 140 | PROMPT INJECTION | See TECH_SPEC.md §140; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 141 | AI OUTPUT COST LIMITS | See TECH_SPEC.md §141; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 142 | RATE LIMITING | See TECH_SPEC.md §142; current implementation evidence must be inspected | AUDIT_REQUIRED |
@@ -169,7 +169,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 151 | DATA RESIDENCY PROFILE | See TECH_SPEC.md §151; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 152 | NON-FUNCTIONAL REQUIREMENTS | See TECH_SPEC.md §152; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 153 | BACKUPS | Real disposable PostgreSQL backup/restore verified; daily production backups, PITR and storage recovery missing — docs/database-recovery.md | PARTIAL |
-| 154 | DISASTER RECOVERY | See TECH_SPEC.md §154; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 154 | DISASTER RECOVERY | RUNBOOK.md covers DB/Redis/AI/storage outages, compromised keys, migration and publishing/payment/email incidents, containment, isolated restore and controlled resumption. Procedure references reviewed against current code/deployment docs; production drills and RPO/RTO remain unverified. | PARTIAL |
 | 155 | PRODUCT ANALYTICS | See TECH_SPEC.md §155; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 156 | MVP FEATURE SET | See TECH_SPEC.md §156; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 157 | DEVELOPMENT SPRINT 0 — FOUNDATION | See TECH_SPEC.md §157; current implementation evidence must be inspected | AUDIT_REQUIRED |

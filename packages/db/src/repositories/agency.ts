@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import { createHash, randomUUID } from 'node:crypto';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { DomainError, type AgencyClientInput } from '@contentos/types';
@@ -30,6 +31,7 @@ export class AgencyRepository {
   async setMode(userId: string, tenantId: string, enabled: boolean, revision: number, correlationId: string) {
     return this.db.transaction(async tx => {
       await lockTenant(tx, tenantId); await assertMembership(tx, userId, tenantId, 'billing');
+      if(enabled)await assertManagedFeature(tx,'agency_mode',userId,tenantId);
       const current = await mode(tx, tenantId);
       if (current.revision !== revision) throw new DomainError('CONFLICT', 409);
       const updated = { enabled, revision: revision + 1 };
@@ -41,7 +43,7 @@ export class AgencyRepository {
   async addClient(userId: string, tenantId: string, input: AgencyClientInput, correlationId: string) {
     const hash = createHash('sha256').update(JSON.stringify(input.kind === 'CREATE' ? { kind: input.kind, name: input.name, timezone: input.timezone } : { kind: input.kind, organizationId: input.organizationId })).digest('hex');
     return this.db.transaction(async tx => {
-      await lockTenant(tx, tenantId); await agencyMember(tx, userId, tenantId, true);
+      await lockTenant(tx, tenantId); await agencyMember(tx, userId, tenantId, true);await assertManagedFeature(tx,'agency_mode',userId,tenantId);
       if (!(await mode(tx, tenantId)).enabled) throw new DomainError('NOT_AUTHORIZED', 403);
       const [existing] = await tx.select().from(agencyClients).where(and(eq(agencyClients.tenantId, tenantId), eq(agencyClients.requestKey, input.idempotencyKey)));
       if (existing) {
@@ -74,6 +76,7 @@ export class AgencyRepository {
   async setArchived(userId: string, tenantId: string, clientId: string, revision: string, archived: boolean, correlationId: string) {
     return this.db.transaction(async tx => {
       await lockTenant(tx, tenantId); await agencyMember(tx, userId, tenantId, true);
+      if(!archived)await assertManagedFeature(tx,'agency_mode',userId,tenantId);
       if (!(await mode(tx, tenantId)).enabled) throw new DomainError('NOT_AUTHORIZED', 403);
       const scope = and(eq(agencyClients.tenantId, tenantId), eq(agencyClients.id, clientId));
       const [client] = await tx.select().from(agencyClients).where(scope).for('update');

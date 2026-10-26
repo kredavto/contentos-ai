@@ -76,3 +76,5 @@ export * from './comment-delivery-resolution';
 export * from './account-erasures';
 
 export * from './account-erasure-recovery';
+
+export * from './feature-policy';

@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {and,eq,inArray,sql} from 'drizzle-orm';
 import {DomainError,type EncryptedCredential,type ProviderKeyProvider,type ProviderKeyReference} from '@contentos/types';
 import type {Database} from '../index';
@@ -14,8 +15,8 @@ async function authorize(tx:Transaction,userId:string,tenantId:string,brandId:st
  const [brand]=await tx.select({id:brands.id}).from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId)));if(!brand)throw new DomainError('NOT_FOUND',404);
 }
 /** Called inside the consumer transaction, under its tenant lock, before persisting remote results. */
-export async function resolveProviderKey(tx:Transaction,userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference){
- await assertMembership(tx,userId,tenantId,'generate');await entitlement(tx,tenantId);
+export async function resolveProviderKey(tx:Transaction,userId:string,tenantId:string,brandId:string,reference:ProviderKeyReference,observation=false){
+ await assertMembership(tx,userId,tenantId,'generate');if(!observation)await assertManagedFeature(tx,'byok',userId,tenantId);await entitlement(tx,tenantId);
  const [row]=await tx.select().from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.id,reference.id),eq(providerKeys.revision,reference.revision),eq(providerKeys.status,'ACTIVE')));
  if(!row?.credential)throw new DomainError('CONFIGURATION_REQUIRED',503);return row;
 }
@@ -37,10 +38,10 @@ export class ProviderKeyRepository {
   await tx.insert(auditLogs).values({tenantId,userId,resourceId:reference.id,action:'PROVIDER_KEY_CHECKED',correlationId});
  });}
  async list(userId:string,tenantId:string,brandId:string){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);return tx.select(metadata).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId))).orderBy(providerKeys.provider);});}
- async prepare(userId:string,tenantId:string,brandId:string,provider:ProviderKeyProvider){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);await entitlement(tx,tenantId);const [row]=await tx.select(metadata).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.provider,provider)));return row??null;});}
+ async prepare(userId:string,tenantId:string,brandId:string,provider:ProviderKeyProvider){return this.db.transaction(async tx=>{await authorize(tx,userId,tenantId,brandId);await assertManagedFeature(tx,'byok',userId,tenantId);await entitlement(tx,tenantId);const [row]=await tx.select(metadata).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.provider,provider)));return row??null;});}
  async save(userId:string,tenantId:string,brandId:string,input:{id:string;provider:ProviderKeyProvider;credential:EncryptedCredential;maskedKey:string;revision:number|null},correlationId:string){
   return this.db.transaction(async tx=>{
-   await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId);await entitlement(tx,tenantId);
+   await lockTenant(tx,tenantId);await authorize(tx,userId,tenantId,brandId);await assertManagedFeature(tx,'byok',userId,tenantId);await entitlement(tx,tenantId);
    const [row]=await tx.select(metadata).from(providerKeys).where(and(eq(providerKeys.tenantId,tenantId),eq(providerKeys.brandId,brandId),eq(providerKeys.provider,input.provider))).for('update');
    if((row?.revision??null)!==input.revision||(row&&row.id!==input.id))throw new DomainError('CONFLICT',409);
    const values={credential:input.credential,maskedKey:input.maskedKey,status:'ACTIVE' as const,revision:row?row.revision+1:0,updatedAt:sql`now()`};

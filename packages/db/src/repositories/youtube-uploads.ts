@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {and,eq,inArray,sql,asc} from 'drizzle-orm';
@@ -34,14 +35,14 @@ export class YouTubeUploadRepository{
     const [claimed]=await tx.update(publishingJobs).set({status,leaseToken:randomUUID(),leaseExpiresAt:sql`clock_timestamp()+interval '3 minutes'`,attempt:status==='PREPARING'?job.attempt+1:job.attempt}).where(jobWhere(tenantId,id)).returning();
     return {job:claimed!,upload:upload??null};
   });}
-  async prepare(lease:YouTubeUploadLease,policies:ConsentPolicy[]){return this.db.transaction(async tx=>{
-    await lockTenant(tx,lease.tenantId);const job=await this.owned(tx,lease);const data=await this.source(tx,job,policies);
+  async prepare(lease:YouTubeUploadLease,policies:ConsentPolicy[],write=false){return this.db.transaction(async tx=>{
+    await lockTenant(tx,lease.tenantId);const job=await this.owned(tx,lease);const data=await this.source(tx,job,policies);if(write)await assertManagedFeature(tx,'youtube_publishing',job.approvedBy,job.tenantId);
     const [upload]=await tx.select().from(youtubeUploads).where(uploadWhere(job));return {job,connection:data.connection,upload:upload??null};
   });}
   async begin(lease:YouTubeUploadLease,etag:string,policies:ConsentPolicy[]){
     if(!/^"[A-Za-z0-9_-]{1,128}"$/.test(etag))throw new DomainError('INVALID_INPUT');
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,lease.tenantId);const job=await this.owned(tx,lease);if(job.status!=='PREPARING')throw new DomainError('CONFLICT',409);
+      await lockTenant(tx,lease.tenantId);const job=await this.owned(tx,lease);if(job.status!=='PREPARING')throw new DomainError('CONFLICT',409);await assertManagedFeature(tx,'youtube_publishing',job.approvedBy,job.tenantId);
       const data=await this.source(tx,job,policies),youtube=job.snapshot.youtube!;
       const [prior]=await tx.select().from(youtubeUploads).where(uploadWhere(job));
       if(prior){
@@ -80,7 +81,7 @@ export class YouTubeUploadRepository{
   },true);}
   /** Persist THUMBNAIL before its non-read-only request. A lost acknowledgement is never blindly replayed. */
   async processed(lease:YouTubeUploadLease,video:YouTubeVideo,policies:ConsentPolicy[]){return this.mutate(lease,async(tx,job,upload)=>{
-    await this.source(tx,job,policies);this.video(job,upload,video);
+    await this.source(tx,job,policies);this.video(job,upload,video);if(job.snapshot.youtube?.coverKey)await assertManagedFeature(tx,'youtube_publishing',job.approvedBy,job.tenantId);
     if(upload.phase!=='PROCESSING'||video.state!=='READY')throw new DomainError('CONFLICT',409);
     await this.update(tx,upload,{phase:job.snapshot.youtube!.coverKey?'THUMBNAIL':'VERIFYING',retryCount:0,lastError:null});
   });}

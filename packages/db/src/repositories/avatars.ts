@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import { randomUUID,createHash } from 'node:crypto';
 import { and,eq,sql,desc,isNull,isNotNull } from 'drizzle-orm';
 import { DomainError,avatarJobInputSchema,type AvatarRequest,type AvatarJobInput,type ConsentType,type ProviderReference } from '@contentos/types';
@@ -31,6 +32,7 @@ export class AvatarRepository {
     const inputHash=createHash('sha256').update(JSON.stringify({brandId,...input})).digest('hex');
     return this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
+      await assertManagedFeature(tx,'avatar_generation',userId,tenantId);
       const [existing]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,input.idempotencyKey)));
       if(existing){if(existing.inputHash!==inputHash||existing.requestedBy!==userId||existing.type!=='CREATE_AVATAR')throw new DomainError('CONFLICT',409);return {id:existing.id,status:existing.status};}
       if(input.connection){const key=await resolveProviderKey(tx,userId,tenantId,brandId,input.connection);if(key.provider!==provider)throw new DomainError('INVALID_INPUT');}
@@ -85,7 +87,8 @@ export class AvatarRepository {
       await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);
       await assertMembership(tx,active.requestedBy,active.tenantId,'generate');
       const data=await entities(tx,active);
-      const key=data.input.connection?await resolveProviderKey(tx,active.requestedBy,job.tenantId,job.brandId,data.input.connection):null;
+      if(!data.look.reference)await assertManagedFeature(tx,'avatar_generation',active.requestedBy,active.tenantId);
+      const key=data.input.connection?await resolveProviderKey(tx,active.requestedBy,job.tenantId,job.brandId,data.input.connection,!!data.look.reference):null;
       if(data.avatar.status!=='ACTIVE')throw new DomainError('CONFLICT',409);
       await validConsent(tx,job.tenantId,data.input,policies);
       if(active.consecutiveFailures>=active.maxAttempts||(!data.look.reference&&data.look.firstSubmittedAt&&Date.now()-data.look.firstSubmittedAt.getTime()>23*3600_000))throw new DomainError('RECONCILIATION_REQUIRED',409);
@@ -123,7 +126,8 @@ export class AvatarRepository {
   async complete(job:StoredJob,policies:ConsentPolicy[]){
     await this.db.transaction(async tx=>{
       await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,active.tenantId,'generate');
-      const data=await entities(tx,active);await validConsent(tx,job.tenantId,data.input,policies);
+      const data=await entities(tx,active);
+      if(!data.look.reference)await assertManagedFeature(tx,'avatar_generation',active.requestedBy,active.tenantId);await validConsent(tx,job.tenantId,data.input,policies);
       if(data.input.connection)await resolveProviderKey(tx,active.requestedBy,job.tenantId,job.brandId,data.input.connection);
       if(data.avatar.status!=='ACTIVE'||!data.look.reference)throw new DomainError('CONFLICT',409);
       await settleInTransaction(tx,job.tenantId,job.reservationId,'CAPTURE',job.correlationId);

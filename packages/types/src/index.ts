@@ -72,3 +72,5 @@ export * from './comment-inbox';
 export * from './comment-pages';
 
 export * from './comment-replies';
+
+export * from './feature-policy';

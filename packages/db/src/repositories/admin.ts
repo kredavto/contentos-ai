@@ -75,7 +75,7 @@ export class AdminRepository {
     return this.db.transaction(async tx => {
       const operator = await assertPlatformOperator(tx, userId);
       const rows = await tx.selectDistinctOn([s.plans.id], {
-        code: s.plans.code, name: s.plans.name, enabled: s.plans.enabled,
+        planId:s.plans.id,code: s.plans.code, name: s.plans.name, enabled: s.plans.enabled,
         version: sql<number>`coalesce(${s.planVersions.version}, 0)`, planVersionId: s.planVersions.id,
         amountMinor: sql<number>`coalesce(${s.planVersions.amountMinor}, 0)`, currency: sql<string>`coalesce(${s.planVersions.currency}, 'RUB')`,
         aiCredits: sql<number>`coalesce(${s.planVersions.aiCredits}, 0)`, videoSeconds: sql<number>`coalesce(${s.planVersions.videoSeconds}, 0)`,

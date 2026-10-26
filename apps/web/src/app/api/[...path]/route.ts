@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { accountErasureRecovery, accountErasure, commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { featurePolicy, accountErasureRecovery, accountErasure, commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
@@ -45,6 +45,8 @@ async function dispatch(request: Request, context: RouteContext) {
     if (key === 'privacy/deletion' && request.method === 'POST') { await auth.throttle('account-deletion', user.userId); return ok(await privacy.request(user.userId, await readBody(request), correlationId), 202); }
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
+      if(key==='admin/feature-policy'&&request.method==='GET'){await auth.throttle('feature-policy-read',user.userId);const query=Object.fromEntries(new URL(request.url).searchParams);return ok(await featurePolicy.inspect(user.userId,{...query,targetId:query.targetId??null},correlationId));}
+      if(key==='admin/feature-policy'&&request.method==='POST'){await auth.throttle('feature-policy-write',user.userId);return ok(await featurePolicy.change(user.userId,await readBody(request),correlationId));}
       if(path[1]==='account-erasures'&&path[2]&&path[3]==='retry'&&path.length===4&&request.method==='POST'){await auth.throttle('account-erasure-recovery',user.userId);return ok(await accountErasureRecovery.retry(user.userId,path[2],await readBody(request),correlationId),202);}
       if(path[1]==='deletion-requests'&&path[2]&&path.length===3&&request.method==='GET'){await auth.throttle('admin-privacy',user.userId);return ok(await admin.inspectDeletion(user.userId,path[2],correlationId));}
       if(key==='admin/comment-delivery-resolution'&&request.method==='POST'){await auth.throttle('comment-delivery-resolution',user.userId);return ok(await commentDeliveryResolution.resolve(user.userId,await readBody(request),correlationId));}
@@ -60,6 +62,7 @@ async function dispatch(request: Request, context: RouteContext) {
     if(request.method==='POST'&&key==='team/accept')return ok(await team.accept(user.userId,await readBody(request),correlationId));
     if (path[0] === 'organizations' && path[1]) {
       const tenantId = path[1];
+      if(path[2]==='features'&&path.length===3&&request.method==='GET'){await auth.throttle('feature-policy-effective',user.userId);return ok(await featurePolicy.overview(user.userId,tenantId));}
       if(path[2]==='approvals'){
         if(path[3]&&path[4]==='comments'&&path.length===5){if(request.method==='GET')return ok(await approvals.comments(user.userId,tenantId,path[3],Object.fromEntries(new URL(request.url).searchParams)));if(request.method==='POST')return ok(await approvals.comment(user.userId,tenantId,path[3],await readBody(request),correlationId),201);}
         if(path[3]&&path[4]==='preview'&&path.length===5&&request.method==='GET')return ok(await approvals.preview(user.userId,tenantId,path[3],correlationId));

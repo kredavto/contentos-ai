@@ -73,3 +73,5 @@ export * from './comment-reply-approvals';
 export * from './comment-deliveries';
 
 export * from './account-erasures';
+
+export * from './feature-policy';

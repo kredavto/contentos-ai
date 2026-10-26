@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {randomUUID,createHash} from 'node:crypto';
 import {and,eq,asc,desc,sql,inArray,isNull,isNotNull} from 'drizzle-orm';
 import {musicFadesFit,DomainError,videoBrollSelections,brollSelectionsSchema,maxBrollTotalBytes,avatarJobInputSchema,videoJobInputSchema,videoProcessingSchema,videoStages,videoReservationSeconds,captionSegmentsSchema,type CaptionEdit,type CaptionSegment,type VideoRequest,type VideoStage,type ProviderReference} from '@contentos/types';
@@ -20,7 +21,7 @@ async function projectFor(tx:Transaction,job:StoredJob){
 }
 async function executionKey(tx:Transaction,project:StoredVideo,userId:string){
  if(!project.providerKeyId)return null;
- return resolveProviderKey(tx,userId,project.tenantId,project.brandId,{id:project.providerKeyId,revision:project.providerKeyRevision!});
+ return resolveProviderKey(tx,userId,project.tenantId,project.brandId,{id:project.providerKeyId,revision:project.providerKeyRevision!},!!project.reference);
 }
 async function musicAsset(tx:Transaction,tenantId:string,brandId:string,assetId:string){
   const [asset]=await tx.select().from(libraryMedia).where(and(eq(libraryMedia.tenantId,tenantId),eq(libraryMedia.brandId,brandId),eq(libraryMedia.id,assetId)));
@@ -98,6 +99,7 @@ export class VideoRepository {
     const inputHash=createHash('sha256').update(JSON.stringify({brandId,...input})).digest('hex');
     return this.db.transaction(async tx=>{
       await lockTenant(tx,tenantId);await assertMembership(tx,userId,tenantId,'generate');
+      await assertManagedFeature(tx,'video_generation',userId,tenantId);
       const [existing]=await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,input.idempotencyKey)));
       if(existing){if(existing.type!=='GENERATE_VIDEO'||existing.inputHash!==inputHash||existing.requestedBy!==userId)throw new DomainError('CONFLICT',409);return {id:existing.id,status:existing.status};}
       for(const slot of ['intro','outro'] as const){const clip=input.bookends?.[slot];if(clip)await bookendAsset(tx,tenantId,brandId,clip);}
@@ -163,7 +165,7 @@ export class VideoRepository {
   }
   async prepare(job:StoredJob,policies:ConsentPolicy[],markSubmitting=false){
     return this.db.transaction(async tx=>{
-      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');let project=await projectFor(tx,active);await validateVideo(tx,project,policies);await executionKey(tx,project,active.requestedBy);
+      await lockTenant(tx,job.tenantId);const active=await ownedJob(tx,job.tenantId,job.id,job.leaseToken!);await assertMembership(tx,active.requestedBy,job.tenantId,'generate');let project=await projectFor(tx,active);await validateVideo(tx,project,policies);if(!project.reference)await assertManagedFeature(tx,'video_generation',active.requestedBy,job.tenantId);await executionKey(tx,project,active.requestedBy);
       if(project.captionMode==='AUTO'&&project.captionMutationState==='UNKNOWN')throw new DomainError('RECONCILIATION_REQUIRED',409);
       if(active.consecutiveFailures>=active.maxAttempts||(!project.reference&&project.firstSubmittedAt&&Date.now()-project.firstSubmittedAt.getTime()>23*3600_000))throw new DomainError('RECONCILIATION_REQUIRED',409);
       if(project.stage==='VIDEO_REQUESTED')project=await transition(tx,project,'VOICE_PREPARING',job.correlationId,{voiceId:project.voiceId,publicVoice:true});

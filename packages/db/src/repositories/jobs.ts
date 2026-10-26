@@ -1,3 +1,4 @@
+import {assertManagedFeature} from './feature-policy';
 import {snapshotCommentReply,checkCommentReplySnapshot,persistGeneratedCommentReply} from './comment-reply-generation';
 import { randomUUID, createHash } from 'node:crypto';
 import { and, eq, sql, desc, inArray } from 'drizzle-orm';
@@ -21,6 +22,8 @@ export class JobRepository {
     const inputHash = createHash('sha256').update(JSON.stringify({ brandId, type, options: input.options })).digest('hex');
     return this.db.transaction(async tx => {
       await lockTenant(tx,tenantId); await assertMembership(tx,userId,tenantId,(type === 'GENERATE_STRATEGY' || type === 'OPTIMIZE_STRATEGY' || type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate');
+      if(type==='OPTIMIZE_STRATEGY')await assertManagedFeature(tx,'analytics_ai',userId,tenantId);
+      if(type==='DRAFT_COMMENT_REPLY')await assertManagedFeature(tx,'comments',userId,tenantId);
       const [existing] = await tx.select().from(jobs).where(and(eq(jobs.tenantId,tenantId),eq(jobs.idempotencyKey,idempotencyKey)));
       if (existing) { if (existing.inputHash !== inputHash || existing.requestedBy !== userId) throw new DomainError('CONFLICT',409); return existing; }
       const [brand] = await tx.select().from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId))).for('share');
@@ -75,7 +78,7 @@ export class JobRepository {
       const [job] = await tx.select().from(jobs).where(jobWhere(tenantId,id)).for('update');
       if (!job || (job.type === 'CREATE_AVATAR' || job.type === 'GENERATE_VIDEO') || ['SUCCEEDED','FAILED','RECONCILIATION'].includes(job.status) || job.nextAttemptAt.getTime() > Date.now() || (job.status === 'RUNNING' && job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now())) return null;
       let permitted = true;
-      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY' || job.type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate'); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
+      try { await assertMembership(tx,job.requestedBy,tenantId,(job.type === 'GENERATE_STRATEGY' || job.type === 'OPTIMIZE_STRATEGY' || job.type === 'DRAFT_COMMENT_REPLY') ? 'strategy' : 'generate');if(job.type==='OPTIMIZE_STRATEGY')await assertManagedFeature(tx,'analytics_ai',job.requestedBy,tenantId);if(job.type==='DRAFT_COMMENT_REPLY')await assertManagedFeature(tx,'comments',job.requestedBy,tenantId); } catch (error) { if (!(error instanceof DomainError)) throw error; permitted = false; }
       if (!permitted || job.attempt >= job.maxAttempts) {
         await settleInTransaction(tx,tenantId,job.reservationId,'RELEASE',job.correlationId);
         await tx.update(jobs).set({status:'FAILED',errorCode:permitted ? 'PROVIDER_UNAVAILABLE' : 'NOT_AUTHORIZED',finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null}).where(jobWhere(tenantId,id));
@@ -88,7 +91,7 @@ export class JobRepository {
   }
   async prepareCommentReply(tenantId:string,id:string,leaseToken:string){return this.db.transaction(async tx=>{
     await lockTenant(tx,tenantId);const job=await ownedJob(tx,tenantId,id,leaseToken);
-    if(job.type!=='DRAFT_COMMENT_REPLY')throw new DomainError('INVALID_INPUT');
+    if(job.type!=='DRAFT_COMMENT_REPLY')throw new DomainError('INVALID_INPUT');await assertManagedFeature(tx,'comments',job.requestedBy,tenantId);
     await checkCommentReplySnapshot(tx,job,generationInputSchema.parse(job.input));
   });}
   async heartbeat(tenantId:string,id:string,leaseToken:string) {

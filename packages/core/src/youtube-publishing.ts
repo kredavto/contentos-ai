@@ -45,7 +45,7 @@ export class YouTubePublishingProcessor{
         const length=Math.min(8*1024*1024,upload.totalBytes-probed.nextByte);
         const bytes=await this.storage.getRange(snapshot.finalKey,{offset:probed.nextByte,length,totalBytes:upload.totalBytes,etag:upload.sourceEtag},context);
         // Consent or the grant may have changed during the source read.
-        await this.repository.prepare(job,this.policies());context.signal.throwIfAborted();
+        await this.repository.prepare(job,this.policies(),true);context.signal.throwIfAborted();
         const result=await this.provider.upload(grant.accessToken,session,{totalBytes:upload.totalBytes,offset:probed.nextByte,bytes,channelId:upload.channelId},context);
         await this.repository.acknowledge(job,result);
         if(result.state==='COMPLETE')phase='PROCESSING';
