@@ -1,0 +1,1 @@
+ALTER TABLE "comment_deliveries" ADD CONSTRAINT "comment_delivery_remote_uq" UNIQUE("tenant_id","external_comment_id");

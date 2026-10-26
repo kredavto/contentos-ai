@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 type RouteContext = { params: Promise<{ path: string[] }> };
 async function dispatch(request: Request, context: RouteContext) {
   return apiResponse(async correlationId => {
-    const { commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
+    const { commentDeliveryResolution, commentDeliveries, commentReplies, comments, commentImports, providerKeys, notificationPreferences, approvals, search, youtubeResolutions, publicationAnalytics, youtubePublications, youtube, libraryMedia, images, covers, funnels, utm, privacy, admin, agency, team, notifications, billing, auth, brands, generation, consent, media, avatars, voices, videos, calendar, social, publishing, analytics, channelAnalytics, performance, env } = services();
     const path = apiRoutePath((await context.params).path);
     const key = path.join('/');
     const jar = await cookies();
@@ -44,6 +44,7 @@ async function dispatch(request: Request, context: RouteContext) {
     if (key === 'privacy/deletion/cancel' && request.method === 'POST') return ok(await privacy.cancel(user.userId, await readBody(request), correlationId));
     if (path[0] === 'admin') {
       if(path[1]==='deletion-requests'&&path[2]&&path.length===3&&request.method==='GET'){await auth.throttle('admin-privacy',user.userId);return ok(await admin.inspectDeletion(user.userId,path[2],correlationId));}
+      if(key==='admin/comment-delivery-resolution'&&request.method==='POST'){await auth.throttle('comment-delivery-resolution',user.userId);return ok(await commentDeliveryResolution.resolve(user.userId,await readBody(request),correlationId));}
       if(key==='admin/youtube-resolution'&&request.method==='POST'){await auth.throttle('youtube-resolution',user.userId);return ok(await youtubeResolutions.request(user.userId,await readBody(request),correlationId),202);}
       if(key==='admin/youtube-resolution/tasks'&&request.method==='GET'){const query=new URL(request.url).searchParams;return ok(await youtubeResolutions.tasks(user.userId,query.get('tenantId')??'',query.get('jobId')??'',correlationId));}
       if (key === 'admin' && request.method === 'GET') return ok(await admin.overview(user.userId, correlationId));
@@ -129,6 +130,10 @@ async function dispatch(request: Request, context: RouteContext) {
               if(path[9]==='resume'){await auth.throttle('comment-import',user.userId);return ok(await commentImports.resume(...scope,path[8],await readBody(request)),202);}
               if(path[9]==='cancel')return ok(await commentImports.cancel(...scope,path[8],await readBody(request)));
             }
+          }
+          if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path[9]==='delivery'&&path.length===10){
+            if(request.method==='GET')return ok(await commentDeliveries.latest(...scope,path[7]));
+            if(request.method==='POST'){await auth.throttle('comment-delivery',user.userId);return ok(await commentDeliveries.request(...scope,path[7],await readBody(request),correlationId),202);}
           }
           if(path[7]&&path[7]!=='imports'&&path[8]==='draft'&&path[9]==='approval'&&path.length===10){
             if(request.method==='GET')return ok(await commentReplies.approvalStatus(...scope,path[7]));

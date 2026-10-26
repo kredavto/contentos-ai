@@ -2,7 +2,7 @@ import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {mkdtemp,writeFile,readFile,readdir,rm,chmod} from 'node:fs/promises';
-import {join,resolve} from 'node:path';
+import {join,resolve,delimiter} from 'node:path';
 import {tmpdir} from 'node:os';
 import {expect,it} from 'vitest';
 const exec=promisify(execFile),script=resolve('scripts/test-local.mjs');
@@ -34,6 +34,15 @@ it('isolates services, provisions media wrappers, migrates before checks and rem
     expect((await readdir(f.directory)).some(name=>name.startsWith('contentos-test-'))).toBe(false);
     const docker=await readFile(join(f.directory,'docker.jsonl'),'utf8');expect(docker).toContain('/usr/bin/ffmpeg');expect(docker).toContain('/usr/bin/ffprobe');expect(docker).not.toContain('prune');
     expect(result.stdout).not.toContain(new URL(calls[0]!.database).password);
+  }finally{await rm(f.directory,{recursive:true,force:true});}
+});
+it('resolves Docker from the original PATH before media wrappers restrict PATH',async()=>{
+  const f=await fixture();try{
+    const result=await exec(process.execPath,[script],{env:{...f.env,DOCKER_PATH:'docker-fixture',PATH:f.directory+delimiter+(process.env.PATH??'')}});
+    expect(result.stdout).toContain('Local verification passed.');
+    const calls=(await readFile(join(f.directory,'docker.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as string[]);
+    expect(calls.some(args=>args.includes('/usr/bin/ffmpeg'))).toBe(true);
+    expect(calls.some(args=>args.includes('/usr/bin/ffprobe'))).toBe(true);
   }finally{await rm(f.directory,{recursive:true,force:true});}
 });
 it('fails the run on a failed check and still removes containers and temporary files',async()=>{

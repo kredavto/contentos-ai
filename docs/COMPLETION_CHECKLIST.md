@@ -96,9 +96,9 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 78 | PUBLICATION METRICS | See TECH_SPEC.md §78; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 79 | PERFORMANCE ANALYST | See TECH_SPEC.md §79; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 80 | STRATEGY RECOMMENDATIONS | See TECH_SPEC.md §80; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 81 | COMMENT INBOX | YouTube read adapter, optional OAuth grant, tenant-bound comments schema, paginated repository/manual triage and persisted import lifecycle are implemented and have focused checks. Page commit/worker execution and inbox UI remain absent; frozen full regression passed 694 tests in 97 files. See comment-inbox-plan.md. | PARTIAL |
-| 82 | COMMENT MODES | SUGGEST_ONLY / APPROVAL / AUTO_REPLY workflows are absent; default must remain suggest-only when implemented. | NOT_IMPLEMENTED |
-| 83 | AUTO-REPLY SAFETY | Manual NEEDS_HUMAN triage exists, but automated safety classification and reply execution do not. Required category escalation, explicit opt-in, current approval and provider outcome reconciliation still require implementation and tests. | NOT_IMPLEMENTED |
+| 81 | COMMENT INBOX | YouTube OAuth/read/import queue, tenant-scoped inbox/triage, immutable manual/AI drafts, approval, confirmed delivery queue and operator receipt verification implemented locally. Final acceptance: 776 tests / 103 files, build and 3 Chromium scenarios. Live Google and other platforms remain open; see comment-inbox-plan.md. | PARTIAL |
+| 82 | COMMENT MODES | SUGGEST_ONLY remains default; draft, approval and explicit manual send are separate. Unknown writes block new versions until read-only operator reconciliation. Opt-in AUTO_REPLY is not implemented. | PARTIAL |
+| 83 | AUTO-REPLY SAFETY | Advisory evidence-bound risk classification and human approval exist. Immutable attempts, no uncertain replay and operator verification are tested locally. Automatic sending remains disabled; its opt-in policy, execution-time category gates and live acceptance remain open. | PARTIAL |
 | 84 | BILLING | See TECH_SPEC.md §84; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 85 | PLANS | See TECH_SPEC.md §85; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 86 | PLAN LIMITS | See TECH_SPEC.md §86; current implementation evidence must be inspected | AUDIT_REQUIRED |

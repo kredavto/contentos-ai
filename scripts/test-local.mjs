@@ -6,7 +6,7 @@ import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -19,7 +19,9 @@ if((args.length&&!browser)||specs.some(spec=>!/^tests\/e2e\/[a-z0-9-]+\.spec\.ts
   process.stderr.write('Usage: pnpm test:local [--recovery] [--e2e [tests/e2e/name.spec.ts ...]]\n');process.exit(2);
 }
 if(process.platform==='win32'){process.stderr.write('test:local requires macOS or Linux and Docker.\n');process.exit(2);}
-const docker=process.env.DOCKER_PATH??(existsSync('/Applications/Docker.app/Contents/Resources/bin/docker')?'/Applications/Docker.app/Contents/Resources/bin/docker':'docker');
+const dockerCommand=process.env.DOCKER_PATH??(existsSync('/Applications/Docker.app/Contents/Resources/bin/docker')?'/Applications/Docker.app/Contents/Resources/bin/docker':'docker');
+// Media subprocesses deliberately restrict PATH; resolve Docker before that restriction.
+const docker=dockerCommand.includes('/')?resolve(dockerCommand):(process.env.PATH??'').split(delimiter).map(path=>resolve(path,dockerCommand)).find(path=>existsSync(path))??dockerCommand;
 const prefix=`contentos-test-${randomBytes(6).toString('hex')}`;
 const names={db:`${prefix}-db`,redis:`${prefix}-redis`,media:`${prefix}-media`};
 const created=[];

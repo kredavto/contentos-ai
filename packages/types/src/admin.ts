@@ -1,5 +1,5 @@
 import { z } from 'zod';
-export const adminCategories = ['users', 'organizations', 'jobs', 'failed_jobs', 'publishing', 'publishing_reconciliation', 'publication_analytics', 'subscriptions', 'plans', 'usage', 'webhooks', 'social', 'costs', 'feature_flags', 'audit', 'email', 'notification_email', 'notification_email_reconciliation', 'payment_tasks', 'actions', 'deletion_requests'] as const;
+export const adminCategories = ['comment_delivery_reconciliation', 'users', 'organizations', 'jobs', 'failed_jobs', 'publishing', 'publishing_reconciliation', 'publication_analytics', 'subscriptions', 'plans', 'usage', 'webhooks', 'social', 'costs', 'feature_flags', 'audit', 'email', 'notification_email', 'notification_email_reconciliation', 'payment_tasks', 'actions', 'deletion_requests'] as const;
 export const adminCategorySchema = z.enum(adminCategories);
 export type AdminCategory = z.infer<typeof adminCategorySchema>;
 export const adminListSchema = z.object({

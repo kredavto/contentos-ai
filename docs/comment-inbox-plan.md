@@ -92,3 +92,25 @@ Acceptance matrix: reject stale draft version/revision; reject changed comment c
 Version-bound approval/revocation storage, service, HTTP surface and UI are implemented; full acceptance is running (see IMPLEMENTATION_STATUS.md). Effective status checks current draft/source/root/brand/connection bindings and the original approver's current permission. Explicit revocation is immutable. This does not yet authorize or implement an external delivery action.
 
 Next delivery slice: keep a separate durable dispatch record tied to an effective approval; revalidate current sender authority and decrypted provider scopes; record an attempt before calling the non-idempotent API; accept a validated provider receipt; treat transport loss, timeout, malformed success or ambiguous upstream failure after dispatch as RECONCILIATION. A text match alone is insufficient evidence of the result. No retry may issue another insert while outcome is unknown. Known preflight denial must not dispatch. Tests must distinguish preflight failure, documented rejection, confirmed receipt and uncertain outcome, and preserve pending/unknown attempts across worker restart.
+
+## Manual delivery and read-only reconciliation — 2026-10-26
+
+Implemented locally; final acceptance results are recorded in IMPLEMENTATION_STATUS.md. SUGGEST_ONLY remains the default. Approval does not enqueue delivery. A separate confirmed request binds a delivery to the immutable approval; current sender authority, source/approval state and encrypted Google comment scopes are checked before the recorded attempt. A queued approval may be revoked to stop dispatch. Once an attempt is recorded, expiry or uncertain transport requires reconciliation rather than replay.
+
+API under the existing comment scope:
+
+- GET `/:commentId/draft/delivery` returns safe latest status and write configuration readiness.
+- POST `/:commentId/draft/delivery` accepts `{approvalId, idempotencyKey, confirmSend: true}`. Session, Origin, rate limits and tenant/brand/publication/comment scope are mandatory. Different approval IDs cannot bypass duplicate-version protection. QUEUED, ATTEMPTED or RECONCILIATION_REQUIRED deliveries block newer versions of that draft as well.
+- Definitive rejection is terminal for that delivery/version. Any subsequent deliberate intent needs a new draft version and approval. Unknown outcomes cannot be bypassed this way.
+
+Operator procedure:
+
+1. Open Admin → «Ответы YouTube: сверка». Filter the organization and identify delivery ID, immutable attempt ID, start time and correlation ID. SUPPORT may read this safe list; it contains no reply text or credentials.
+2. Obtain the external reply ID from trustworthy evidence tied to this particular attempt. Identical text alone is insufficient. Record the investigation ticket/reference.
+3. A platform ADMIN can enter the identifiers and evidence acknowledgment in «Сверка ответа YouTube», or POST `/api/v1/admin/comment-delivery-resolution` with `{tenantId, deliveryId, attemptId, externalCommentId, ticket, confirmAttemptEvidence: true}`.
+4. The service performs only a fixed-endpoint YouTube read. The receipt must match the supplied external ID, original parent, channel and immutable approved text. Publication time must fall between five seconds before the stored attempt and two minutes after it, and cannot be more than five seconds in the future relative to the database clock. A receipt cannot belong to two deliveries within a tenant.
+5. Valid proof records SUCCEEDED with an operator audit event. Missing, mismatched or out-of-window evidence leaves the outcome unknown. Never clear an attempt or requeue an uncertain write by editing SQL.
+
+A later draft edit or approval revocation does not change a historical remote fact: reconciliation uses the original immutable version and does not revive its approval. Current operator authority and the original sender's current tenant/brand management permission are still required. Reading the receipt requires the original connection generation and comment scope; replaced/revoked credentials remain a conservative unresolved case. There is no force-resend/force-success control.
+
+Production Google OAuth, comment insert and receipt lookup have not been exercised with real credentials. The browser acceptance covers configuration-required controls and existing draft/approval flows; database/processor tests use explicit synthetic providers. Other platforms and opt-in AUTO_REPLY remain outside this implemented slice.

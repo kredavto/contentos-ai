@@ -64,6 +64,9 @@ test('comment inbox preserves plain text, thread pagination, triage and viewer b
   await approval.getByLabel('Я проверил сохранённый текст и указанные риски').check();
   await approval.getByRole('button',{name:'Одобрить версию 3',exact:true}).click();
   await expect(approval.getByText('Версия 3: одобрена',{exact:true})).toBeVisible();
+  const delivery=approval.getByRole('region',{name:'Отправка ответа',exact:true});
+  await expect(delivery.getByText('Для отправки требуется настройка подключения YouTube на сервере.',{exact:true})).toBeVisible();
+  await expect(delivery.getByRole('button',{name:'Отправить одобренный ответ',exact:true})).toBeDisabled();
   await approval.getByRole('button',{name:'Отозвать одобрение',exact:true}).click();
   await expect(approval.getByText('Версия 3: одобрение отозвано',{exact:true})).toBeVisible();
   expect((await database.client`select count(*)::int as count from comment_reply_approvals where tenant_id=${tenant} and comment_id=${root}`)[0]?.count).toBe(1);

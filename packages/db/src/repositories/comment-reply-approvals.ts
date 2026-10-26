@@ -7,7 +7,7 @@ import {lockTenant,assertMembership,type Transaction} from './ledger';
 import {authorizeComment} from './comments';
 import {authorizeCommentImport} from './comment-imports';
 const scope=(tenantId:string,publicationId:string,commentId:string)=>and(eq(commentReplyApprovals.tenantId,tenantId),eq(commentReplyApprovals.publicationId,publicationId),eq(commentReplyApprovals.commentId,commentId));
-async function binding(tx:Transaction,actor:string,tenantId:string,brandId:string,publicationId:string,commentId:string,version:number,revision:number){
+export async function commentReplyApprovalBinding(tx:Transaction,actor:string,tenantId:string,brandId:string,publicationId:string,commentId:string,version:number,revision:number){
  await assertMembership(tx,actor,tenantId,'approve');
  const publication=await authorizeCommentImport(tx,actor,tenantId,brandId,publicationId);
  const [comment]=await tx.select().from(comments).where(and(eq(comments.tenantId,tenantId),eq(comments.publicationId,publicationId),eq(comments.id,commentId)));
@@ -33,7 +33,7 @@ export class CommentReplyApprovalRepository{
    await lockTenant(tx,tenantId);await authorizeComment(tx,userId,tenantId,brandId,publicationId);await assertMembership(tx,userId,tenantId,'approve');
    const [existing]=await tx.select().from(commentReplyApprovals).where(and(eq(commentReplyApprovals.tenantId,tenantId),eq(commentReplyApprovals.idempotencyKey,input.idempotencyKey)));
    if(existing){if(existing.approvedBy!==userId||existing.inputHash!==inputHash)throw new DomainError('CONFLICT',409);return {id:existing.id,version:existing.version};}
-   const target=await binding(tx,userId,tenantId,brandId,publicationId,commentId,input.version,input.revision);
+   const target=await commentReplyApprovalBinding(tx,userId,tenantId,brandId,publicationId,commentId,input.version,input.revision);
    const [approval]=await tx.insert(commentReplyApprovals).values({tenantId,publicationId,commentId,draftId:target.draftId,version:input.version,draftRevision:input.revision,connectionId:target.binding.connectionId,binding:target.binding,approvedBy:userId,idempotencyKey:input.idempotencyKey,inputHash}).returning();
    await tx.insert(auditLogs).values({tenantId,userId,resourceId:approval!.id,action:'COMMENT_REPLY_APPROVED',correlationId,metadata:{version:input.version,risksAcknowledged:true}});
    return {id:approval!.id,version:approval!.version};
@@ -47,7 +47,7 @@ export class CommentReplyApprovalRepository{
   const summary={id:approval.id,version:approval.version,createdAt:approval.createdAt};
   const [revoked]=await tx.select({id:commentReplyApprovalRevocations.id}).from(commentReplyApprovalRevocations).where(and(eq(commentReplyApprovalRevocations.tenantId,tenantId),eq(commentReplyApprovalRevocations.approvalId,approval.id)));
   if(revoked)return {...summary,status:'REVOKED' as const};
-  try{const current=await binding(tx,approval.approvedBy,tenantId,brandId,publicationId,commentId,approval.version,approval.draftRevision);if(current.draftId!==approval.draftId||JSON.stringify(current.binding)!==JSON.stringify(commentReplyApprovalBindingSchema.parse(approval.binding)))return {...summary,status:'STALE' as const};}
+  try{const current=await commentReplyApprovalBinding(tx,approval.approvedBy,tenantId,brandId,publicationId,commentId,approval.version,approval.draftRevision);if(current.draftId!==approval.draftId||JSON.stringify(current.binding)!==JSON.stringify(commentReplyApprovalBindingSchema.parse(approval.binding)))return {...summary,status:'STALE' as const};}
   catch(error){if(!(error instanceof DomainError))throw error;return {...summary,status:'STALE' as const};}
   return {...summary,status:'APPROVED' as const};
  });}

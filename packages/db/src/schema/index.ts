@@ -69,3 +69,5 @@ export * from './comment-imports';
 export * from './comment-replies';
 
 export * from './comment-reply-approvals';
+
+export * from './comment-deliveries';

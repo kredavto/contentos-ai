@@ -99,9 +99,13 @@ test('ADMIN publishes a priced version while SUPPORT stays read-only', async ({ 
     await page.goto('/admin');
     await expect(page.getByRole('button', { name: 'Опубликовать версию тарифа', exact: true })).toBeDisabled();
     await expect(page.getByText('SUPPORT может просматривать тарифы.', { exact: false })).toBeVisible();
+    await page.getByLabel('Раздел администрирования',{exact:true}).selectOption('comment_delivery_reconciliation');
+    await expect(page.getByRole('region',{name:'Сверка ответа YouTube',exact:true})).toHaveCount(0);
     await database.client`update platform_operators set role='ADMIN' where user_id=${actor}`;
     await page.reload();
     await expect(page.getByLabel('Название тарифа', { exact: true })).toBeEnabled();
+    await page.getByLabel('Раздел администрирования',{exact:true}).selectOption('comment_delivery_reconciliation');
+    await expect(page.getByRole('region',{name:'Сверка ответа YouTube',exact:true}).getByRole('button',{name:'Проверить квитанцию ответа',exact:true})).toBeDisabled();
     await page.getByLabel('Тариф', { exact: true }).selectOption('AGENCY');
     const current = await page.request.get('/api/v1/admin/plans');
     const catalog = (await current.json()).data.plans as Array<{code:string;version:number}>;

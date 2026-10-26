@@ -1,3 +1,8 @@
+import {AdminRepository} from '../../packages/db/src/repositories/admin';
+import {CommentDeliveryResolutionService} from '../../packages/core/src/comment-delivery-resolution';
+import {CommentDeliveryRepository} from '../../packages/db/src/repositories/comment-deliveries';
+import {CommentDeliveryProcessor} from '../../packages/core/src/comment-delivery-processor';
+import {ProviderRequestError,type YouTubeCommentPublishingProvider} from '../../packages/types/src/index';
 import {randomUUID} from 'node:crypto';
 import {beforeAll,describe,expect,it,vi} from 'vitest';
 import {commentReplyDrafts,commentReplyVersions} from '../../packages/db/src/schema/comment-replies';
@@ -519,6 +524,120 @@ describe.skipIf(!url)('comment storage constraints',()=>{
   const f=await generationFixture(),queued=await f.enqueue(),job=(await f.jobs.claim(tenant,queued.id))!;
   await f.jobs.complete(tenant,job.id,job.leaseToken!,{reply:null,sentiment:null,risks:[{category:'UNCERTAIN',source:'CONTEXT',quote:null,reason:'Needs a person'}]});
   await expect(approvals.approve(user,tenant,brand,f.publicationId,f.comment.id!,{version:1,revision:0,acknowledgeRisks:true,idempotencyKey:randomUUID()},randomUUID())).rejects.toThrow('CONFLICT');
+ });
+
+ const deliveries=new CommentDeliveryRepository(database.db);
+ async function deliveryFixture(){
+  const f=await approvalFixture(),approval=await f.approve(),key=randomUUID();
+  const request=()=>deliveries.request(user,tenant,brand,approval.id,key,randomUUID());
+  const queued=await request();
+  const channelId='UC'+f.connectionId.replaceAll('-','').slice(0,22);
+  const access={accessForComments:vi.fn(async()=>({accessToken:'synthetic-only',channelId}))};
+  const provider:YouTubeCommentPublishingProvider={commentReplyReceipt:vi.fn(async()=>null),insertCommentReply:vi.fn(async(_token,value,context)=>({reference:{provider:'youtube',internalId:context.internalId,externalId:'reply-'+randomUUID(),metadata:{parentId:value.parentId,channelId:value.channelId}},publishedAt:new Date().toISOString()}))};
+  return {...f,approval,queued,request,access,provider,processor:new CommentDeliveryProcessor(deliveries,access,provider)};
+ }
+ it('deduplicates delivery intent and serializes workers to exactly one recorded write',async()=>{
+  const f=await deliveryFixture();expect((await f.request()).id).toBe(f.queued.id);
+  await Promise.all([f.processor.run(tenant,f.queued.id),f.processor.run(tenant,f.queued.id)]);
+  expect(f.provider.insertCommentReply).toHaveBeenCalledOnce();
+  const row=await deliveries.lookup(tenant,f.queued.id);expect(row?.job.status).toBe('SUCCEEDED');expect(row?.job.attemptId).not.toBeNull();
+  await f.processor.run(tenant,f.queued.id);expect(f.provider.insertCommentReply).toHaveBeenCalledOnce();
+ });
+ it('rejects revoked approval after token acquisition without dispatch',async()=>{
+  const f=await deliveryFixture();f.access.accessForComments.mockImplementation(async()=>{await approvals.revoke(user,tenant,brand,f.publicationId,f.comment.id!,f.approval.id,randomUUID());return {accessToken:'synthetic-only',channelId:'UC'+f.connectionId.replaceAll('-','').slice(0,22)};});
+  await f.processor.run(tenant,f.queued.id);expect(f.provider.insertCommentReply).not.toHaveBeenCalled();expect((await deliveries.lookup(tenant,f.queued.id))?.job).toMatchObject({status:'REJECTED',attemptId:null});
+ });
+ it('keeps lost responses uncertain across worker restarts and never retries the insert',async()=>{
+  const f=await deliveryFixture();vi.mocked(f.provider.insertCommentReply).mockRejectedValue(new Error('lost response'));
+  await f.processor.run(tenant,f.queued.id);await f.processor.run(tenant,f.queued.id);
+  expect(f.provider.insertCommentReply).toHaveBeenCalledOnce();expect((await deliveries.lookup(tenant,f.queued.id))?.job.status).toBe('RECONCILIATION_REQUIRED');
+ });
+ it('recovers expired recorded attempts only to reconciliation, never dispatch',async()=>{
+  const f=await deliveryFixture();await deliveries.attempt(tenant,f.queued.id,brand);
+  await database.client`update comment_deliveries set lease_expires_at=now()-interval '1 second' where id=${f.queued.id}`;
+  await f.processor.run(tenant,f.queued.id);expect(f.provider.insertCommentReply).not.toHaveBeenCalled();expect((await deliveries.lookup(tenant,f.queued.id))?.job.status).toBe('RECONCILIATION_REQUIRED');
+ });
+ it('distinguishes explicit provider denial from unknown failure and fences stale completions',async()=>{
+  const f=await deliveryFixture();vi.mocked(f.provider.insertCommentReply).mockRejectedValue(new ProviderRequestError('NOT_AUTHORIZED',403,true));await f.processor.run(tenant,f.queued.id);
+  expect((await deliveries.lookup(tenant,f.queued.id))?.job.status).toBe('REJECTED');
+  const g=await deliveryFixture(),claimed=(await deliveries.attempt(tenant,g.queued.id,brand))!;
+  await deliveries.finish({...claimed.job,attemptId:randomUUID()},{status:'SUCCEEDED',externalId:'wrong',publishedAt:new Date()});expect((await deliveries.lookup(tenant,g.queued.id))?.job.status).toBe('ATTEMPTED');
+ });
+ it('denies unauthorized senders and cross-tenant requests',async()=>{
+  const f=await deliveryFixture(),viewer=await member('VIEWER');
+  await expect(deliveries.request(viewer,tenant,brand,f.approval.id,randomUUID(),randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+  await expect(deliveries.request(user,randomUUID(),brand,f.approval.id,randomUUID(),randomUUID())).rejects.toThrow();
+  await expect(deliveries.request(user,tenant,randomUUID(),f.approval.id,randomUUID(),randomUUID())).rejects.toThrow();
+ });
+
+ it('blocks a second approval for an already dispatched draft version and protects attempt history',async()=>{
+  const f=await deliveryFixture(),other=await approvals.approve(user,tenant,brand,f.publicationId,f.comment.id!,{...f.input,idempotencyKey:randomUUID()},randomUUID());
+  await expect(deliveries.request(user,tenant,brand,other.id,randomUUID(),randomUUID())).rejects.toThrow('CONFLICT');
+  await deliveries.attempt(tenant,f.queued.id,brand);
+  await expect(database.client`update comment_deliveries set status='QUEUED',attempt_id=null,attempted_at=null,lease_expires_at=null where id=${f.queued.id}`).rejects.toThrow();
+  await expect(database.client`delete from comment_deliveries where id=${f.queued.id}`).rejects.toThrow();
+  const row=(await deliveries.lookup(tenant,f.queued.id))!.job;
+  await deliveries.finish(row,{status:'RECONCILIATION_REQUIRED',code:'RECONCILIATION_REQUIRED'});
+  await expect(database.client`update comment_deliveries set status='REJECTED' where id=${f.queued.id}`).rejects.toThrow();
+ });
+
+ it('exposes scoped safe delivery status and rejects mismatched URL targets',async()=>{
+  const f=await deliveryFixture();expect(await deliveries.latest(user,tenant,brand,f.publicationId,f.comment.id!)).toMatchObject({id:f.queued.id,status:'QUEUED',externalCommentId:null});
+  await expect(deliveries.request(user,tenant,brand,f.approval.id,randomUUID(),randomUUID(),{publicationId:randomUUID(),commentId:f.comment.id!})).rejects.toThrow('NOT_FOUND');
+  await expect(deliveries.latest(user,tenant,brand,f.publicationId,randomUUID())).rejects.toThrow('NOT_FOUND');
+ });
+ async function uncertainFixture(){
+  const f=await deliveryFixture();vi.mocked(f.provider.insertCommentReply).mockRejectedValue(new Error('uncertain'));
+  await f.processor.run(tenant,f.queued.id);const row=(await deliveries.lookup(tenant,f.queued.id))!.job;
+  const actor=await member('OWNER');await database.client`insert into platform_operators(user_id,role) values(${actor},'ADMIN')`;
+  const input={tenantId:tenant,deliveryId:f.queued.id,attemptId:row.attemptId!,externalCommentId:'verified-reply-'+randomUUID(),ticket:'CASE-123',confirmAttemptEvidence:true};
+  const resolver=new CommentDeliveryResolutionService(deliveries,f.access,f.provider,true);
+  vi.mocked(f.provider.commentReplyReceipt).mockImplementation(async(_token,externalId,value,context)=>({reference:{provider:'youtube',internalId:context.internalId,externalId,metadata:{parentId:value.parentId,channelId:value.channelId}},publishedAt:row.attemptedAt!.toISOString()}));
+  return {...f,row,actor,input,resolver};
+ }
+ it('resolves only operator-supplied receipt identities with read-only verification and immutable attempt evidence',async()=>{
+  const f=await uncertainFixture();await expect(f.resolver.resolve(user,f.input,randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+  const result=await f.resolver.resolve(f.actor,f.input,randomUUID());expect(result.status).toBe('SUCCEEDED');
+  expect(f.provider.insertCommentReply).toHaveBeenCalledOnce();expect(f.provider.commentReplyReceipt).toHaveBeenCalledOnce();
+  await f.resolver.resolve(f.actor,f.input,randomUUID());expect(f.provider.commentReplyReceipt).toHaveBeenCalledOnce();
+  expect((await deliveries.lookup(tenant,f.queued.id))?.job.externalCommentId).toBe(f.input.externalCommentId);
+ });
+ it('does not interpret missing, old or mismatched receipts as permission to resend',async()=>{
+  const f=await uncertainFixture();vi.mocked(f.provider.commentReplyReceipt).mockResolvedValue(null);
+  await expect(f.resolver.resolve(f.actor,f.input,randomUUID())).rejects.toThrow('RECONCILIATION_REQUIRED');
+  vi.mocked(f.provider.commentReplyReceipt).mockImplementation(async(_token,externalId,value,context)=>({reference:{provider:'youtube',internalId:context.internalId,externalId,metadata:{parentId:value.parentId,channelId:value.channelId}},publishedAt:new Date(f.row.attemptedAt!.getTime()-60000).toISOString()}));
+  await expect(f.resolver.resolve(f.actor,f.input,randomUUID())).rejects.toThrow('RECONCILIATION_REQUIRED');
+  expect((await deliveries.lookup(tenant,f.queued.id))?.job.status).toBe('RECONCILIATION_REQUIRED');expect(f.provider.insertCommentReply).toHaveBeenCalledOnce();
+ });
+
+ it('never assigns one provider receipt to two delivery attempts',async()=>{
+  const f=await deliveryFixture();await f.processor.run(tenant,f.queued.id);const receiptId=(await deliveries.lookup(tenant,f.queued.id))!.job.externalCommentId!;
+  const g=await deliveryFixture();vi.mocked(g.provider.insertCommentReply).mockImplementation(async(_token,value,context)=>({reference:{provider:'youtube',internalId:context.internalId,externalId:receiptId,metadata:{parentId:value.parentId,channelId:value.channelId}},publishedAt:new Date().toISOString()}));
+  await g.processor.run(tenant,g.queued.id);
+  expect((await deliveries.lookup(tenant,g.queued.id))?.job.status).toBe('RECONCILIATION_REQUIRED');
+  expect(g.provider.insertCommentReply).toHaveBeenCalledOnce();
+  const actor=await member('OWNER');await database.client`insert into platform_operators(user_id,role) values(${actor},'ADMIN')`;
+  const attempt=(await deliveries.lookup(tenant,g.queued.id))!.job;
+  await expect(deliveries.completeResolution(actor,tenant,g.queued.id,attempt.attemptId!,receiptId,new Date(),'CASE-REUSE',randomUUID())).rejects.toThrow('CONFLICT');
+ });
+
+ it('lists reconciliation attempt identities for operators without reply text or credentials',async()=>{
+  const f=await uncertainFixture(),admin=new AdminRepository(database.db);
+  const result=await admin.list(f.actor,{category:'comment_delivery_reconciliation',tenantId:tenant,limit:50},randomUUID());
+  expect(result.rows.find(row=>row.id===f.queued.id)).toMatchObject({attemptId:f.row.attemptId,status:'RECONCILIATION_REQUIRED'});
+  expect(JSON.stringify(result)).not.toContain('Approved exact text');expect(JSON.stringify(result)).not.toContain('synthetic-only');
+  expect((await admin.list(f.actor,{category:'comment_delivery_reconciliation',tenantId:randomUUID(),limit:50},randomUUID())).rows).toEqual([]);
+  await expect(admin.list(user,{category:'comment_delivery_reconciliation',limit:50},randomUUID())).rejects.toThrow('NOT_AUTHORIZED');
+ });
+
+ it('blocks newer reply versions while a previous outcome is unknown and reconciles the historical approval after revocation',async()=>{
+  const f=await uncertainFixture();await approvals.revoke(user,tenant,brand,f.publicationId,f.comment.id!,f.approval.id,randomUUID());
+  await replies.save(user,tenant,brand,f.publicationId,f.comment.id!,{revision:0,contentRevision:0,reviewRevision:0,reply:'A newer reply version'},randomUUID());
+  const newer=await approvals.approve(user,tenant,brand,f.publicationId,f.comment.id!,{version:2,revision:1,acknowledgeRisks:true,idempotencyKey:randomUUID()},randomUUID());
+  await expect(deliveries.request(user,tenant,brand,newer.id,randomUUID(),randomUUID())).rejects.toThrow('CONFLICT');
+  expect((await f.resolver.resolve(f.actor,f.input,randomUUID())).status).toBe('SUCCEEDED');
+  expect(vi.mocked(f.provider.commentReplyReceipt).mock.calls[0]![2].text).toBe('Approved exact text');
+  expect(f.provider.insertCommentReply).toHaveBeenCalledOnce();
  });
 
 });
