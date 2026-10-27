@@ -1,12 +1,16 @@
 # Implementation status
 
-Updated 2026-10-26.
+Updated 2026-10-27.
 
 Estimated full-project coverage: **≈63%** (101/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
 
 Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
 
 This is an implementation inventory, not a claim that the full specification is complete.
+
+## Latest focused reliability slice (2026-10-27)
+
+OpenAI text generation, image generation and caption transcription now have independent process-local, long-lived-provider circuit breakers: bounded failure windows, cooldown, single half-open probes and stale concurrent-result fencing. The text-only checkpoint ec8be649 passed full CI: 859 tests across 120 files and 37 Chromium scenarios, migrations, TypeScript/lint and production build. The image/caption extension passed 65 focused tests plus providers/test TypeScript and changed-file ESLint; its new full CI gate remains separate. Uncertain image writes retain reconciliation semantics; only a pre-dispatch circuit denial is definitive. HeyGen per-client admission and a caption-denial worker-state correction are also implemented: 91 focused tests plus full-workspace/test TypeScript and lint pass; two new worker DB cases await latest-commit CI. Request-scoped BYOK state and cross-process coordination remain open; no live provider/deployment acceptance was performed. See [scope and verification](circuit-breaker.md). The project-wide coverage estimate above is unchanged pending the full audit.
 
 ## Verified working slice
 

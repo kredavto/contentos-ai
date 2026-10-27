@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CircuitBreaker, CircuitOpenError } from './circuit-breaker';
 import {downloadProviderVideo} from './video-download';
 import { DomainError, ProviderRequestError, type AvatarProvider, type VideoProvider, type OperationContext, type ProviderReference } from '@contentos/types';
 const externalId = z.string().min(1).max(255);
@@ -10,9 +11,22 @@ function reference(context:OperationContext,id:string,metadata:Record<string,unk
 function checkReference(value:ProviderReference){if(value.provider!=='heygen')throw new DomainError('INVALID_INPUT');return encodeURIComponent(externalId.parse(value.externalId));}
 /** Official v3 transport. No implicit mutation retries; durable jobs own replay. */
 export class HeyGenClient {
-  constructor(private readonly apiKey:string,private readonly transport:typeof fetch=fetch) {if(!apiKey)throw new DomainError('CONFIGURATION_REQUIRED',503);}
+  constructor(private readonly apiKey:string,private readonly transport:typeof fetch=fetch,private readonly circuit=new CircuitBreaker()) {if(!apiKey)throw new DomainError('CONFIGURATION_REQUIRED',503);}
   async request<T>(path:string,method:'GET'|'POST'|'DELETE',schema:z.ZodType<T>,context:OperationContext,body?:unknown):Promise<T> {
     if(!path.startsWith('/v3/')||path.includes('://'))throw new DomainError('INVALID_INPUT');
+    try{
+      return await this.circuit.execute(()=>this.requestAdmitted(path,method,schema,context,body),error=>!context.signal.aborted&&error instanceof DomainError&&error.code==='PROVIDER_UNAVAILABLE');
+    }catch(error){
+      if(error instanceof CircuitOpenError){
+        // A local POST admission denial is not a retry of an uncertain mutation.
+        // Do not make read/poll failures definitive: a remote resource may exist.
+        if(method==='POST')throw new ProviderRequestError('RATE_LIMITED',429,true);
+        throw new DomainError('PROVIDER_UNAVAILABLE',503);
+      }
+      throw error;
+    }
+  }
+  private async requestAdmitted<T>(path:string,method:'GET'|'POST'|'DELETE',schema:z.ZodType<T>,context:OperationContext,body?:unknown):Promise<T>{
     const start=Date.now();let status=0;
     try{
       const response=await this.transport(`https://api.heygen.com${path}`,{method,redirect:'error',signal:AbortSignal.any([context.signal,AbortSignal.timeout(30_000)]),headers:{'X-Api-Key':this.apiKey,...(body?{'Content-Type':'application/json'}:{}),...(method==='POST'?{'Idempotency-Key':context.idempotencyKey}:{})},...(body?{body:JSON.stringify(body)}:{})});

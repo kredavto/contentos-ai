@@ -11,6 +11,8 @@ import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
 import {MediaService} from '../../packages/core/src/media';
 import {MockAvatarProvider} from '../../packages/providers/src/avatar';
+import {OpenAICaptionProvider} from '../../packages/providers/src/captions';
+import {CircuitBreaker} from '../../packages/providers/src/circuit-breaker';
 import {DomainError,ProviderRequestError,videoStages,type VideoProvider,type VideoProcessingProvider,type StorageProvider} from '../../packages/types/src/index';
 const url=process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)('durable consent-bound video factory',()=>{
@@ -206,6 +208,24 @@ describe.skipIf(!url)('durable consent-bound video factory',()=>{
     expect((await row(job.id)).status).toBe('SUCCEEDED');expect(transcriptions).toBe(1);expect((await ledger.overview(userId,tenantId)).balances.AI_CREDITS).toEqual({available:balance-3,reserved:0});
     await auto.delete(userId,tenantId,brandId,project.id,correlationId);await database.client`update video_projects set delete_after=now()-interval '1 second' where id=${project.id}`;expect(await auto.cleanupOne()).toBe(true);
     expect((await database.client`select segments from captions where project_id=${project.id}`)[0]?.segments).toEqual([]);
+  });
+  it('terminates a pre-dispatch caption circuit denial without false reconciliation or held credits',async()=>{
+    const circuit=new CircuitBreaker({failureThreshold:1});
+    await expect(circuit.execute(async()=>{throw new Error('fixture outage');},()=>true)).rejects.toThrow('fixture outage');
+    let transcriptions=0;
+    const caption={name:'openai',model:'whisper-1',provider:new OpenAICaptionProvider('fixture','whisper-1',async()=>{transcriptions++;throw new Error('Must not dispatch');},circuit)};
+    const wav=Buffer.alloc(100);wav.write('RIFF');wav.write('WAVE',8);
+    const audioProcessing={...processing,prepareAudio:async()=>({bytes:wav,durationSeconds:11.2})};
+    const auto=new VideoService(repo,{name:providerName,provider},storage,true,caption),runner=new VideoProcessor(database.db,{name:providerName,provider},storage,audioProcessing,true,caption);
+    const before=(await ledger.overview(userId,tenantId)).balances;
+    const job=await auto.create(userId,tenantId,brandId,{...await request(),captionMode:'AUTO'},correlationId);
+    await due(job.id);await runner.run(tenantId,job.id);await due(job.id);await runner.run(tenantId,job.id);
+    expect(await row(job.id)).toMatchObject({status:'FAILED',error_code:'RATE_LIMITED'});
+    expect((await database.client`select caption_mutation_state,reference from video_projects where job_id=${job.id}`)[0]).toMatchObject({caption_mutation_state:'REJECTED',reference:expect.any(Object)});
+    await due(job.id);await runner.run(tenantId,job.id);
+    expect(transcriptions).toBe(0);
+    expect((await ledger.overview(userId,tenantId)).balances.AI_CREDITS).toEqual(before.AI_CREDITS);
+    expect((await ledger.overview(userId,tenantId)).balances.VIDEO_SECONDS).toEqual(before.VIDEO_SECONDS);
   });
   it('never repeats an uncertain transcription and allows an explicit manual fallback with refund',async()=>{
     let transcriptions=0;const caption={name:'fixture-caption',model:'fixture',provider:{transcribe:async()=>{transcriptions++;throw new DomainError('PROVIDER_UNAVAILABLE');}}};
