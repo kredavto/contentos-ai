@@ -1,6 +1,7 @@
 import {readFile,stat} from 'node:fs/promises';
 import {isAbsolute} from 'node:path';
 import {z} from 'zod';
+import {CircuitBreaker,CircuitOpenError} from './circuit-breaker';
 import {DomainError,ProviderRequestError,imageGenerationSchema,maxGeneratedImageBytes,type ImageProvider,type OperationContext} from '@contentos/types';
 
 // Explicit server choice; aliases whose defaults may drift and retired models are excluded.
@@ -34,7 +35,7 @@ export class OpenAIImageProvider implements ImageProvider{
   readonly name='openai';
   readonly currency='USD';
   readonly model:z.infer<typeof openAIImageModelSchema>;
-  constructor(private readonly apiKey:string,model:string,private readonly transport:typeof fetch=fetch){
+  constructor(private readonly apiKey:string,model:string,private readonly transport:typeof fetch=fetch,private readonly circuit=new CircuitBreaker({failureWindowMs:1_200_000})){
     const parsed=openAIImageModelSchema.safeParse(model);
     if(!apiKey.trim()||!parsed.success)throw new DomainError('CONFIGURATION_REQUIRED',503);
     this.model=parsed.data;
@@ -44,38 +45,46 @@ export class OpenAIImageProvider implements ImageProvider{
     if(!parsed.success||!z.uuid().safeParse(context.internalId).success||!z.uuid().safeParse(context.correlationId).success)throw new ProviderRequestError('INVALID_INPUT',400,true);
     if(context.signal.aborted)throw new ProviderRequestError('PROVIDER_UNAVAILABLE',503,true);
     const input=parsed.data,signal=AbortSignal.any([context.signal,AbortSignal.timeout(210_000)]);
-    let response:Response|undefined;
-    try{
-      response=await this.transport('https://api.openai.com/v1/images/generations',{
-        method:'POST',redirect:'error',signal,
-        headers:{Authorization:`Bearer ${this.apiKey}`,'Content-Type':'application/json','X-Client-Request-Id':context.correlationId},
-        body:JSON.stringify({model:this.model,prompt:input.prompt,n:1,size:`${input.width}x${input.height}`,quality:'medium',output_format:'png',background:'opaque',moderation:'auto'}),
-      });
-      if(!response.ok){
-        if([401,403].includes(response.status))throw new ProviderRequestError('CONFIGURATION_REQUIRED',503,true);
-        if(response.status===429)throw new ProviderRequestError('RATE_LIMITED',429,true);
-        if(response.status>=400&&response.status<500&&![408,409].includes(response.status))throw new ProviderRequestError('PROVIDER_REJECTED',502,true);
+    try{return await this.circuit.execute(async()=>{
+      let response:Response|undefined;
+      try{
+        response=await this.transport('https://api.openai.com/v1/images/generations',{
+          method:'POST',redirect:'error',signal,
+          headers:{Authorization:`Bearer ${this.apiKey}`,'Content-Type':'application/json','X-Client-Request-Id':context.correlationId},
+          body:JSON.stringify({model:this.model,prompt:input.prompt,n:1,size:`${input.width}x${input.height}`,quality:'medium',output_format:'png',background:'opaque',moderation:'auto'}),
+        });
+        if(!response.ok){
+          if([401,403].includes(response.status))throw new ProviderRequestError('CONFIGURATION_REQUIRED',503,true);
+          if(response.status===429)throw new ProviderRequestError('RATE_LIMITED',429,true);
+          if(response.status>=400&&response.status<500&&![408,409].includes(response.status))throw new ProviderRequestError('PROVIDER_REJECTED',502,true);
+          throw uncertain();
+        }
+        const data=responseSchema.parse(await readResponse(response,signal));
+        const encoded=data.data[0]!.b64_json;
+        // Buffer.from alone silently accepts corrupt base64. Require canonical encoding.
+        if(encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw uncertain();
+        const bytes=Buffer.from(encoded,'base64');
+        if(bytes.length>maxGeneratedImageBytes||bytes.length<24||bytes.toString('base64')!==encoded||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||bytes.toString('ascii',12,16)!=='IHDR'||bytes.readUInt32BE(16)!==input.width||bytes.readUInt32BE(20)!==input.height)throw uncertain();
+        signal.throwIfAborted();
+        const requestId=response.headers.get('x-request-id');
+        return {
+          // This is a diagnostic request id, not a retrievable image/job id.
+          reference:requestId&&/^[A-Za-z0-9_-]{1,200}$/.test(requestId)?{provider:this.name,internalId:context.internalId,externalId:requestId,metadata:{kind:'request',quality:'medium'}}:null,
+          bytes,mimeType:'image/png',usage:{model:this.model,inputUnits:data.usage?.input_tokens??null,outputUnits:data.usage?.output_tokens??null,costMicrounits:null,currency:'USD'},
+        };
+      }catch(error){
+        if(error instanceof ProviderRequestError)throw error;
+        // Transport failure, malformed output and cancellation after dispatch can all
+        // follow a billable generation. Hide raw vendor payloads and never mark retry-safe.
         throw uncertain();
-      }
-      const data=responseSchema.parse(await readResponse(response,signal));
-      const encoded=data.data[0]!.b64_json;
-      // Buffer.from alone silently accepts corrupt base64. Require canonical encoding.
-      if(encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw uncertain();
-      const bytes=Buffer.from(encoded,'base64');
-      if(bytes.length>maxGeneratedImageBytes||bytes.length<24||bytes.toString('base64')!==encoded||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||bytes.toString('ascii',12,16)!=='IHDR'||bytes.readUInt32BE(16)!==input.width||bytes.readUInt32BE(20)!==input.height)throw uncertain();
-      signal.throwIfAborted();
-      const requestId=response.headers.get('x-request-id');
-      return {
-        // This is a diagnostic request id, not a retrievable image/job id.
-        reference:requestId&&/^[A-Za-z0-9_-]{1,200}$/.test(requestId)?{provider:this.name,internalId:context.internalId,externalId:requestId,metadata:{kind:'request',quality:'medium'}}:null,
-        bytes,mimeType:'image/png',usage:{model:this.model,inputUnits:data.usage?.input_tokens??null,outputUnits:data.usage?.output_tokens??null,costMicrounits:null,currency:'USD'},
-      };
+      }finally{await response?.body?.cancel().catch(()=>{});}
+    },error=>!context.signal.aborted&&error instanceof ProviderRequestError&&['RECONCILIATION_REQUIRED','RATE_LIMITED'].includes(error.code));
     }catch(error){
-      if(error instanceof ProviderRequestError)throw error;
-      // Transport failure, malformed output and cancellation after dispatch can all
-      // follow a billable generation. Hide raw vendor payloads and never mark retry-safe.
-      throw uncertain();
-    }finally{await response?.body?.cancel().catch(()=>{});}
+      // Admission denial is definitive: no remote request was dispatched. Never
+      // reclassify a failure from an admitted billable generation as retry-safe.
+      if(error instanceof CircuitOpenError)throw new ProviderRequestError('PROVIDER_UNAVAILABLE',503,true);
+      throw error;
+    }
   }
 }
 
@@ -104,3 +113,4 @@ export function imageFromEnvironment(env:{IMAGE_PROVIDER:string;IMAGE_GENERATION
   if(env.IMAGE_PROVIDER==='mock'&&env.MOCK_IMAGE_FILE)return new MockImageProvider(env.NODE_ENV,env.MOCK_IMAGE_FILE);
   return null;
 }
+

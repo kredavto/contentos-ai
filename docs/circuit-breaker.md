@@ -1,4 +1,4 @@
-# OpenAI text-generation circuit breaker
+# OpenAI circuit breakers
 
 The long-lived OpenAI Responses adapter used by the worker now admits calls through
 a process-local CLOSED → OPEN → HALF_OPEN → CLOSED circuit. No request is retried
@@ -24,8 +24,9 @@ return their original result so metered usage is not lost.
 - This is not a distributed breaker. Multiple worker processes independently admit
   their own requests and probes; already-admitted calls are not cancelled. A
   fleet-wide concurrency/rate budget is separate work.
-- OpenAI text generation only: image, speech, HeyGen and other provider adapters are
-  not covered. Do not mark all of specification §134 production-complete.
+- OpenAI text generation, image generation and Whisper caption transcription are
+  covered independently. HeyGen and other provider adapters are not covered. Do
+  not mark all of specification §134 production-complete.
 - Existing explicit fallback routes and durable job/credit handling are unchanged.
   The breaker does not replay uncertain remote writes, create automatic fallback
   credentials or fabricate successful output.
@@ -42,3 +43,34 @@ HTTP error classification, network failures, aborts and existing structured-outp
 usage/error contracts. This focused cloud checkout is not a full-project test run;
 repository CI, production build/browser regression and live acceptance remain
 separate gates.
+
+The text-only checkpoint `ec8be649` subsequently passed full repository CI:
+**859 tests across 120 files, all 37 Chromium scenarios, migrations, TypeScript,
+ESLint and production build**, run
+https://github.com/kredavto/contentos-ai/actions/runs/40579906079.
+
+## Image and caption extension
+
+Image generation uses the same five-failure/30-second-cooldown policy, with a
+20-minute failure window to accommodate five serial 210-second timeouts. Caption
+transcription retains the 10-minute window and 90-second SDK timeout. Each
+long-lived worker adapter has independent state; opening an image circuit does
+not trip text generation or transcription. Neither adapter retries requests.
+
+Image admission wraps the entire bounded response read/validation. Network errors,
+uncertain HTTP responses, malformed image responses and rate limits count, but
+caller cancellation does not. A previously dispatched image still reports
+`RECONCILIATION_REQUIRED` with `definitiveRejection:false`, even when that failure
+opens the circuit. Only circuit rejection **before dispatch** reports
+`PROVIDER_UNAVAILABLE` with `definitiveRejection:true`; the existing worker can
+release that request's reservation without replaying earlier uncertain requests.
+Caption admission uses the SDK transport-error classification from text
+generation, preserves segment validation, and logs `CIRCUIT_OPEN` for denied calls.
+As with text generation, malformed HTTP-200 caption output remains a validation
+error rather than a transport-outage signal; it does not trip this circuit.
+
+Focused extension verification: **65 tests in five files**, including original
+image/raster/caption contracts and both breaker suites, passed. Providers and
+focused-checkout test TypeScript, changed-file ESLint and whitespace checks passed.
+This extension requires a new full CI run; the successful checkpoint above does
+not establish regression acceptance for later commits.
