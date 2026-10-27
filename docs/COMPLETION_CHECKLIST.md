@@ -149,7 +149,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 131 | OBSERVABILITY | See TECH_SPEC.md §131; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 132 | STRUCTURED LOGGING | See TECH_SPEC.md §132; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 133 | HEALTH ENDPOINTS | Separate Node /api/health/ready probes PostgreSQL/Redis/private S3, with 200/503/no-store, native cancellation, coalescing, monotonic caching and no external-provider coupling. Full 830-test checkpoint, full MVP/readiness browsers and final 16-test/wire/HTTP acceptance passed — readiness.md. Production configuration/acceptance remains separate. | LOCAL_VERIFIED |
-| 134 | PROVIDER CIRCUIT BREAKER | Source audit 2026-10-26: LLM requests have explicit timeouts and no SDK retries, but no CLOSED/OPEN/HALF_OPEN breaker implementation exists. | MISSING |
+| 134 | PROVIDER CIRCUIT BREAKER | OpenAI text-generation process-local CLOSED/OPEN/HALF_OPEN admission, bounded failure window, single probe and stale-result fencing implemented; 30 focused breaker/AI tests and package TypeScript/lint passed. Other adapters, distributed coordination and production acceptance remain — circuit-breaker.md. | PARTIAL |
 | 135 | TIMEOUT | See TECH_SPEC.md §135; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 136 | DATABASE INDEXES | Migration 0095 and database-index-audit.md cover user-reference and tenant read paths; production load/p95 remains unverified | PARTIAL |
 | 137 | UNIQUE CONSTRAINTS | See TECH_SPEC.md §137; current implementation evidence must be inspected | AUDIT_REQUIRED |

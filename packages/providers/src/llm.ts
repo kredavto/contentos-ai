@@ -1,21 +1,26 @@
 import OpenAI from 'openai';
+import { CircuitBreaker } from './circuit-breaker';
 import { DomainError, type LLMProvider, type OperationContext, type Usage } from '@contentos/types';
 
 export class OpenAILLMProvider implements LLMProvider {
   readonly name = 'openai';
   private readonly client: OpenAI;
-  constructor(apiKey: string, fetchImplementation?: typeof fetch) {
+  constructor(apiKey: string, fetchImplementation?: typeof fetch, private readonly circuit = new CircuitBreaker()) {
     if (!apiKey) throw new DomainError('CONFIGURATION_REQUIRED', 503);
     this.client = new OpenAI({ apiKey, maxRetries: 0, timeout: 90_000, ...(fetchImplementation ? { fetch: fetchImplementation } : {}) });
   }
   async generate(input: Parameters<LLMProvider['generate']>[0], context: OperationContext) {
     if (!input.model) throw new DomainError('CONFIGURATION_REQUIRED', 503);
     try {
-      const response = await this.client.responses.create({
+      const response = await this.circuit.execute(() => this.client.responses.create({
         model: input.model, store: false, max_output_tokens: 12000,
         input: [{ role: 'system', content: input.system }, { role: 'user', content: input.prompt }],
         text: { format: { type: 'json_schema', name: 'contentos_workflow', strict: true, schema: input.jsonSchema } },
-      }, { signal: context.signal });
+      }, { signal: context.signal }), (error) => {
+        if (context.signal.aborted) return false;
+        return error instanceof OpenAI.APIConnectionError ||
+          (error instanceof OpenAI.APIError && (error.status === 408 || error.status === 429 || (error.status !== undefined && error.status >= 500)));
+      });
       const usage: Usage = { model: response.model, inputUnits: response.usage?.input_tokens ?? 0, outputUnits: response.usage?.output_tokens ?? 0, costMicrounits: null, currency: 'USD' };
       // Preserve metered usage even for truncated or invalid output. The orchestrator
       // records this call before deciding whether a schema repair is needed.
@@ -32,3 +37,4 @@ export class OpenAILLMProvider implements LLMProvider {
     }
   }
 }
+

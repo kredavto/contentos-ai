@@ -1,12 +1,16 @@
 # Implementation status
 
-Updated 2026-10-26.
+Updated 2026-10-27.
 
 Estimated full-project coverage: **≈63%** (101/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
 
 Account export format v2 extends the password-confirmed JSON with personal authentication and email-delivery history, consent acceptance/revocation evidence, accepted renewal terms and own action metadata. Actor-scoped projections exclude third-party identities, credentials and operational payloads, including after membership ends. Migration 0039 adds six lookup indexes. Payment transaction/organization-content exports, large asynchronous archives and actual account erasure remain outstanding.
 
 This is an implementation inventory, not a claim that the full specification is complete.
+
+## Latest focused reliability slice (2026-10-27)
+
+OpenAI text generation now has a process-local, long-lived-provider circuit breaker: bounded failure window, cooldown, single half-open probe and stale concurrent-result fencing. Focused breaker/existing AI tests passed (30 tests), with providers/AI/types TypeScript and changed-file ESLint. This does not extend to other adapters or coordinate multiple worker processes; no live provider/deployment acceptance was performed. See [scope and verification](circuit-breaker.md). The project-wide coverage estimate above is unchanged pending the full audit.
 
 ## Verified working slice
 
