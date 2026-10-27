@@ -26,7 +26,10 @@ Source baseline: `f7b069b`; documentation-only changes do not alter application 
 
 - Frozen-lockfile install completed with project-pinned pnpm 10.30.3 and Node 24.22.1.
 - Local `pnpm test`: **80 passed, 82 skipped** across 30 files (18 passed, 12 skipped). PostgreSQL integration suites explicitly skipped because TEST_DATABASE_URL was absent. This is not a full-suite pass.
-- Fresh typecheck, lint, build and complete CI results are pending at this point; do not reuse historical green results as new evidence.
+- Fresh local `pnpm typecheck`, `pnpm lint` and `pnpm build`: **PASSED**. Relative documentation links: **29 checked, no missing targets**; `git diff --check`: **PASSED**.
+- Fresh complete [CI run 40547843029](https://github.com/kredavto/contentos-ai/actions/runs/40547843029): **PASSED** on 2026-10-27 for PR head `7e1b582` (tested PR merge ref `062b2ad`). Migrations, typecheck, lint, all **162 tests in 30 files** with PostgreSQL 17 and real FFmpeg, production build, and **both Playwright scenarios (4.2 minutes)** passed. This supersedes the local skipped integration suites for this source baseline.
+- Latest-feature coverage includes frozen performance evidence, immutable decisions, permissions/tenant isolation, idempotent credit capture and strategy conflicts; browser coverage exercises report generation, explicit acceptance/rejection and persisted history.
+- [PR #3](https://github.com/kredavto/contentos-ai/pull/3) was merged into `main` as `ddd7641`. This follow-up only records the completed verification evidence; it does not change application code.
 - No live paid AI call, live social publication or production deployment is part of this documentation verification.
 
 ## Launch gates
