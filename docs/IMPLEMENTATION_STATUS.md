@@ -1,6 +1,8 @@
 # Implementation status
 
-Updated 2026-10-04. This is an implementation inventory, not a claim that the full specification is complete.
+Documentation reviewed 2026-10-27; latest implementation evidence below is dated 2026-10-04. This is an implementation inventory, not a claim that the full specification is complete.
+
+Current stage labels and launch gates: [READINESS.md](READINESS.md). Earlier verification entries are historical; later sections supersede their pending-work statements. New verification results are recorded separately there and must not be confused with previous CI runs.
 
 ## Verified working slice
 
@@ -70,10 +72,10 @@ Updated 2026-10-04. This is an implementation inventory, not a claim that the fu
 - Durable mail delivery and cleanup, OAuth authentication extensibility/flows, team invitations/role management and agency clients.
 - Extend the implemented text/avatar/video/publishing job engine to additional platforms and webhooks, including operator reconciliation and provider pricing configuration.
 - Remaining image/media, YooKassa, YouTube/TikTok/Meta/VK and platform analytics adapters; production configuration and live verification of HeyGen/S3/Telegram remain pending.
-- Remaining AI workflows beyond strategy/ideas/scripts; downstream publishing transitions from the implemented editorial calendar.
+- Remaining audience/competitor/trend and other AI workflows beyond implemented strategy/ideas/scripts and performance reports; additional publishing providers beyond Telegram.
 - Private voice cloning/import, cover studio, B-roll and general video/audio media library; operator investigation of expired unknown submissions.
 - OAuth flows and refresh for additional social platforms, autopilot, verified/idempotent webhooks, additional delivery-status adapters and normalized/raw analytics.
-- AI recommendations with acceptance, comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
+- Additional recommendation workflows beyond implemented reviewed strategy experiments; comments/reply safety modes, funnels/UTMs, subscription billing/plans/renewal and financial dashboards.
 - Admin/support/audit UI, notifications, privacy export/deletion workflows, broader media access flows, feature flags, Sentry-compatible implementation, readiness/provider monitoring.
 - Complete development seed, full requested E2E beyond onboarding, remaining adapter/webhook/media/publishing tests, platform-wide security and architecture review.
 - Production Docker images/release flow, GLOBAL/RU deployment configuration and infrastructure, backups/restore verification, production credentials.
@@ -85,7 +87,7 @@ Git remote origin: https://github.com/kredavto/contentos-ai. User selected Verce
 
 ## Next concrete slice
 
-Continue with normalized analytics/Performance Analyst, Cover Studio and operator resolution for uncertain submissions. Additional social providers, payments and all other original requirements remain in scope. Research official APIs first.
+Performance Analyst reports and acceptance/rejection are now connected and verified (see final section). Next: automatic publication analytics/recurring collection, Cover Studio and operator resolution for uncertain submissions. Additional social providers, payments and production verification remain in scope. Research official APIs before adapter work.
 
 ## Local environment notes
 
