@@ -88,7 +88,7 @@ describe('caption circuit admission', () => {
     const { circuit } = setup(); let calls = 0;
     const provider = new OpenAICaptionProvider('fixture', 'whisper-1', async (url) => { if (url === 'data:,') return new Response(''); calls++; return Response.json({}, { status }); }, circuit);
     for (let i = 0; i < 2; i++) await expect(provider.transcribe(captionInput, context())).rejects.toThrow('PROVIDER_UNAVAILABLE');
-    await expect(provider.transcribe(captionInput, context())).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE', definitiveRejection: true });
+    await expect(provider.transcribe(captionInput, context())).rejects.toMatchObject({ code: 'RATE_LIMITED', definitiveRejection: true });
     expect(calls).toBe(2);
   });
   it('recovers with validated segments and keeps credential failures out of the outage counter', async () => {

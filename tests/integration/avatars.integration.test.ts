@@ -93,6 +93,24 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     await expect(repo.complete(claimed,avatarConsentPolicies())).rejects.toThrow('CONFLICT');
     expect(await service.cleanupOne()).toBe(true);
   });
+  it('releases a fresh local circuit denial without erasing an earlier unknown submission',async()=>{
+    const {subject}=await person();
+    const deniedProvider={...provider,create:async()=>{throw new ProviderRequestError('RATE_LIMITED',429,true);}};
+    const denied=new AvatarProcessor(database.db,{provider:deniedProvider,name:connection.name},storage,true);
+    const fresh=await service.create(userId,tenantId,brandId,request(subject),correlationId);
+    await denied.run(tenantId,fresh.id);
+    expect((await row(fresh.id)).status).toBe('FAILED');
+    expect((await row(fresh.id)).error_code).toBe('RATE_LIMITED');
+    expect((await database.client`select mutation_state from avatar_looks where job_id=${fresh.id}`)[0]?.mutation_state).toBe('REJECTED');
+    expect((await database.client`select status from usage_reservations where id=${(await row(fresh.id)).reservation_id}`)[0]?.status).toBe('RELEASED');
+    const uncertain=await service.create(userId,tenantId,brandId,request(subject),correlationId);
+    const dispatched=new AvatarProcessor(database.db,{name:connection.name,provider:{...provider,create:async()=>{throw new DomainError('PROVIDER_UNAVAILABLE',503);}}},storage,true);
+    await dispatched.run(tenantId,uncertain.id);expect((await row(uncertain.id)).status).toBe('RETRY');
+    await due(uncertain.id);await denied.run(tenantId,uncertain.id);
+    expect((await row(uncertain.id)).status).toBe('RECONCILIATION');
+    expect((await database.client`select mutation_state from avatar_looks where job_id=${uncertain.id}`)[0]?.mutation_state).toBe('UNKNOWN');
+    expect((await database.client`select status from usage_reservations where id=${(await row(uncertain.id)).reservation_id}`)[0]?.status).toBe('HELD');
+  });
   it('does not exhaust submission retries during normal long-running polling',async()=>{
     const {subject}=await person();const job=await service.create(userId,tenantId,brandId,request(subject),correlationId);
     const pending=new AvatarProcessor(database.db,{name:connection.name,provider:{...provider,status:async()=>({status:'PROCESSING',previewUrl:null})}},storage,true);

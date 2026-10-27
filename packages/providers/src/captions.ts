@@ -18,7 +18,7 @@ export class OpenAICaptionProvider implements CaptionProvider {
       if(!parsed.success)throw new DomainError('PROVIDER_REJECTED',502);
       status='SUCCEEDED';return parsed.data;
     }catch(error){
-      if(error instanceof CircuitOpenError){status='CIRCUIT_OPEN';throw new ProviderRequestError('PROVIDER_UNAVAILABLE',503,true);}
+      if(error instanceof CircuitOpenError){status='CIRCUIT_OPEN';throw new ProviderRequestError('RATE_LIMITED',429,true);}
       if(error instanceof DomainError)throw error;
       if(error instanceof OpenAI.APIError&&(error.status===401||error.status===403))throw new ProviderRequestError('CONFIGURATION_REQUIRED',503,true);
       if(error instanceof OpenAI.APIError&&error.status&&error.status>=400&&error.status<500&&![408,409,429].includes(error.status))throw new ProviderRequestError('PROVIDER_REJECTED',502,true);

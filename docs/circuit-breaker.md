@@ -1,4 +1,4 @@
-# OpenAI circuit breakers
+# AI provider circuit breakers
 
 The long-lived OpenAI Responses adapter used by the worker now admits calls through
 a process-local CLOSED → OPEN → HALF_OPEN → CLOSED circuit. No request is retried
@@ -25,8 +25,8 @@ return their original result so metered usage is not lost.
   their own requests and probes; already-admitted calls are not cancelled. A
   fleet-wide concurrency/rate budget is separate work.
 - OpenAI text generation, image generation and Whisper caption transcription are
-  covered independently. HeyGen and other provider adapters are not covered. Do
-  not mark all of specification §134 production-complete.
+  covered independently. HeyGen is covered per client (see the request-scoped BYOK
+  limitation below). Do not mark specification §134 production-complete.
 - Existing explicit fallback routes and durable job/credit handling are unchanged.
   The breaker does not replay uncertain remote writes, create automatic fallback
   credentials or fabricate successful output.
@@ -66,6 +66,9 @@ opens the circuit. Only circuit rejection **before dispatch** reports
 release that request's reservation without replaying earlier uncertain requests.
 Caption admission uses the SDK transport-error classification from text
 generation, preserves segment validation, and logs `CIRCUIT_OPEN` for denied calls.
+Its pre-dispatch denial returns definitive `RATE_LIMITED`, not a retryable
+`PROVIDER_UNAVAILABLE`: retrying after the persisted caption state becomes
+`REJECTED` would otherwise cause unnecessary reconciliation on the next attempt.
 As with text generation, malformed HTTP-200 caption output remains a validation
 error rather than a transport-outage signal; it does not trip this circuit.
 
@@ -74,3 +77,34 @@ image/raster/caption contracts and both breaker suites, passed. Providers and
 focused-checkout test TypeScript, changed-file ESLint and whitespace checks passed.
 This extension requires a new full CI run; the successful checkpoint above does
 not establish regression acceptance for later commits.
+
+## HeyGen extension and worker-state regression
+
+Each `HeyGenClient` now has independent process-local admission. Counted failures
+are the adapter's existing unavailable outcomes (network/HTTP 408, 409, 429 and
+5xx). Caller cancellations, definitive credential/request errors and malformed
+successful responses do not count. Existing 30-second timeout, validated response
+schema, idempotency headers and absence of implicit retries are unchanged.
+
+An admitted request retains its original uncertain/non-definitive outcome even
+when it opens the circuit. A blocked POST is a definitive local `RATE_LIMITED`
+denial; blocked GET/DELETE operations remain non-definitive
+`PROVIDER_UNAVAILABLE`, since an existing remote resource may still need polling
+or deletion. The repository's existing unknown-submission guard must preserve
+older uncertainty even if a later attempt is denied locally.
+
+Server-configured worker clients are long-lived. **Request-scoped BYOK and key
+verification clients do not retain breaker state across requests/jobs.** No secret
+cache or credential-indexed global registry is added. Fleet-wide and durable
+BYOK-scoped protection remain open.
+
+Final focused validation for this extension: **91 tests in seven suites**;
+full-workspace/test TypeScript, ESLint and production build passed. Added PostgreSQL worker tests
+for fresh-denial refunds, prior-unknown reservation retention and caption denial
+without false reconciliation. Those two new database cases were not run locally
+(PostgreSQL is unavailable); they require the latest commit's full CI. No live
+provider call or production readiness is claimed.
+
+The OpenAI image/caption checkpoint `d1b56a4` passed full CI (879 tests in 121 files, all 37 Chromium scenarios, migrations, typecheck, lint and build):
+https://github.com/kredavto/contentos-ai/actions/runs/40582710462.
+This result does not validate the later HeyGen/caption worker-state changes.
