@@ -12,6 +12,10 @@ This is an implementation inventory, not a claim that the full specification is 
 
 OpenAI text generation, image generation and caption transcription now have independent process-local, long-lived-provider circuit breakers: bounded failure windows, cooldown, single half-open probes and stale concurrent-result fencing. The text-only checkpoint ec8be649 passed full CI: 859 tests across 120 files and 37 Chromium scenarios, migrations, TypeScript/lint and production build. The image/caption extension passed 65 focused tests plus providers/test TypeScript and changed-file ESLint; its new full CI gate remains separate. Uncertain image writes retain reconciliation semantics; only a pre-dispatch circuit denial is definitive. HeyGen per-client admission and a caption-denial worker-state correction are also implemented: 91 focused tests plus full-workspace/test TypeScript and lint pass; two new worker DB cases await latest-commit CI. Request-scoped BYOK state and cross-process coordination remain open; no live provider/deployment acceptance was performed. See [scope and verification](circuit-breaker.md). The project-wide coverage estimate above is unchanged pending the full audit.
 
+## Latest focused search slice (2026-10-27)
+
+Organization search now supports bounded first/previous/next navigation using at most 50 cursor bookmarks, without retaining previous result pages. Failed transitions preserve the visible page for retry; new query/type submissions and tenant changes reset history, with request identity/abort fencing for late responses. Six focused tests, full workspace/test TypeScript, ESLint and production build passed. Updated browser coverage requires exact-commit CI; entity-specific selection and production-scale latency remain open. See [search scope](search.md).
+
 ## Verified working slice
 
 - pnpm 10.30.3 / Turborepo monorepo: apps/web, apps/worker and seven requested packages; strict TypeScript 5.9.3, ESLint 10, Vitest, Playwright.
