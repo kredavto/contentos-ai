@@ -17,3 +17,5 @@ export * from './youtube';
 export * from './mock-youtube';
 
 export * from './redis-readiness';
+export type {CircuitExecutor} from './circuit-breaker';
+export type {HeyGenCircuitScope} from './heygen-circuit-registry';

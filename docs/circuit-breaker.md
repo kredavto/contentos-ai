@@ -93,10 +93,9 @@ denial; blocked GET/DELETE operations remain non-definitive
 or deletion. The repository's existing unknown-submission guard must preserve
 older uncertainty even if a later attempt is denied locally.
 
-Server-configured worker clients are long-lived. **Request-scoped BYOK and key
-verification clients do not retain breaker state across requests/jobs.** No secret
-cache or credential-indexed global registry is added. Fleet-wide and durable
-BYOK-scoped protection remain open.
+Server-configured worker clients are long-lived. The initial HeyGen checkpoint
+used per-client state only; the scoped BYOK extension below retains health across
+request/job clients. Key-verification clients remain isolated.
 
 Final focused validation for this extension: **91 tests in seven suites**;
 full-workspace/test TypeScript, ESLint and production build passed. Added PostgreSQL worker tests
@@ -108,3 +107,44 @@ provider call or production readiness is claimed.
 The OpenAI image/caption checkpoint `d1b56a4` passed full CI (879 tests in 121 files, all 37 Chromium scenarios, migrations, typecheck, lint and build):
 https://github.com/kredavto/contentos-ai/actions/runs/40582710462.
 This result does not validate the later HeyGen/caption worker-state changes.
+
+
+## Scoped BYOK admission
+
+Full acceptance of the preceding HeyGen/worker checkpoint `449efe9` passed:
+**897 tests in 122 files and all 37 Chromium scenarios**, migrations, TypeScript,
+ESLint and build ([CI run](https://github.com/kredavto/contentos-ai/actions/runs/40585397865)).
+That checkpoint does not validate the scoped registry extension below.
+
+Avatar, video and voice-catalog factories now share process-local health by the
+**resolved database row's tenant ID, provider-key ID and revision**. Authorization,
+plan eligibility, consent, revocation/revision checks and credential decryption
+still occur on their existing paths before client construction. Registry lookup
+never grants authority. A scoped client rejects a mismatched operation tenant
+before admission or transport. Rotation uses a distinct revision; server keys and
+read-only key-verification requests remain separate. A successful catalog call
+can close the same provider-wide credential circuit used by avatar/video calls;
+this is not independent per-endpoint health verification.
+
+The registry stores canonical non-secret identities, counters and monotonic times,
+not credentials, credential hashes, clients, requests, errors or operation
+closures. A gate resolves the current entry on every invocation, so a retained
+client cannot revive a stale breaker after healthy-entry expiry. Defaults are at
+most 2,048 entries globally and 64 per tenant. Only CLOSED entries idle for 30
+minutes with no admitted request in flight expire. OPEN/HALF_OPEN entries are
+never discarded merely because cooldown elapsed or capacity is needed. Capacity
+exhaustion denies before dispatch using the same safe method-specific mapping as
+an open circuit; it never falls back to an untracked request.
+
+Tradeoffs: abandoned failed credential revisions can retain capacity until a
+successful probe or process restart. Registry state does not survive restart or
+coordinate web/worker replicas; there is no distributed circuit, durable incident
+history or administrative reset endpoint. This does not replace database rate
+limits, authorization or uncertainty reconciliation. No provider was called live.
+Validation of this extension is recorded in its draft PR; pending CI is not a pass.
+
+Scoped-extension local validation: **97 tests in seven provider suites**, full
+workspace/test TypeScript, ESLint and production build passed. Two existing
+PostgreSQL integration scenarios now assert that avatar, video and catalog
+factories receive the resolved row identity; these require exact-commit CI.
+Independent review found no blocking identity, eviction or uncertainty defects.

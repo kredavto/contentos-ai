@@ -2,8 +2,12 @@ export class CircuitOpenError extends Error {
   constructor() { super('PROVIDER_UNAVAILABLE'); this.name = 'CircuitOpenError'; }
 }
 
+export interface CircuitExecutor {
+  execute<T>(operation: () => Promise<T>, isFailure: (error: unknown) => boolean): Promise<T>;
+}
+
 /** Process-local admission control. Never retries or cancels an admitted operation. */
-export class CircuitBreaker {
+export class CircuitBreaker implements CircuitExecutor {
   private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
   private generation = 0;
   private failures = 0;
@@ -22,6 +26,9 @@ export class CircuitBreaker {
   }
 
   private now() { return (this.options.now ?? (() => performance.now()))(); }
+
+  /** Registry eviction may forget only a closed, sufficiently idle instance. */
+  isClosed(): boolean { return this.state === 'CLOSED'; }
 
   async execute<T>(operation: () => Promise<T>, isFailure: (error: unknown) => boolean): Promise<T> {
     if (this.state === 'HALF_OPEN') throw new CircuitOpenError();
