@@ -1,6 +1,6 @@
 import type {ErrorReporter} from '@contentos/types';
 import {reportError} from './error-reporting';
-import {videoFromKey} from '@contentos/providers';
+import {videoFromKey,type HeyGenCircuitScope} from '@contentos/providers';
 import {CredentialVault} from './credential-vault';
 import type {EncryptedCredential} from '@contentos/types';
 import {z} from 'zod';
@@ -9,11 +9,11 @@ import {DomainError,ProviderRequestError,videoRequestSchema,videoApprovalSchema,
 import {avatarConsentPolicies} from './avatars';
 export type VideoConnection={provider:VideoProvider;name:string}|null;
 export type CaptionConnection={provider:CaptionProvider;name:string;model:string}|null;
-export type VideoByok={vault:CredentialVault|null;provider?:(key:string)=>VideoProvider};
-function boundConnection(key:{id:string;tenantId:string;brandId:string;provider:string;credential:EncryptedCredential|null},byok?:VideoByok){
+export type VideoByok={vault:CredentialVault|null;provider?:(key:string,scope?:HeyGenCircuitScope)=>VideoProvider};
+function boundConnection(key:{id:string;tenantId:string;brandId:string;revision:number;provider:string;credential:EncryptedCredential|null},byok?:VideoByok){
  if(!byok?.vault||!key.credential||key.provider!=='heygen')throw new DomainError('CONFIGURATION_REQUIRED',503);
  const plaintext=byok.vault.decrypt(key.credential,{kind:'PROVIDER_KEY',tenantId:key.tenantId,brandId:key.brandId,connectionId:key.id,provider:'heygen'});
- return {name:'heygen',provider:(byok.provider??videoFromKey)(plaintext)};
+ return {name:'heygen',provider:(byok.provider??videoFromKey)(plaintext,{tenantId:key.tenantId,providerKeyId:key.id,revision:key.revision})};
 }
 const uuid=z.uuid();
 export class VideoService {

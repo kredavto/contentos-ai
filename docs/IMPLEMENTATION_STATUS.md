@@ -1564,3 +1564,38 @@ Operational/security review: all indexes are additive; existing retention/histor
 A new independent slice is built on the existing PR5 search history, not a duplicate of its pagination. SCRIPT hits open a dedicated authenticated read-only current-script page through an exact tenant/brand/script-scoped repository/service lookup, independent of the studio's 100-newest-script overview. The page presents current metadata, content and approval state without editor/approval/generation mutations; other entity kinds remain section links. No migration, unpublished plan-limit patch recreation or external provider operation. Local/CI validation remains to be recorded; see [search](search.md).
 
 Script-destination local gates passed: 8 focused tests across four files independently repeated, full workspace/test TypeScript, ESLint and fresh production build. All local tests: 371 passed / 536 skipped (73 passing / 53 skipped files); three new database cases and the new browser/mobile scenario remain unverified without services. Independent review found no remaining blocker after correcting streamed not-found status assumptions and avoiding nested main landmarks. Source/patch remain local pending explicit publication authorization; no merge/deploy.
+
+
+## Scoped BYOK circuit admission — 2026-10-27
+
+The preceding provider/worker checkpoint `449efe9` passed full CI: 897 tests across 122 files, 37 Chromium scenarios, migrations, TypeScript, lint and production build (run 40585397865). The new extension shares bounded process-local HeyGen health across avatar/video/catalog clients using the authorized resolved tenant/key/revision, without retaining plaintext credentials or bypassing core checks. Healthy idle entries expire; active/open circuits cannot be evicted by identity churn, and capacity fails closed. Rotation isolates revisions; abandoned open revisions may retain capacity until recovery/restart. Cross-process and restart-durable protection remain unimplemented. Extension CI is separate and must pass before acceptance; no live provider/production validation or project-wide percentage increase is claimed. See [circuit scope and limits](circuit-breaker.md).
+
+## SMTP operation deadline and cancellation — 2026-10-27
+
+Source audit found that authentication and notification workers already supplied 15-second AbortSignals, but SMTP ignored cancellation after dispatch and had only per-phase/inactivity limits. The adapter now owns a separate socket per send through Nodemailer's public connection hook, with an absolute 30-second ceiling, earlier caller cancellation and a 5-second connection ceiling. Native teardown preserves concurrent-send isolation and keeps post-dispatch outcomes uncertain; existing terminal reconciliation/no-replay semantics remain unchanged. SMTP/TLS option allowlisting rejects pooling/proxy/custom transports that could bypass socket ownership. No migrations, live sender configuration or external emails. Loopback SMTP/TLS regression, typecheck/lint/build and exact-commit CI are required; pending checks are not counted as passed. See [production email](production-email.md).
+
+SMTP local verification completed: 40 focused SMTP/classification/wire tests passed and independently repeated; full workspace/test TypeScript, ESLint and production build passed. The local all-tests command passed 396 tests with 533 skipped across 71 passing and 52 skipped files because integration services are unavailable. This is not full CI acceptance. Source and recovery patch are prepared locally; publication awaits explicit authorization after the repository commit action was denied by review. No bypass or alternate push was attempted.
+
+## LLM aggregate request admission — 2026-10-27
+
+§141 source audit confirmed fixed output and attempt limits but no aggregate serialized request ceiling. A provider-only local slice now limits OpenAI Responses body JSON to 256 KiB UTF-8, including schema/envelope, before circuit or transport admission. A detached plain-JSON snapshot prevents mutation/serialization-hook bypass; non-JSON/cyclic/excessively nested data fails safely without truncation. This is a byte guard, not exact tokenization, model context or subscription enforcement. Large valid source contexts may need reduction; existing credit handling remains unchanged. No migrations, plan-limit patch recreation or live provider call. Validation and publication authorization remain separate; see [request budget](llm-request-budget.md).
+
+LLM budget local validation completed: 38 focused tests across three suites passed and independently repeated; full workspace/test TypeScript, ESLint and production build passed. All-tests command: 372 passed / 533 skipped, with absent local PostgreSQL/Redis explicitly preventing full integration acceptance. No full CI result is claimed for this unpublished slice; recovery patch remains local until authorized publication.
+
+## Reconstructed combined acceptance candidate — 2026-10-28
+
+The user approved a separate integration draft combining PR4–9, without merging
+or deployment. The earlier local candidate passed types/lint/build and 424 tests
+with 536 database/Redis skips; independent review passed 114 focused tests. Its
+workspace and patch were unavailable after environment replacement. Rebuilt on
+unchanged PR9 from the exact published PR6/7/8 commits; all 30 source/test paths
+match their source versions byte for byte. Historical documentation was retained
+and consolidated. This is not a claim of recovering the previous full tree hash.
+See [integration plan](integration-plan.md) for exact references and remaining gates.
+
+Individual CI subsequently passed PR6 (910 tests/37 browsers), PR7 (929/37),
+PR8 (905/37) and PR9 (907/38), superseding their earlier pending notes. These
+individual runs are not combined acceptance. Full exact-head PostgreSQL/Redis
+and 38-scenario browser CI must pass for this integration candidate. No migrations,
+production configuration, live provider calls or old plan-limit recreation are
+included. Project-wide completion and production readiness remain unestablished.
