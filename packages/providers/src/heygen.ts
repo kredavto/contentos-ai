@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CircuitBreaker, CircuitOpenError } from './circuit-breaker';
+import { CircuitBreaker, CircuitOpenError, type CircuitExecutor } from './circuit-breaker';
 import {downloadProviderVideo} from './video-download';
 import { DomainError, ProviderRequestError, type AvatarProvider, type VideoProvider, type OperationContext, type ProviderReference } from '@contentos/types';
 const externalId = z.string().min(1).max(255);
@@ -11,9 +11,13 @@ function reference(context:OperationContext,id:string,metadata:Record<string,unk
 function checkReference(value:ProviderReference){if(value.provider!=='heygen')throw new DomainError('INVALID_INPUT');return encodeURIComponent(externalId.parse(value.externalId));}
 /** Official v3 transport. No implicit mutation retries; durable jobs own replay. */
 export class HeyGenClient {
-  constructor(private readonly apiKey:string,private readonly transport:typeof fetch=fetch,private readonly circuit=new CircuitBreaker()) {if(!apiKey)throw new DomainError('CONFIGURATION_REQUIRED',503);}
+  constructor(private readonly apiKey:string,private readonly transport:typeof fetch=fetch,private readonly circuit:CircuitExecutor=new CircuitBreaker(),private readonly tenantId?:string) {
+    if(!apiKey)throw new DomainError('CONFIGURATION_REQUIRED',503);
+    if(tenantId!==undefined&&!z.uuid().safeParse(tenantId).success)throw new DomainError('INVALID_INPUT');
+  }
   async request<T>(path:string,method:'GET'|'POST'|'DELETE',schema:z.ZodType<T>,context:OperationContext,body?:unknown):Promise<T> {
     if(!path.startsWith('/v3/')||path.includes('://'))throw new DomainError('INVALID_INPUT');
+    if(this.tenantId!==undefined&&(typeof context.tenantId!=='string'||context.tenantId.toLowerCase()!==this.tenantId.toLowerCase()))throw new DomainError('NOT_AUTHORIZED',403);
     try{
       return await this.circuit.execute(()=>this.requestAdmitted(path,method,schema,context,body),error=>!context.signal.aborted&&error instanceof DomainError&&error.code==='PROVIDER_UNAVAILABLE');
     }catch(error){

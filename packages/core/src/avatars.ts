@@ -1,6 +1,6 @@
 import type {ErrorReporter} from '@contentos/types';
 import {reportError} from './error-reporting';
-import {avatarFromKey} from '@contentos/providers';
+import {avatarFromKey,type HeyGenCircuitScope} from '@contentos/providers';
 import {CredentialVault} from './credential-vault';
 import type {EncryptedCredential} from '@contentos/types';
 import { z } from 'zod';
@@ -9,11 +9,11 @@ import { DomainError,ProviderRequestError,avatarRequestSchema,type AvatarProvide
 import { consentPolicy } from './consent';
 export const avatarConsentPolicies=()=>[consentPolicy('OWN_LIKENESS'),consentPolicy('THIRD_PARTY_LIKENESS'),consentPolicy('CROSS_BORDER_PROCESSING')];
 export type AvatarConnection={provider:AvatarProvider;name:string}|null;
-export type AvatarByok={vault:CredentialVault|null;provider?:(key:string)=>AvatarProvider};
-function boundConnection(key:{id:string;tenantId:string;brandId:string;provider:string;credential:EncryptedCredential|null},byok?:AvatarByok){
+export type AvatarByok={vault:CredentialVault|null;provider?:(key:string,scope?:HeyGenCircuitScope)=>AvatarProvider};
+function boundConnection(key:{id:string;tenantId:string;brandId:string;revision:number;provider:string;credential:EncryptedCredential|null},byok?:AvatarByok){
  if(!byok?.vault||!key.credential||key.provider!=='heygen')throw new DomainError('CONFIGURATION_REQUIRED',503);
  const plaintext=byok.vault.decrypt(key.credential,{kind:'PROVIDER_KEY',tenantId:key.tenantId,brandId:key.brandId,connectionId:key.id,provider:'heygen'});
- return {name:'heygen',provider:(byok.provider??avatarFromKey)(plaintext)};
+ return {name:'heygen',provider:(byok.provider??avatarFromKey)(plaintext,{tenantId:key.tenantId,providerKeyId:key.id,revision:key.revision})};
 }
 const uuid=z.uuid();
 const contextFor=(job:StoredJob,signal:AbortSignal):OperationContext=>({tenantId:job.tenantId,internalId:job.id,idempotencyKey:job.idempotencyKey,correlationId:job.correlationId,signal});

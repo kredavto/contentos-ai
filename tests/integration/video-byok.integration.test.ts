@@ -5,6 +5,7 @@ import {BillingRepository,ProviderKeyRepository,VideoRepository,VoiceRepository,
 import {VideoService,VideoProcessor} from '../../packages/core/src/videos';
 import {ProviderKeyService} from '../../packages/core/src/provider-keys';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
+import type {HeyGenCircuitScope} from '../../packages/providers/src/index';
 import {isolatedTestDatabase} from '../helpers/isolated-database';
 import {AvatarService,AvatarProcessor} from '../../packages/core/src/avatars';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
@@ -19,7 +20,8 @@ describe.skipIf(!url)('BYOK-bound video jobs',()=>{
   const consent=new ConsentService(new ConsentRepository(database.db));
   const vault=new CredentialVault(JSON.stringify({v1:randomBytes(32).toString('base64')}),'v1'),keys=new ProviderKeyService(new ProviderKeyRepository(database.db),vault);
   const provider:AvatarProvider={create:async(_input,context)=>{return {provider:'heygen',internalId:context.internalId,externalId:`look-${context.internalId}`,metadata:{groupId:`group-${context.internalId}`}};},list:async()=>[],status:async()=>{return {status:'READY',previewUrl:null};},delete:async()=>{}};
-  const byok={vault,provider:(secret:string)=>{expect(secret).toMatch(/^fixture-/);return provider;}};
+  const avatarScopes:HeyGenCircuitScope[]=[];
+  const byok={vault,provider:(secret:string,healthScope?:HeyGenCircuitScope)=>{expect(secret).toMatch(/^fixture-/);expect(healthScope).toMatchObject({tenantId});avatarScopes.push(healthScope!);return provider;}};
   const service=new AvatarService(repo,null,storage,true,byok),processor=new AvatarProcessor(database.db,null,storage,true,undefined,byok);
   async function key(){const current=(await keys.list(userId,tenantId,brandId))[0];return keys.save(userId,tenantId,brandId,{provider:'heygen',apiKey:`fixture-${randomUUID()}`,revision:current?.revision??null},correlationId);}
   async function queued(){const saved=await key(),{subject}=await person();const input={...request(subject),connection:{id:saved.id,revision:saved.revision}};const job=await service.create(userId,tenantId,brandId,input,correlationId);await due(job.id);return {saved,job,input};}
@@ -49,7 +51,8 @@ describe.skipIf(!url)('BYOK-bound video jobs',()=>{
   let submitted=0,checked=0,removed=0;
   const videoProvider:VideoProvider={submit:async(_input,context)=>{submitted++;return {provider:'heygen',externalId:`video-${context.internalId}`,internalId:context.internalId,metadata:{}};},status:async()=>{checked++;return {status:'READY',downloadUrl:'https://fixture.example.test/video.mp4'};},download:async()=>Buffer.from('original-fixture'),delete:async()=>{removed++;}};
   const processing:VideoProcessingProvider={prepareAudio:async()=>({bytes:Buffer.from('wav'),durationSeconds:11.2}),process:async input=>{for(const stage of ['CAPTIONS_GENERATING','BROLL_PROCESSING','COVER_GENERATING','QC'] as const)await input.onStage?.(stage,{});return {bytes:Buffer.from('final-fixture'),thumbnail:Buffer.from('cover'),durationSeconds:11.2,width:720,height:1280};}};
-  const videoByok={vault,provider:(secret:string)=>{expect(secret).toMatch(/^fixture-/);return videoProvider;}},videos=new VideoService(new VideoRepository(database.db),null,storage,true,null,videoByok),videoWorker=new VideoProcessor(database.db,null,storage,processing,true,null,undefined,videoByok);
+  const videoScopes:HeyGenCircuitScope[]=[];
+  const videoByok={vault,provider:(secret:string,healthScope?:HeyGenCircuitScope)=>{expect(secret).toMatch(/^fixture-/);expect(healthScope).toMatchObject({tenantId});videoScopes.push(healthScope!);return videoProvider;}},videos=new VideoService(new VideoRepository(database.db),null,storage,true,null,videoByok),videoWorker=new VideoProcessor(database.db,null,storage,processing,true,null,undefined,videoByok);
   async function videoRequest(){
     const avatar=await queued();await processor.run(tenantId,avatar.job.id);await due(avatar.job.id);await processor.run(tenantId,avatar.job.id);expect((await row(avatar.job.id)).status).toBe('SUCCEEDED');
     const [look]=await database.client`select id,avatar_id from avatar_looks where job_id=${avatar.job.id}`;
@@ -66,6 +69,9 @@ describe.skipIf(!url)('BYOK-bound video jobs',()=>{
     const [project]=await database.client`select * from video_projects where job_id=${job.id}`;expect(project!.provider_key_id).toBe(avatar.saved.id);expect(project!.provider_key_revision).toBe(avatar.saved.revision);
     await expect(database.client`update video_projects set provider_key_revision=provider_key_revision+1 where id=${project!.id}`).rejects.toThrow('immutable');
     expect(await videos.download(userId,tenantId,brandId,project!.id,correlationId)).toHaveProperty('videoUrl');await videos.delete(userId,tenantId,brandId,project!.id,correlationId);await database.client`update video_projects set delete_after=now()-interval '1 second' where id=${project!.id}`;expect(await videos.cleanupOne()).toBe(true);expect(removed).toBe(1);
+    const healthScope={tenantId,providerKeyId:avatar.saved.id,revision:avatar.saved.revision};
+    expect(avatarScopes.slice(-2)).toEqual([healthScope,healthScope]);
+    expect(videoScopes.slice(-3)).toEqual([healthScope,healthScope,healthScope]);
   });
   it('rejects stale avatar bindings before reservation and never substitutes the platform key',async()=>{
     const {input}=await videoRequest();await key();const before=await database.client`select id from jobs where tenant_id=${tenantId} and type='GENERATE_VIDEO'`;
