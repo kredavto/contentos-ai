@@ -3,6 +3,7 @@ import {useEffect,useRef,useState,type FormEvent} from 'react';
 import Link from 'next/link';
 import type {SearchPage} from '@contentos/types';
 import {api} from '../lib/api-client';
+import {searchResultLink} from '../lib/search-result-link';
 import {firstSearchPage,nextSearchPage,previousSearchPage,searchPageCursor,searchPageNumber,type SearchHistory} from '../lib/search-history';
 const labels={BRAND:'Бренды',IDEA:'Идеи',SCRIPT:'Сценарии',CONTENT:'Материалы',PUBLICATION:'Публикации'};
 export function OrganizationSearch({tenantId}:{tenantId:string}){
@@ -39,7 +40,7 @@ function OrganizationSearchForm({tenantId}:{tenantId:string}){
       <button className="button secondary" disabled={q.trim().length<2||(pending&&submitted?.q===q.trim()&&submitted.kind===kind)}>Найти</button>
     </form>
     {pending?<p role="status">Ищем…</p>:null}{error?<p role="alert" className="notice error">{error}</p>:null}
-    {result?<div aria-live="polite"><p className="muted">Результаты для «{submitted?.q}»{result.next?' · есть следующая страница':''}</p>{!result.items.length?<p>Совпадений не найдено.</p>:<ul className="search-results">{result.items.map(item=><li key={`${item.kind}:${item.id}`}><small>{labels[item.kind]} · {item.brandName}</small><h3>{item.title}</h3><p>{item.excerpt}</p><Link href={item.kind==='BRAND'?`/brands/${item.brandId}/onboarding?organization=${tenantId}`:`/brands/${item.brandId}/content?organization=${tenantId}&tab=${item.kind==='IDEA'?'ideas':item.kind==='SCRIPT'?'scripts':item.kind==='PUBLICATION'?'publishing':'calendar'}`}>Открыть раздел бренда</Link></li>)}</ul>}
+    {result?<div aria-live="polite"><p className="muted">Результаты для «{submitted?.q}»{result.next?' · есть следующая страница':''}</p>{!result.items.length?<p>Совпадений не найдено.</p>:<ul className="search-results">{result.items.map(item=><li key={`${item.kind}:${item.id}`}><small>{labels[item.kind]} · {item.brandName}</small><h3>{item.title}</h3><p>{item.excerpt}</p><Link href={searchResultLink(item,tenantId).href}>{searchResultLink(item,tenantId).label}</Link></li>)}</ul>}
       <nav aria-label="Страницы результатов поиска">
         <p className="muted">Страница {searchPageNumber(history)}</p>
         {history.firstPage>1?<p className="muted">Сохранены переходы только для последних 50 страниц. Для более ранних результатов вернитесь к первой странице.</p>:null}
