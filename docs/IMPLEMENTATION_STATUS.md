@@ -1599,3 +1599,22 @@ individual runs are not combined acceptance. Full exact-head PostgreSQL/Redis
 and 38-scenario browser CI must pass for this integration candidate. No migrations,
 production configuration, live provider calls or old plan-limit recreation are
 included. Project-wide completion and production readiness remain unestablished.
+
+## Exact IDEA search destination — unpublished local slice, 2026-10-28
+
+Added exact scoped read-only IDEA detail following SCRIPT detail, with membership
+checks in its repository transaction and explicit safe field projection. Ideas
+beyond the studio's 100-row cap can be opened directly. Dynamic auth, unavailable
+view, approver redirect, escaped saved metadata/content/scores and no mutations.
+No migrations, external requests, publication, merge or deployment. Independent
+review found no blocking access issue; tests cover identity validation, errors,
+encoded links plus prepared PostgreSQL/browser privacy cases. Full DB/browser
+acceptance remains pending and prior PR10 CI is not evidence for this new slice.
+See docs/search.md for scope and validation boundaries.
+
+Local validation completed: 11 focused tests in five files, full workspace/test
+TypeScript, ESLint and fresh production build passed. Final all-tests run passed
+427 tests across 77 files, with 539 skipped across 54 database/Redis-dependent
+files (including three new IDEA database cases). Independent review also passed
+10 focused tests. No full PostgreSQL/browser acceptance or visual inspection is
+claimed; exact-slice CI will require separate publication authorization.

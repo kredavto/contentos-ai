@@ -87,6 +87,17 @@ export class ContentRepository {
       return editCarouselInTransaction(tx,userId,tenantId,brandId,carouselId,input,correlationId);
     });
   }
+  /** Exact saved idea lookup, independent of the capped studio overview. */
+  async currentIdea(userId:string,tenantId:string,brandId:string,ideaId:string) {
+    return this.db.transaction(async tx=>{
+      const member=await assertMembership(tx,userId,tenantId);
+      const [idea]=await tx.select({id:ideas.id,brandId:ideas.brandId,brandName:brands.name,title:ideas.title,angle:ideas.angle,hook:ideas.hook,audienceLabel:ideas.audienceLabel,pillarLabel:ideas.pillarLabel,funnelStage:ideas.funnelStage,platform:ideas.platform,format:ideas.format,score:ideas.score,scores:ideas.scores,rationale:ideas.rationale,status:ideas.status})
+        .from(ideas).innerJoin(brands,and(eq(brands.tenantId,ideas.tenantId),eq(brands.id,ideas.brandId)))
+        .where(and(eq(ideas.tenantId,tenantId),eq(ideas.brandId,brandId),eq(ideas.id,ideaId)));
+      if(!idea)throw new DomainError('NOT_FOUND',404);
+      return {...idea,role:member.role};
+    });
+  }
   /** Exact current script lookup, independent of the capped studio overview. */
   async currentScript(userId:string,tenantId:string,brandId:string,scriptId:string) {
     return this.db.transaction(async tx=>{
