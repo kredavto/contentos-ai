@@ -1618,3 +1618,34 @@ TypeScript, ESLint and fresh production build passed. Final all-tests run passed
 files (including three new IDEA database cases). Independent review also passed
 10 focused tests. No full PostgreSQL/browser acceptance or visual inspection is
 claimed; exact-slice CI will require separate publication authorization.
+
+## Exact PUBLICATION search destination — unpublished local slice, 2026-10-28
+
+Prepared a separate read-only PUBLICATION destination on published IDEA head
+5d54a360. It reads exact stored publication evidence outside the 100-row job list,
+rechecks membership/account state in its transaction, binds tenant/brand across
+all joins, and distinguishes immutable publication text from the current material
+title. Raw snapshots, provider references/URLs, storage keys and credentials are
+not projected. No live provider request or publish/cancel/approve mutation; dates
+and status are explicitly stored evidence, not a live-platform claim.
+
+Four DB regressions and one browser/mobile scenario are prepared; local services
+are unavailable so full database/browser and visual acceptance remain pending.
+Independent review found no blocking security/access issue and independently
+passed 11 focused tests. The added legacy cross-brand content-pointer regression
+checks that the explicit brand join fails closed despite the looser legacy FK.
+No publication, commit, migration, merge or deployment; no old plan-limit recovery.
+See docs/search.md. Prior PR11 CI does not validate this unpublished slice.
+
+Prior baseline acceptance is now established: draft PR10 combined CI run
+40749113084 passed 960 tests/38 Chromium scenarios; draft PR11 IDEA head 5d54a360
+passed 966 tests/39 Chromium in run 40759452804 with no test skips. Both remain
+unmerged drafts, with production/live acceptance separate. These historical
+results do not establish acceptance of the new PUBLICATION slice.
+
+Local PUBLICATION checks passed: 14 focused tests across six suites, full
+workspace/test TypeScript, ESLint, fresh production build and whitespace checks.
+Final all-tests run: 430 passed / 543 skipped (78 passing / 55 skipped files).
+The four new database cases are among the skips; no DB/browser acceptance or
+visual review is claimed. Full verification requires an authorized publication
+and exact-head CI or an available isolated database/browser environment.

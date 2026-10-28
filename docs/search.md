@@ -6,7 +6,7 @@ PostgreSQL case-insensitive substring search treats %, _ and backslash literally
 
 The dashboard form resets synchronously with the organization, aborts stale requests, and supports kind filters, explicit submission and first/previous/next-page navigation. Only cursor bookmarks are retained for at most 50 pages; earlier result objects and excerpts are not cached. Back and first-page navigation fetch again through the authenticated no-store API. At the retained-history boundary, previous-page navigation is disabled and a first-page restart remains available. Page numbers describe traversal position, not a stable snapshot or total count.
 
-Navigation history commits only when the target request succeeds. A failed next/back request leaves the displayed page and its cursor history intact for retry. Newly submitted query/filter values reset history; a changed query can supersede an in-flight page request. Request identity plus AbortController fencing prevents an older response or finalizer from replacing the new query, clearing its pending state, or crossing an organization reset. A synchronous ref guard also blocks repeated page clicks before disabled controls render. SCRIPT and IDEA results use dedicated read-only destinations described below; other kinds still open the appropriate brand section. Exact editor selection and other entity-specific destinations remain UX extensions. There is no external provider call. Search uses existing relational tables; no new migration is required. Large-tenant performance and search indexes remain to be measured before production scale claims.
+Navigation history commits only when the target request succeeds. A failed next/back request leaves the displayed page and its cursor history intact for retry. Newly submitted query/filter values reset history; a changed query can supersede an in-flight page request. Request identity plus AbortController fencing prevents an older response or finalizer from replacing the new query, clearing its pending state, or crossing an organization reset. A synchronous ref guard also blocks repeated page clicks before disabled controls render. SCRIPT, IDEA and PUBLICATION results use dedicated read-only destinations described below; other kinds still open the appropriate brand section. Exact editor selection and other entity-specific destinations remain UX extensions. There is no external provider call. Search uses existing relational tables; no new migration is required. Large-tenant performance and search indexes remain to be measured before production scale claims.
 
 Acceptance passed: workspace/test-source TypeScript, ESLint, production build, 570 tests across 81 files and the Chrome scenario in tests/e2e/search.spec.ts. Coverage includes current-version text, literal wildcards, 105-row pagination, tenant/account denial, publication lookup, UI pagination/empty/error recovery and no-store. A 390px screenshot was inspected and the browser asserted no horizontal overflow. The initial browser attempt failed before execution due to a missing Playwright Chromium binary; the successful run used installed Chrome.
 
@@ -28,7 +28,7 @@ The page is explicitly read-only: current version, platform, duration, approval
 state, all script sections and fact-check notes. Text is escaped by React. It does
 not save, approve, generate, schedule or select an editor draft. The displayed
 version is current at page load, not a frozen snapshot from the earlier search
-response; reload obtains current data and rechecks permission. IDEA also has a local read-only destination described below; other search kinds
+response; reload obtains current data and rechecks permission. IDEA and PUBLICATION also have read-only destinations described below; other search kinds
 still open their brand sections. Exact editing/deeplinks for other entity types
 and production-scale search performance remain unfinished.
 
@@ -77,3 +77,41 @@ redirect, exact search navigation, reload, read-only/escaping, mobile layout,
 wrong/duplicate scope, approver redirect and revocation. Database/browser tests
 are prepared but not executed here because services are unavailable. No migration,
 lockfile, deployment or old plan-limit reconstruction is included.
+
+## Exact read-only publication destination — local slice, 2026-10-28
+
+PUBLICATION hits now open `/brands/[id]/publications/[publicationId]` with explicit
+organization scope. This uses `publications.id`, never a publishing-job ID, and
+reads exact stored evidence outside the publishing overview's 100-job cap.
+Membership and disabled-user checks occur within the read transaction. Publication,
+job, brand and current content joins bind tenant and brand; inconsistent legacy
+same-tenant/different-brand content pointers fail closed rather than leaking data.
+
+The page displays saved snapshot title/caption/type/privacy/comment setting/time
+zone, stored job status and UTC timestamps. The current content title is separately
+labelled when changed. Recorded result time may be a system verification time,
+particularly for YouTube, rather than exact platform publication time. This is not
+a claim of current external availability, visibility or content. Reload rechecks
+access without a provider request. Authentication, CLIENT_APPROVER redirect,
+escaped rendering, unavailable/noindex handling and read-only controls follow the
+existing script/idea destinations. There are no send/cancel/approve controls.
+
+Only safe fields are projected: no raw provider reference, external URL, signed
+media URL, storage key, credential, connection/job identifiers or full snapshot.
+Historical reads do not require an active social connection or configured provider.
+No new migration, dependency, API, external operation or old plan-limit patch.
+
+This slice is local on PR11 `5d54a360`; prior CI does not validate these changes.
+Four PostgreSQL cases cover the overview cap, immutable snapshot vs renamed current
+content, absent/raw data, wrong ID/tenant/brand/account, inconsistent content links,
+revoked membership and disabled accounts. A browser/mobile scenario covers exact
+search navigation, anonymous redirect, reload, escaping, no private marker/unsafe
+link, job-ID denial, duplicate scope, approver redirect and membership revocation.
+Database/browser acceptance remains pending because local services are unavailable.
+No mobile screenshot has been inspected for this slice yet.
+
+Historical acceptance update: IDEA was subsequently published with explicit
+permission as draft PR11 at `5d54a360`. CI run 40759452804 passed all 966 tests in
+131 files without skips and all 39 Chromium scenarios, plus migrations, types,
+lint and build. The IDEA mobile screenshot was inspected. This supersedes the
+IDEA-only pending notes above, not the new unpublished PUBLICATION slice.
