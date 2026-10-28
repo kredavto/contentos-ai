@@ -156,7 +156,7 @@ This register preserves every numbered specification section. `AUDIT_REQUIRED` m
 | 138 | DATABASE TRANSACTIONS | See TECH_SPEC.md §138; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 139 | AI PROMPT VERSIONING | Source audit 2026-10-26: workflow instructions are code constants; prompt_templates and persisted generation prompt-version binding are absent. | MISSING |
 | 140 | PROMPT INJECTION | See TECH_SPEC.md §140; current implementation evidence must be inspected | AUDIT_REQUIRED |
-| 141 | AI OUTPUT COST LIMITS | See TECH_SPEC.md §141; current implementation evidence must be inspected | AUDIT_REQUIRED |
+| 141 | AI OUTPUT COST LIMITS | OpenAI 12,000-output-token cap and bounded attempts retained; new aggregate 256 KiB UTF-8 request admission before transport, detached snapshot and no silent truncation. 38 focused contract tests pass. Exact token/model budgets, plan-policy reconciliation and latest full CI remain separate — llm-request-budget.md. | PARTIAL |
 | 142 | RATE LIMITING | See TECH_SPEC.md §142; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 143 | TESTING PYRAMID | See TECH_SPEC.md §143; current implementation evidence must be inspected | AUDIT_REQUIRED |
 | 144 | ОБЯЗАТЕЛЬНЫЕ E2E | See TECH_SPEC.md §144; current implementation evidence must be inspected | AUDIT_REQUIRED |
