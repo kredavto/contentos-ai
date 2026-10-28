@@ -1,7 +1,7 @@
 import {assertManagedFeature} from './feature-policy';
 import {isDeepStrictEqual} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
-import {and,eq,lte,or,inArray,desc,asc,ne} from 'drizzle-orm';
+import {and,eq,lte,or,inArray,desc,asc,ne,sql} from 'drizzle-orm';
 import {DomainError,telegramVideoByteLimit,validateTelegramPublication,youtubeMetadataSchema,type PublishingApproval,type PublishingSnapshot,type PublishingState,type PublishingProvider,type ErrorCode} from '@contentos/types';
 import type {Database} from '../index';
 import {publishingJobs,publications,calendarEntries,contentItems,socialConnections,videoProjects,brands,auditLogs,youtubeUploads} from '../schema';
@@ -45,6 +45,23 @@ export async function publishingSource(tx:Transaction,tenantId:string,brandId:st
 }
 export class PublishingRepository{
   constructor(private readonly db:Database,private readonly now:()=>Date=()=>new Date()){}
+  /** Read stored publication evidence only; never contact providers or expose raw snapshots. */
+  async publication(userId:string,tenantId:string,brandId:string,publicationId:string){
+    return this.db.transaction(async tx=>{
+      const member=await assertMembership(tx,userId,tenantId);
+      const [publication]=await tx.select({id:publications.id,brandId:publishingJobs.brandId,brandName:brands.name,contentTitle:contentItems.title,
+        title:sql<string>`${publishingJobs.snapshot}->>'title'`,caption:sql<string>`${publishingJobs.snapshot}->>'caption'`,type:sql<string>`${publishingJobs.snapshot}->>'type'`,privacy:sql<string>`${publishingJobs.snapshot}->>'privacy'`,commentsEnabled:sql<boolean>`(${publishingJobs.snapshot}->>'commentsEnabled')::boolean`,timeZone:sql<string>`${publishingJobs.snapshot}->>'timeZone'`,
+        provider:publications.provider,status:publishingJobs.status,publishedAt:publications.publishedAt,recordedAt:publications.recordedAt,scheduledAt:publishingJobs.scheduledAt})
+        .from(publications)
+        .innerJoin(publishingJobs,and(eq(publishingJobs.tenantId,publications.tenantId),eq(publishingJobs.id,publications.jobId)))
+        .innerJoin(brands,and(eq(brands.tenantId,publishingJobs.tenantId),eq(brands.id,publishingJobs.brandId)))
+        .innerJoin(contentItems,and(eq(contentItems.tenantId,publishingJobs.tenantId),eq(contentItems.brandId,publishingJobs.brandId),eq(contentItems.id,publishingJobs.contentItemId)))
+        .where(and(eq(publications.tenantId,tenantId),eq(publishingJobs.brandId,brandId),eq(publications.id,publicationId)));
+      if(!publication)throw new DomainError('NOT_FOUND',404);
+      return {...publication,role:member.role};
+    });
+  }
+
   async list(userId:string,tenantId:string,brandId:string){return this.db.transaction(async tx=>{await assertMembership(tx,userId,tenantId);const [brand]=await tx.select({id:brands.id}).from(brands).where(and(eq(brands.tenantId,tenantId),eq(brands.id,brandId)));if(!brand)throw new DomainError('NOT_FOUND',404);
     const rows=await tx.select({job:publishingJobs,url:publications.url,publishedAt:publications.publishedAt,recordedAt:publications.recordedAt,uploadPhase:youtubeUploads.phase,uploadedBytes:youtubeUploads.nextByte,totalBytes:youtubeUploads.totalBytes,remoteVideoId:youtubeUploads.videoId}).from(publishingJobs).leftJoin(publications,and(eq(publications.tenantId,publishingJobs.tenantId),eq(publications.jobId,publishingJobs.id))).leftJoin(youtubeUploads,and(eq(youtubeUploads.tenantId,publishingJobs.tenantId),eq(youtubeUploads.jobId,publishingJobs.id))).where(and(eq(publishingJobs.tenantId,tenantId),eq(publishingJobs.brandId,brandId))).orderBy(desc(publishingJobs.createdAt)).limit(100);
     return rows.map(({job,url,publishedAt,recordedAt,uploadPhase,uploadedBytes,totalBytes,remoteVideoId})=>({id:job.id,calendarId:job.calendarId,calendarRevision:job.calendarRevision,connectionId:job.connectionId,title:job.snapshot.title,caption:job.snapshot.caption,type:job.snapshot.type,status:job.status,scheduledAt:job.scheduledAt,timeZone:job.snapshot.timeZone,errorCode:job.errorCode,attempt:job.attempt,url,publishedAt,recordedAt,provider:job.provider,...(job.provider==='youtube'?{uploadPhase,uploadedBytes,totalBytes,reviewUrl:remoteVideoId?`https://www.youtube.com/watch?v=${remoteVideoId}`:null}:{})}));

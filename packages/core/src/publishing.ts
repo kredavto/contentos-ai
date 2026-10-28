@@ -10,6 +10,7 @@ export type PublishingConnection={name:string;provider:PublishingProvider}|null;
 const uuid=z.uuid();
 export class PublishingService{
   constructor(private readonly repository:PublishingRepository,private readonly connection:PublishingConnection,private readonly configured:boolean){}
+  publication(userId:string,tenantId:string,brandId:string,publicationId:string){return this.repository.publication(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(publicationId));}
   async overview(userId:string,tenantId:string,brandId:string){return {jobs:await this.repository.list(userId,uuid.parse(tenantId),uuid.parse(brandId)),configuration:{ready:!!this.connection&&this.configured,provider:this.connection?.name??'disabled'}};}
   approve(userId:string,tenantId:string,brandId:string,input:unknown,correlationId:string){uuid.parse(tenantId);uuid.parse(brandId);const parsed=publishingApprovalSchema.parse(input);if(!this.connection||!this.configured)throw new DomainError('CONFIGURATION_REQUIRED',503);return this.repository.approve(userId,tenantId,brandId,parsed,this.connection.name,avatarConsentPolicies(),correlationId);}
   cancel(userId:string,tenantId:string,brandId:string,id:string){return this.repository.cancel(userId,uuid.parse(tenantId),uuid.parse(brandId),uuid.parse(id));}
