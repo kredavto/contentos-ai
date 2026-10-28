@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { CircuitBreaker } from './circuit-breaker';
+import { boundedLlmRequestSnapshot } from './llm-request-budget';
 import { DomainError, type LLMProvider, type OperationContext, type Usage } from '@contentos/types';
 
 export class OpenAILLMProvider implements LLMProvider {
@@ -10,13 +11,27 @@ export class OpenAILLMProvider implements LLMProvider {
     this.client = new OpenAI({ apiKey, maxRetries: 0, timeout: 90_000, ...(fetchImplementation ? { fetch: fetchImplementation } : {}) });
   }
   async generate(input: Parameters<LLMProvider['generate']>[0], context: OperationContext) {
-    if (!input.model) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+    let source: Record<string, unknown>;
     try {
-      const response = await this.circuit.execute(() => this.client.responses.create({
-        model: input.model, store: false, max_output_tokens: 12000,
-        input: [{ role: 'system', content: input.system }, { role: 'user', content: input.prompt }],
-        text: { format: { type: 'json_schema', name: 'contentos_workflow', strict: true, schema: input.jsonSchema } },
-      }, { signal: context.signal }), (error) => {
+      if (!input || typeof input !== 'object' || Array.isArray(input) || (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)) throw new Error();
+      source = {};
+      for (const key of ['model', 'system', 'prompt', 'jsonSchema']) {
+        const descriptor = Object.getOwnPropertyDescriptor(input, key);
+        if (descriptor && !('value' in descriptor)) throw new Error();
+        source[key] = descriptor?.value;
+      }
+    } catch { throw new DomainError('INVALID_INPUT'); }
+    if (!source.model) throw new DomainError('CONFIGURATION_REQUIRED', 503);
+    if (typeof source.model !== 'string' || typeof source.system !== 'string' || typeof source.prompt !== 'string' || !source.jsonSchema || typeof source.jsonSchema !== 'object' || Array.isArray(source.jsonSchema)) throw new DomainError('INVALID_INPUT');
+    // Admission precedes breaker accounting and any SDK/network work. The detached
+    // snapshot prevents caller mutation/serialization hooks from bypassing its cap.
+    const request = boundedLlmRequestSnapshot({
+        model: source.model, store: false, max_output_tokens: 12000,
+        input: [{ role: 'system' as const, content: source.system }, { role: 'user' as const, content: source.prompt }],
+        text: { format: { type: 'json_schema' as const, name: 'contentos_workflow', strict: true, schema: source.jsonSchema as Record<string, unknown> } },
+    });
+    try {
+      const response = await this.circuit.execute(() => this.client.responses.create(request, { signal: context.signal }), (error) => {
         if (context.signal.aborted) return false;
         return error instanceof OpenAI.APIConnectionError ||
           (error instanceof OpenAI.APIError && (error.status === 408 || error.status === 429 || (error.status !== undefined && error.status >= 500)));
