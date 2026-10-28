@@ -41,6 +41,7 @@ export class GenerationService {
   setCarouselArchived(userId:string,tenantId:string,brandId:string,carouselId:string,raw:unknown,correlationId:string){return this.content.setCarouselArchived(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId),carouselLifecycleSchema.parse(raw),correlationId);}
   editCarousel(userId:string,tenantId:string,brandId:string,carouselId:string,raw:unknown,correlationId:string) { return this.content.editCarousel(userId,id.parse(tenantId),id.parse(brandId),id.parse(carouselId),carouselEditSchema.parse(raw),correlationId); }
   grantTrial(userId:string,tenantId:string,correlationId:string) { return this.ledger.grantTrial(userId,id.parse(tenantId),correlationId); }
+  currentIdea(userId:string,tenantId:string,brandId:string,ideaId:string) {return this.content.currentIdea(userId,id.parse(tenantId),id.parse(brandId),id.parse(ideaId));}
   currentScript(userId:string,tenantId:string,brandId:string,scriptId:string) {return this.content.currentScript(userId,id.parse(tenantId),id.parse(brandId),id.parse(scriptId));}
   history(userId:string,tenantId:string,brandId:string,scriptId:string) {return this.content.history(userId,id.parse(tenantId),id.parse(brandId),id.parse(scriptId));}
   editScript(userId:string,tenantId:string,brandId:string,scriptId:string,raw:unknown,correlationId:string) {
