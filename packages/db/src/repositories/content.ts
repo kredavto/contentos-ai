@@ -87,6 +87,20 @@ export class ContentRepository {
       return editCarouselInTransaction(tx,userId,tenantId,brandId,carouselId,input,correlationId);
     });
   }
+  /** Exact current script lookup, independent of the capped studio overview. */
+  async currentScript(userId:string,tenantId:string,brandId:string,scriptId:string) {
+    return this.db.transaction(async tx=>{
+      const member=await assertMembership(tx,userId,tenantId);
+      const [script]=await tx.select({id:scripts.id,brandId:scripts.brandId,brandName:brands.name,title:contentItems.title,currentVersion:scripts.currentVersion,approvedVersion:scripts.approvedVersion,platform:scripts.platform,duration:scripts.duration,content:scriptVersions.content})
+        .from(scripts)
+        .innerJoin(brands,and(eq(brands.tenantId,scripts.tenantId),eq(brands.id,scripts.brandId)))
+        .innerJoin(contentItems,and(eq(contentItems.tenantId,scripts.tenantId),eq(contentItems.brandId,scripts.brandId),eq(contentItems.id,scripts.contentItemId)))
+        .innerJoin(scriptVersions,and(eq(scriptVersions.tenantId,scripts.tenantId),eq(scriptVersions.scriptId,scripts.id),eq(scriptVersions.version,scripts.currentVersion)))
+        .where(and(eq(scripts.tenantId,tenantId),eq(scripts.brandId,brandId),eq(scripts.id,scriptId)));
+      if(!script)throw new DomainError('NOT_FOUND',404);
+      return {...script,role:member.role};
+    });
+  }
   async history(userId:string,tenantId:string,brandId:string,scriptId:string) {
     return this.db.transaction(async tx=> {
       await assertMembership(tx,userId,tenantId);
