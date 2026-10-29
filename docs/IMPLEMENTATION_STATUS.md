@@ -1,6 +1,12 @@
 # Implementation status
 
-Updated 2026-10-27.
+Documentation reconciled 2026-10-29 from the later implementation branch and the main-branch readiness review. The dated implementation and validation entries below retain their original chronology; later evidence supersedes earlier pending-work statements for the exact scope and revision it verifies. This reconciliation changes documentation only and does not itself verify a new source tree, deploy a release or establish production readiness.
+
+Current scope guidance: [README development stages](../README.md#development-stages) and [completion checklist](COMPLETION_CHECKLIST.md). [READINESS.md](READINESS.md) is retained as the historical `f7b069b` baseline, including its recorded CI and launch-gate definitions—not a current claim that subsequently implemented billing, Cover Studio, team/privacy or publishing work is still absent. Implementation, automated fixture verification, live server-adapter verification and accepted production operation are distinct gates.
+
+**Release remains in development; full MVP/commercial readiness and live production acceptance are not established by these records.** A successful build or hosting deployment does not prove configured database/Redis/storage, a compatible persistent worker, real provider delivery, backup restoration or the live end-to-end acceptance chain. Those operational gates must be recorded separately when actually verified.
+
+The project-wide estimate immediately below is historical and has not been recomputed for this documentation reconciliation. It must not be interpreted as a measured release-readiness percentage.
 
 Estimated full-project coverage: **≈63%** (101/160 rubric points). See [calculation, scope and remaining gaps](PROJECT_PROGRESS.md). This is an engineering estimate, not production readiness.
 

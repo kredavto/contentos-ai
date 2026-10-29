@@ -2,7 +2,17 @@
 
 AI content operations SaaS. Implemented: email/password accounts, verified email, password reset, revocable sessions, organizations, brands and a persisted 15-step Brand Brain onboarding. Strategy/ideas/script and standalone post generation, content approval/version history, durable BullMQ jobs and immutable credit accounting are also implemented. Avatar/voice selection and basic video generation, FFmpeg processing, [versioned Cover Studio](docs/video-covers.md), storage and approval are implemented. Approval-based Telegram publishing, analytics/recommendations, monthly billing and in-app notifications are implemented. Additional providers and richer editing remain in development. See [coverage and gaps](docs/IMPLEMENTATION_STATUS.md).
 
-Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web deployment target: Vercel team digagency. Long-running media/queue work requires a separate worker service. No production deployment yet. [Staging web preview](https://contentos-54l7vlhlu-digagency.vercel.app) is available; account operations require the still-unconfigured production data/worker services.
+**Release status: IN DEVELOPMENT · live server integrations: UNVERIFIED · production acceptance: NOT ESTABLISHED.** Implemented workflows and automated fixture tests do not prove live provider delivery, full specification completion or commercial readiness. A successful web deployment or preview build alone does not establish a working production backend.
+
+Source: [kredavto/contentos-ai](https://github.com/kredavto/contentos-ai). Web deployment target: Vercel team digagency. Persistent BullMQ/FFmpeg work requires a separate compatible worker service, PostgreSQL, Redis and private S3 storage. Runtime credentials, dependency readiness, backup/restore and live end-to-end verification are separate launch gates; this documentation does not attest that those gates have passed.
+
+## Development stages
+
+Scope labels distinguish implemented application paths from full product completion, live-provider verification and production acceptance. **IMPLEMENTED** means the named code path is connected, not that every related requirement is complete; **PARTIAL** means important scope remains; **LIVE UNVERIFIED** and unestablished production acceptance remain separate even when CI is green. These labels are not completion percentages.
+
+Use the [implementation inventory and dated evidence](docs/IMPLEMENTATION_STATUS.md) and [completion checklist](docs/COMPLETION_CHECKLIST.md) for current functional scope. The [readiness review](docs/READINESS.md) preserves the historical `f7b069b` baseline and its verification/launch criteria. Its earlier stage register and feature-pending list are **not** the current inventory: later work includes billing/subscriptions, Cover Studio, broader editing, team/privacy operations and additional publishing workflows. Do not regress these implemented slices to pending solely because they were absent from that older baseline.
+
+The full MVP is **not established as complete**. The section 170 acceptance chain in [TECH_SPEC.md](TECH_SPEC.md) must work with live services; mocked browser checks do not close that gate. Supported platforms, unfinished scope, live integrations, operating infrastructure and production acceptance must each be verified explicitly before commercial launch.
 
 ## Local development
 
