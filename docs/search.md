@@ -6,7 +6,7 @@ PostgreSQL case-insensitive substring search treats %, _ and backslash literally
 
 The dashboard form resets synchronously with the organization, aborts stale requests, and supports kind filters, explicit submission and first/previous/next-page navigation. Only cursor bookmarks are retained for at most 50 pages; earlier result objects and excerpts are not cached. Back and first-page navigation fetch again through the authenticated no-store API. At the retained-history boundary, previous-page navigation is disabled and a first-page restart remains available. Page numbers describe traversal position, not a stable snapshot or total count.
 
-Navigation history commits only when the target request succeeds. A failed next/back request leaves the displayed page and its cursor history intact for retry. Newly submitted query/filter values reset history; a changed query can supersede an in-flight page request. Request identity plus AbortController fencing prevents an older response or finalizer from replacing the new query, clearing its pending state, or crossing an organization reset. A synchronous ref guard also blocks repeated page clicks before disabled controls render. SCRIPT, IDEA and PUBLICATION results use dedicated read-only destinations described below; other kinds still open the appropriate brand section. Exact editor selection and other entity-specific destinations remain UX extensions. There is no external provider call. Search uses existing relational tables; no new migration is required. Large-tenant performance and search indexes remain to be measured before production scale claims.
+Navigation history commits only when the target request succeeds. A failed next/back request leaves the displayed page and its cursor history intact for retry. Newly submitted query/filter values reset history; a changed query can supersede an in-flight page request. Request identity plus AbortController fencing prevents an older response or finalizer from replacing the new query, clearing its pending state, or crossing an organization reset. A synchronous ref guard also blocks repeated page clicks before disabled controls render. SCRIPT, IDEA, PUBLICATION and CONTENT results use dedicated read-only destinations described below; BRAND opens its exact onboarding page. Exact editor selection and other entity-specific destinations remain UX extensions. There is no external provider call. Search uses existing relational tables; no new migration is required. Large-tenant performance and search indexes remain to be measured before production scale claims.
 
 Acceptance passed: workspace/test-source TypeScript, ESLint, production build, 570 tests across 81 files and the Chrome scenario in tests/e2e/search.spec.ts. Coverage includes current-version text, literal wildcards, 105-row pagination, tenant/account denial, publication lookup, UI pagination/empty/error recovery and no-store. A 390px screenshot was inspected and the browser asserted no horizontal overflow. The initial browser attempt failed before execution due to a missing Playwright Chromium binary; the successful run used installed Chrome.
 
@@ -28,8 +28,8 @@ The page is explicitly read-only: current version, platform, duration, approval
 state, all script sections and fact-check notes. Text is escaped by React. It does
 not save, approve, generate, schedule or select an editor draft. The displayed
 version is current at page load, not a frozen snapshot from the earlier search
-response; reload obtains current data and rechecks permission. IDEA and PUBLICATION also have read-only destinations described below; other search kinds
-still open their brand sections. Exact editing/deeplinks for other entity types
+response; reload obtains current data and rechecks permission. IDEA, PUBLICATION and CONTENT also have read-only destinations described below; BRAND
+opens its exact onboarding page. Exact editing/deeplinks for other entity types
 and production-scale search performance remain unfinished.
 
 No schema migration or external provider call is required. Repository tests must
@@ -115,3 +115,39 @@ permission as draft PR11 at `5d54a360`. CI run 40759452804 passed all 966 tests 
 131 files without skips and all 39 Chromium scenarios, plus migrations, types,
 lint and build. The IDEA mobile screenshot was inspected. This supersedes the
 IDEA-only pending notes above, not the new unpublished PUBLICATION slice.
+
+## Exact read-only CONTENT destination — local slice, 2026-10-29
+
+CONTENT results now open `/brands/[id]/content/[contentId]?organization=...`,
+using the exact content-item ID rather than a post/carousel ID or the calendar
+section. A single tenant/brand-bound query reads current POST/CAROUSEL text with
+membership/disabled-user checks in the transaction, outside the 100-row studio
+caps. Joins require the matching content type and current version. Existing
+subtypes with missing current versions fail unavailable rather than substituting
+historical or sibling text. Absent post/carousel entities show an explicit no-text
+state; other content types show metadata only, without media or related scripts.
+
+The dynamic authenticated page displays current material metadata, saved text,
+version/approval state, carousel archive/lifecycle status, escaped slides/caption,
+hashtags and fact-check notes. Carousel design is not executed or applied as CSS;
+this is textual inspection, not a graphical export. CLIENT_APPROVER redirects to
+the approval portal. No editor, selection, approval, generation, media signing,
+provider request or publishing operation is added. Reload rechecks scope and
+reads current saved data. Material status is not a live external-platform claim.
+
+The slice is local on published PR12 `1293c830`; prior CI does not cover it.
+Seven prepared PostgreSQL cases cover both capped lists, archived/current state,
+immutable history, absent-text/metadata-only branches, subtype mismatch suppression,
+missing current versions, exact scope and revoked/disabled accounts. A browser
+scenario covers both search destinations, reload, escaping, read-only and mobile
+layout, no-text/metadata-only states, incorrect scope/entity ID, anonymous/approver
+redirects and revocation. No local DB/browser or visual acceptance is claimed:
+PostgreSQL/Redis services are unavailable. No migration, dependency/workflow change,
+old plan-limit reconstruction, publication, merge or deployment.
+
+Prior PUBLICATION acceptance: PR12 head `1293c830` passed CI run 40788677032:
+973 tests/133 files without skips and 40 Chromium scenarios, migrations, types,
+lint and build. Its mobile screenshot was visually inspected and results posted
+with explicit permission in PR comment 6488327261. This supersedes PUBLICATION
+pending notes above, not the new CONTENT slice. Exact editing, media preview and
+production-scale search performance remain separate unfinished work.
