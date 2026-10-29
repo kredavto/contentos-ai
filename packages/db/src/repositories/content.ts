@@ -87,6 +87,32 @@ export class ContentRepository {
       return editCarouselInTransaction(tx,userId,tenantId,brandId,carouselId,input,correlationId);
     });
   }
+  /** Exact material and current text only; never substitute historical text or load media. */
+  async currentContent(userId:string,tenantId:string,brandId:string,contentItemId:string){
+    return this.db.transaction(async tx=>{
+      const member=await assertMembership(tx,userId,tenantId);
+      const [row]=await tx.select({id:contentItems.id,brandId:contentItems.brandId,brandName:brands.name,title:contentItems.title,type:contentItems.type,status:contentItems.status,revision:contentItems.revision,
+        postId:posts.id,postVersion:posts.currentVersion,postApprovedVersion:posts.approvedVersion,postPlatform:posts.platform,postContent:postVersions.content,
+        carouselId:carousels.id,carouselVersion:carousels.currentVersion,carouselApprovedVersion:carousels.approvedVersion,carouselPlatform:carousels.platform,carouselArchivedAt:carousels.archivedAt,carouselLifecycleRevision:carousels.lifecycleRevision,carouselContent:carouselVersions.content})
+        .from(contentItems).innerJoin(brands,and(eq(brands.tenantId,contentItems.tenantId),eq(brands.id,contentItems.brandId)))
+        .leftJoin(posts,and(eq(contentItems.type,'POST'),eq(posts.tenantId,contentItems.tenantId),eq(posts.brandId,contentItems.brandId),eq(posts.contentItemId,contentItems.id)))
+        .leftJoin(postVersions,and(eq(postVersions.tenantId,posts.tenantId),eq(postVersions.postId,posts.id),eq(postVersions.version,posts.currentVersion)))
+        .leftJoin(carousels,and(eq(contentItems.type,'CAROUSEL'),eq(carousels.tenantId,contentItems.tenantId),eq(carousels.brandId,contentItems.brandId),eq(carousels.contentItemId,contentItems.id)))
+        .leftJoin(carouselVersions,and(eq(carouselVersions.tenantId,carousels.tenantId),eq(carouselVersions.carouselId,carousels.id),eq(carouselVersions.version,carousels.currentVersion)))
+        .where(and(eq(contentItems.tenantId,tenantId),eq(contentItems.brandId,brandId),eq(contentItems.id,contentItemId)));
+      if(!row)throw new DomainError('NOT_FOUND',404);
+      const item={id:row.id,brandId:row.brandId,brandName:row.brandName,title:row.title,type:row.type,status:row.status,revision:row.revision,role:member.role};
+      if(row.type==='POST'&&row.postId){
+        if(!row.postContent||row.postVersion===null||row.postPlatform===null)throw new DomainError('NOT_FOUND',404);
+        return {...item,detail:{kind:'POST' as const,id:row.postId,version:row.postVersion,approvedVersion:row.postApprovedVersion,platform:row.postPlatform,content:row.postContent}};
+      }
+      if(row.type==='CAROUSEL'&&row.carouselId){
+        if(!row.carouselContent||row.carouselVersion===null||row.carouselPlatform===null||row.carouselLifecycleRevision===null)throw new DomainError('NOT_FOUND',404);
+        return {...item,detail:{kind:'CAROUSEL' as const,id:row.carouselId,version:row.carouselVersion,approvedVersion:row.carouselApprovedVersion,platform:row.carouselPlatform,archivedAt:row.carouselArchivedAt,lifecycleRevision:row.carouselLifecycleRevision,content:row.carouselContent}};
+      }
+      return {...item,detail:{kind:row.type==='POST'||row.type==='CAROUSEL'?'NO_TEXT' as const:'METADATA_ONLY' as const}};
+    });
+  }
   /** Exact saved idea lookup, independent of the capped studio overview. */
   async currentIdea(userId:string,tenantId:string,brandId:string,ideaId:string) {
     return this.db.transaction(async tx=>{

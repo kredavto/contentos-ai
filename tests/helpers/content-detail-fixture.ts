@@ -1,0 +1,27 @@
+import {randomUUID} from 'node:crypto';
+import type {createDatabase} from '../../packages/db/src/index';
+import type {PostOutput,CarouselOutput} from '../../packages/types/src/index';
+/** Disposable stored content only: no jobs, credentials, providers or media operations. */
+export async function contentDetailFixture(sql:ReturnType<typeof createDatabase>['client']){
+  const user=randomUUID(),outsider=randomUUID(),tenant=randomUUID(),foreign=randomUUID(),brand=randomUUID(),otherBrand=randomUUID();
+  const postContentId=randomUUID(),postId=randomUUID(),carouselContentId=randomUUID(),carouselId=randomUUID(),videoContentId=randomUUID(),emptyPostContentId=randomUUID(),emptyCarouselContentId=randomUUID();
+  const postTitle=`Exact content post ${randomUUID()}`,carouselTitle=`Exact content carousel ${randomUUID()}`;
+  const post:PostOutput={title:'Saved current post title',body:'Current post <script>alert(1)</script> '+('longword'.repeat(100)),hashtags:['saved','current'],factCheckNotes:['Verify this post claim <img src=x onerror=alert(1)>']};
+  const carousel:CarouselOutput={title:'Saved current carousel title',slides:[{heading:'Current first slide <script>alert(1)</script>',body:'First slide '+('longword'.repeat(40))},{heading:'Current second slide',body:'Second slide <img src=x onerror=alert(1)>'}],caption:'Current carousel caption '+('longword'.repeat(100)),hashtags:['carousel'],factCheckNotes:['Verify this carousel claim <script>alert(1)</script>'],design:{format:'SQUARE',font:'SANS',backgroundColor:'#ffffff',textColor:'#000000',accentColor:'#008877'}};
+  for(const id of [user,outsider])await sql`insert into users(id,email,name,password_hash,email_verified_at) values(${id},${`${id}@example.test`},'Content reader','unusable',now())`;
+  for(const id of [tenant,foreign]){await sql`insert into organizations(id,name) values(${id},'Content detail fixture')`;await sql`insert into workspaces(id,tenant_id,name) values(${id},${id},'Workspace')`;await sql`insert into organization_members(tenant_id,user_id,role) values(${id},${user},'VIEWER')`;}
+  for(const id of [brand,otherBrand])await sql`insert into brands(id,tenant_id,workspace_id,name) values(${id},${tenant},${tenant},'Content detail brand')`;
+  await sql`insert into brands(id,tenant_id,workspace_id,name) values(${foreign},${foreign},${foreign},'Foreign brand')`;
+  await sql`insert into content_items(id,tenant_id,brand_id,title,type,status,revision,created_at) values(${postContentId},${tenant},${brand},${postTitle},'POST','APPROVED',7,now()-interval '1 year'),(${carouselContentId},${tenant},${brand},${carouselTitle},'CAROUSEL','READY',4,now()-interval '1 year'),(${videoContentId},${tenant},${brand},'Metadata-only video','SHORT_VIDEO','SCRIPT',0,now()),(${emptyPostContentId},${tenant},${brand},'Empty post','POST','SCRIPT',0,now()),(${emptyCarouselContentId},${tenant},${brand},'Empty carousel','CAROUSEL','SCRIPT',0,now())`;
+  await sql`insert into posts(id,tenant_id,brand_id,content_item_id,current_version,approved_version,approved_by,platform,created_at) values(${postId},${tenant},${brand},${postContentId},2,2,${user},'TELEGRAM',now()-interval '1 year')`;
+  await sql`insert into carousels(id,tenant_id,brand_id,content_item_id,current_version,platform,archived_at,lifecycle_revision,created_at) values(${carouselId},${tenant},${brand},${carouselContentId},2,'TELEGRAM','2025-01-01T00:00:00Z',1,now()-interval '1 year')`;
+  for(const version of [1,2]){
+    await sql`insert into content_versions(tenant_id,post_id,version,content,created_by) values(${tenant},${postId},${version},${JSON.stringify(version===2?post:{...post,body:'Historical post body'})}::jsonb,${user})`;
+    await sql`insert into carousel_versions(tenant_id,carousel_id,version,content,created_by) values(${tenant},${carouselId},${version},${JSON.stringify(version===2?carousel:{...carousel,caption:'Historical carousel caption',slides:[{heading:'Historical first slide',body:'Historical body'},{heading:'Historical second slide',body:'Historical body'}]})}::jsonb,${user})`;
+  }
+  await sql`with added as (insert into content_items(tenant_id,brand_id,title,type) select ${tenant},${brand},'Recent post '||n,'POST' from generate_series(1,101)n returning id) insert into posts(id,tenant_id,brand_id,content_item_id,current_version,platform) select id,${tenant},${brand},id,1,'TELEGRAM' from added`;
+  await sql`insert into content_versions(tenant_id,post_id,version,content,created_by) select ${tenant},id,1,${JSON.stringify({...post,title:'Recent post',body:'Recent post body'})}::jsonb,${user} from posts where tenant_id=${tenant} and brand_id=${brand} and id<>${postId}`;
+  await sql`with added as (insert into content_items(tenant_id,brand_id,title,type) select ${tenant},${brand},'Recent archived carousel '||n,'CAROUSEL' from generate_series(1,101)n returning id) insert into carousels(id,tenant_id,brand_id,content_item_id,current_version,platform,archived_at,lifecycle_revision) select id,${tenant},${brand},id,1,'TELEGRAM',now(),1 from added`;
+  await sql`insert into carousel_versions(tenant_id,carousel_id,version,content,created_by) select ${tenant},id,1,${JSON.stringify({...carousel,title:'Recent carousel',caption:'Recent carousel caption'})}::jsonb,${user} from carousels where tenant_id=${tenant} and brand_id=${brand} and id<>${carouselId}`;
+  return {user,outsider,tenant,foreign,brand,otherBrand,postContentId,postId,carouselContentId,carouselId,videoContentId,emptyPostContentId,emptyCarouselContentId,postTitle,carouselTitle,post,carousel};
+}

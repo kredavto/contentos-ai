@@ -1649,3 +1649,29 @@ Final all-tests run: 430 passed / 543 skipped (78 passing / 55 skipped files).
 The four new database cases are among the skips; no DB/browser acceptance or
 visual review is claimed. Full verification requires an authorized publication
 and exact-head CI or an available isolated database/browser environment.
+
+## Exact CONTENT search destination — unpublished local slice, 2026-10-29
+
+Prepared on unchanged published PR12 `1293c830`. CONTENT hits now open the exact
+material, with one tenant/brand/type/current-version query and transactional
+membership/account checks. Current POST and CAROUSEL text can be viewed beyond
+studio caps, including explicitly archived carousels. Missing current versions
+fail closed; absent text and metadata-only other types are explicit. No historical
+fallback, media/signing/provider work, design execution or mutation controls.
+Authenticated dynamic page preserves approver redirect and escaped text/noindex
+unavailable handling. See docs/search.md for scope and remaining acceptance.
+
+Seven database cases plus one browser scenario are prepared; local PostgreSQL/
+Redis remain unavailable. Independent review found no blocking access/security
+issue and passed 12 focused tests. Local focused search/detail tests: 17 passed
+across seven files. Full local tests: 433 passed / 550 skipped across 79 passing /
+56 skipped files; the seven new DB cases are skipped, not accepted. Workspace/test
+TypeScript, ESLint, production build and whitespace checks passed for this slice.
+No DB/browser or screenshot inspection is claimed. No new migration, dependency,
+workflow, old plan-limit reconstruction, publication, merge or deployment.
+
+Baseline PR12 has since passed full CI: 973 tests/133 files without skips and all
+40 Chromium scenarios in run 40788677032; its mobile screenshot was inspected and
+results recorded in comment 6488327261 after explicit permission. That result
+supersedes earlier PUBLICATION pending notes, not this new CONTENT slice. Global
+project completion and production/live readiness remain unestablished.
