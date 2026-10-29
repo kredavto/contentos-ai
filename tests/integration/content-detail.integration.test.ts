@@ -25,7 +25,7 @@ describe.skipIf(!url)('exact current content detail',()=>{
     expect(row).toMatchObject({id:f.carouselContentId,title:f.carouselTitle,type:'CAROUSEL',revision:4,detail:{kind:'CAROUSEL',id:f.carouselId,version:2,approvedVersion:null,platform:'TELEGRAM',lifecycleRevision:1,archivedAt:new Date('2025-01-01T00:00:00Z'),content:f.carousel}});
     expect(JSON.stringify(row)).not.toContain('Historical carousel');
     await expect(database.client`update carousel_versions set content='{}' where carousel_id=${f.carouselId} and version=1`).rejects.toThrow();
-    const [saved]=await database.client`select archived_at,lifecycle_revision from carousels where id=${f.carouselId}`;expect(saved?.archived_at).toEqual(new Date('2025-01-01T00:00:00Z'));expect(saved?.lifecycle_revision).toBe(1);
+    const [saved]=await database.client`select archived_at = '2025-01-01T00:00:00Z'::timestamptz as archived_matches,lifecycle_revision from carousels where id=${f.carouselId}`;expect(saved?.archived_matches).toBe(true);expect(saved?.lifecycle_revision).toBe(1);
   });
   it('distinguishes absent post/carousel text from metadata-only media without fallback',async()=>{
     const f=await contentDetailFixture(database.client);

@@ -37,6 +37,6 @@ test('opens exact current post and archived carousel from search without mutatio
     await page.goto(path(f.carouselContentId));await expect(page.getByRole('heading',{name:'Материал недоступен',exact:true})).toBeVisible();await expect(page.getByText(f.carousel.caption,{exact:true})).toHaveCount(0);
     expect(await database.client`select id from jobs where tenant_id=${f.tenant}`).toHaveLength(0);expect(await database.client`select id from audit_logs where tenant_id=${f.tenant}`).toHaveLength(0);
     const [post]=await database.client`select current_version,approved_version from posts where id=${f.postId}`;expect(post).toMatchObject({current_version:2,approved_version:2});
-    const [carousel]=await database.client`select current_version,approved_version,lifecycle_revision,archived_at from carousels where id=${f.carouselId}`;expect(carousel).toMatchObject({current_version:2,approved_version:null,lifecycle_revision:1,archived_at:new Date('2025-01-01T00:00:00Z')});
+    const [carousel]=await database.client`select current_version,approved_version,lifecycle_revision,archived_at = '2025-01-01T00:00:00Z'::timestamptz as archived_matches from carousels where id=${f.carouselId}`;expect(carousel).toMatchObject({current_version:2,approved_version:null,lifecycle_revision:1,archived_matches:true});
   }finally{await database.client`delete from sessions where user_id=${f.user}`;}
 });
