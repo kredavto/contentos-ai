@@ -16,7 +16,8 @@
     "db:migrate": "node scripts/with-env.mjs pnpm --filter @contentos/db migrate",
     "admin:operator": "node scripts/with-env.mjs pnpm --filter @contentos/db operator",
     "db:seed": "node scripts/with-env.mjs tsx scripts/seed-development.ts",
-    "test:local": "node scripts/test-local.mjs"
+    "test:local": "node scripts/test-local.mjs",
+    "config:check": "node --import tsx scripts/config-check.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
