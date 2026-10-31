@@ -28,3 +28,11 @@ This is a small-fixture recovery regression, not an operational backup service o
 Production recovery still requires coordinated database/object-store/key backups, access-controlled encrypted storage, retention and monitoring, documented RPO/RTO, and a timed restore into isolated infrastructure. Keep workers/schedulers disabled during such a drill: restored pending jobs, outbox records and uncertain remote submissions require reconciliation before external side effects resume.
 
 PostgreSQL command references: [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html), [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html).
+
+## CI recovery gate and safety boundary
+
+The independent `database-recovery` GitHub Actions job runs the same `pnpm test:local --recovery` path with a 30-minute bound, no production secrets/environment and no dump/schema artifact upload. This deliberately reuses the existing fixture lifecycle and regression checks rather than introducing another backup utility. The safe `database_recovery_verified` event is evidence for the tested commit only; no success is assumed before the job completes.
+
+Before creating recovery databases, the internal entrypoint checks a local Unix Docker endpoint and verifies that the running PostgreSQL 17 fixture has the runner's exact owner label/name and the URL's single loopback host-port mapping. The guard remains test-only. The runner forwards only explicit fixture recovery configuration plus PATH/HOME/TMPDIR; recovery Docker/migration subprocesses receive only these process essentials and the target migration URL when needed, not ambient provider secrets, PG settings, Docker overrides or Node preload options. Unexpected errors print fixed stage codes, never raw database/parser/inspection messages. Migration replay uses `node --import tsx`.
+
+Each local run now builds a unique media image tag and removes only that tag during owned-resource cleanup. This avoids concurrent runs replacing/removing a shared media image. Existing signal/cleanup limitations still apply: an interrupted host or SIGKILL may require manual cleanup. The cloud gate is synthetic logical dump/restore evidence, **not** configured production backup retention, PITR/WAL recovery, encrypted off-site storage, object/key recovery or a measured production RPO/RTO.

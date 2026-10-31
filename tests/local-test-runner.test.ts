@@ -57,17 +57,15 @@ it('rejects unsupported flags and paths before provisioning Docker resources',as
   for(const args of [['--unknown'],['--e2e','../outside.spec.ts'],['--recovery','--unknown'],['--e2e','--recovery']])await expect(exec(process.execPath,[script,...args])).rejects.toMatchObject({code:2});
 });
 
-it('runs opt-in recovery after migrations and checks, before regression, and cleans up on failure',async()=>{
-  for(const fail of ['', 'exec']){
-    const f=await fixture(fail);try{
-      const run=exec(process.execPath,[script,'--recovery'],{env:f.env});
-      if(fail)await expect(run).rejects.toMatchObject({code:1});else expect((await run).stdout).toContain('Local verification passed.');
-      const calls=(await readFile(join(f.directory,'pnpm.jsonl'),'utf8')).trim().split('\n').map(line=>(JSON.parse(line) as {args:string[]}).args);
-      expect(calls).toEqual([['--filter','@contentos/db','migrate'],['typecheck'],['lint'],['exec','tsx','scripts/database-recovery.ts'],...(fail?[]:[['test']])]);
-      expect(await readFile(join(f.directory,'containers.json'),'utf8')).toBe('[]');
-      expect((await readdir(f.directory)).some(name=>name.startsWith('contentos-test-'))).toBe(false);
-    }finally{await rm(f.directory,{recursive:true,force:true});}
-  }
+it('runs guarded recovery after migrations/checks and cleans up if an unowned mock container is rejected',async()=>{
+  const f=await fixture();try{
+    const run=exec(process.execPath,[script,'--recovery'],{env:f.env});
+    await expect(run).rejects.toMatchObject({code:1,stderr:expect.stringContaining('"event":"database_recovery_failed","stage":"ownership"')});
+    const calls=(await readFile(join(f.directory,'pnpm.jsonl'),'utf8')).trim().split('\n').map(line=>(JSON.parse(line) as {args:string[]}).args);
+    expect(calls).toEqual([['--filter','@contentos/db','migrate'],['typecheck'],['lint']]);
+    expect(await readFile(join(f.directory,'containers.json'),'utf8')).toBe('[]');
+    expect((await readdir(f.directory)).some(name=>name.startsWith('contentos-test-'))).toBe(false);
+  }finally{await rm(f.directory,{recursive:true,force:true});}
 });
 
 it('terminates the active check and cleans up on SIGTERM',async()=>{
