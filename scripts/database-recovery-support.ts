@@ -4,10 +4,32 @@ import {createDatabase} from '../packages/db/src/index';
 export function recoveryConfiguration(env:NodeJS.ProcessEnv){
   let url:URL;
   try{url=new URL(env.TEST_DATABASE_URL??'');}catch{throw new Error('Disposable recovery environment required');}
-  const container=env.RECOVERY_CONTAINER??'',docker=env.RECOVERY_DOCKER??'';
-  if(env.NODE_ENV!=='test'||!/^contentos-test-[a-f0-9]{12}-db$/.test(container)||!docker||!['postgres:','postgresql:'].includes(url.protocol)||url.hostname!=='127.0.0.1'||url.pathname!=='/contentos_test'||url.username!=='contentos'||!url.port||url.search||url.hash)throw new Error('Disposable recovery environment required');
-  return {url,container,docker};
+  const container=env.RECOVERY_CONTAINER??'',docker=env.RECOVERY_DOCKER??'',dockerHost=env.RECOVERY_DOCKER_HOST??'',owner=env.RECOVERY_OWNER??'';
+  if(env.NODE_ENV!=='test'||!/^contentos-test-[a-f0-9]{12}-db$/.test(container)||!docker.startsWith('/')||!dockerHost.startsWith('unix:///')||owner!==container.slice(0,-3)||!['postgres:','postgresql:'].includes(url.protocol)||url.hostname!=='127.0.0.1'||url.pathname!=='/contentos_test'||url.username!=='contentos'||!url.port||url.search||url.hash)throw new Error('Disposable recovery environment required');
+  return {url,container,docker,dockerHost,owner};
 }
+
+
+// Only subprocess essentials; never inherit provider keys, PG options or Node preload hooks.
+export function recoveryChildEnvironment(env:NodeJS.ProcessEnv):NodeJS.ProcessEnv {
+  const result:NodeJS.ProcessEnv={NODE_ENV:'test'};
+  for(const key of ['PATH','HOME','TMPDIR'] as const)if(env[key]!==undefined)result[key]=env[key];
+  return result;
+}
+export function assertRecoveryOwnership(raw:string,configuration:ReturnType<typeof recoveryConfiguration>){
+  try {
+    const records=JSON.parse(raw);
+    if(!Array.isArray(records)||records.length!==1)throw new Error();
+    const record=records[0];
+    const ports=record?.NetworkSettings?.Ports?.['5432/tcp'];
+    if(record?.Name!==`/${configuration.container}`||record?.State?.Running!==true||
+      record?.Config?.Image!=='postgres:17-alpine'||record?.Config?.Labels?.['contentos.test.owner']!==configuration.owner||
+      !Array.isArray(ports)||ports.length!==1||ports[0]?.HostIp!=='127.0.0.1'||ports[0]?.HostPort!==configuration.url.port)throw new Error();
+  }catch{throw new Error('Recovery ownership verification failed');}
+}
+export const recoveryStages=['configuration','ownership','fixture','snapshot','schema','dump_restore','migration_replay','integrity','source_unchanged'] as const;
+export type RecoveryStage=typeof recoveryStages[number];
+export function recoveryFailure(stage:RecoveryStage){return JSON.stringify({event:'database_recovery_failed',stage:recoveryStages.includes(stage)?stage:'configuration'});}
 
 // PostgreSQL adds a fresh psql restriction token to every textual dump.
 export function normalizeSchemaDump(value:string){return value.split('\n').filter(line=>!/^\\(?:un)?restrict [A-Za-z0-9]+$/.test(line)).join('\n');}
