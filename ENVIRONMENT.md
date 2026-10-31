@@ -1,5 +1,7 @@
 # Environment
 
+Offline production configuration preflight: `pnpm config:check --role web|worker`. Inject environment externally; this command does not load `.env` or contact services. Exit 0 is **not** operational readiness. See [scope, required keys and limitations](docs/deployment-preflight.md).
+
 Configuration is parsed server-side with Zod. Public fields are only product name, app URL and safe capability metadata. Product name defaults to CONTENTOS AI and is overridable from one configuration source.
 
 Required runtime groups: APP_URL/NODE_ENV; DATABASE_URL; REDIS_URL; CREDENTIAL_ENCRYPTION_KEYS/CREDENTIAL_ACTIVE_KEY_ID; S3_ENDPOINT/S3_REGION/S3_BUCKET/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY; email configuration; enabled provider credentials. Exact implemented keys live in .env.example as slices are added.

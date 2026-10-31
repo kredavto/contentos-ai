@@ -5,6 +5,7 @@
     "playwright.config.ts",
     "vitest.config.ts",
     "scripts/seed-development.ts",
-    "scripts/database-recovery*.ts"
+    "scripts/database-recovery*.ts",
+    "scripts/config-check*.ts"
   ]
 }

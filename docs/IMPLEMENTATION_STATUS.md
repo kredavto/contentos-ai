@@ -1681,3 +1681,9 @@ Baseline PR12 has since passed full CI: 973 tests/133 files without skips and al
 results recorded in comment 6488327261 after explicit permission. That result
 supersedes earlier PUBLICATION pending notes, not this new CONTENT slice. Global
 project completion and production/live readiness remain unestablished.
+
+## Offline deployment configuration preflight (2026-10-31)
+
+Added a read-only `config:check --role web|worker` production core/auth/storage profile. It reuses runtime parsing and the credential-vault constructor; output contains only fixed identifiers/codes, never configuration values. No `.env` loading, key generation, provider construction, network access, subprocesses or runtime behavior changes. Conservative S3 shape checks and worker binary paths are not live acceptance. Exit 0 means offline-valid only; migrations, connectivity, permissions, email delivery, worker/live providers and backups remain unchecked. See [deployment preflight](deployment-preflight.md). Verification evidence is recorded separately after checks run.
+
+Local verification on the prepared slice: `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `git diff --check` passed. Full local Vitest: **496 passed, 550 skipped**, 80 passed/56 skipped files; database-backed tests were not accepted locally without the test database. Focused preflight plus existing SMTP suites: **103 passed** (63 new preflight tests). Exact CLI subprocess tests verified exit 0/1/2 and empty stderr, including sentinel secret suppression. This is not database/browser/live-service acceptance. SMTP URL parser was moved unchanged to a pure shared module; its existing adapter behavior is preserved.
