@@ -1,3 +1,4 @@
+import {errorReporter} from './error-reporting';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { DomainError, maxPhotoUploadBytes, mediaUploadSchema } from '@contentos/types';
@@ -6,10 +7,12 @@ const messages: Record<string, string> = {
   INVALID_INPUT: 'Проверьте поля формы. Ссылка также могла истечь или уже использоваться.', CONFLICT: 'Данные изменились. Обновите страницу и повторите действие.',
   CONFIGURATION_REQUIRED: 'Сервис ещё не настроен. Администратор должен подключить необходимые службы.',
   RATE_LIMITED: 'Слишком много попыток. Попробуйте позже.', PROVIDER_UNAVAILABLE: 'Внешний сервис временно недоступен. Повторите позже.',
-  INVALID_MEDIA: 'Выберите корректный файл JPEG, PNG или WebP размером до 3 МБ и до 16 мегапикселей.',
+  INVALID_MEDIA: 'Файл не прошёл проверку. Проверьте формат, размер и ограничения, указанные рядом с загрузкой.',
   RECONCILIATION_REQUIRED: 'Результат запроса пока не подтверждён. Не создавайте дубликат; требуется проверка задачи.',
   INSUFFICIENT_CREDITS: 'Недостаточно кредитов для этой операции.',
   CONSENT_REQUIRED: 'Для этой операции требуется действующее согласие.',
+  PORTFOLIO_LIMIT_REACHED: 'Достигнут лимит клиентских организаций в портфеле. Обратитесь к администратору.',
+  EXPORT_TOO_LARGE: 'Объём данных превышает лимит быстрой выгрузки. Файл не создан. Расширенная выгрузка пока недоступна.',
   PLAN_LIMIT_REACHED: 'Достигнут лимит хранилища. Удалите ненужные файлы.',
 };
 export async function readPhotoUpload(request: Request) {
@@ -51,6 +54,9 @@ export function clientAddress(request: Request): string {
   // Shared conservative bucket until a trusted reverse proxy is configured.
   return 'local-or-unconfigured-proxy';
 }
+export function apiData(data:unknown,requestId:string,status=200){
+  return Response.json({data:data??null,meta:{requestId},error:null},{status});
+}
 export async function apiResponse(action: (correlationId: string) => Promise<Response>) {
   const correlationId = randomUUID();
   const started = performance.now();
@@ -64,6 +70,7 @@ export async function apiResponse(action: (correlationId: string) => Promise<Res
     const code = error instanceof DomainError ? error.code : error instanceof ZodError ? 'INVALID_INPUT' : 'INTERNAL_ERROR';
     const status = error instanceof DomainError ? error.status : error instanceof ZodError ? 400 : 500;
     console.error(JSON.stringify({ event: 'api_error', correlationId, code, status, durationMs: Math.round(performance.now() - started) }));
-    return Response.json({ error: { code, message: messages[code] ?? 'Не удалось выполнить действие. Попробуйте позже.', correlationId } }, { status, headers: { 'Cache-Control': 'no-store', 'X-Request-Id': correlationId, ...(status === 429 ? { 'Retry-After': '900' } : {}) } });
+    if(status>=500){const errors=errorReporter();errors.capture(error instanceof Error?error:new Error(code),{correlationId,code});await errors.flush?.(1000);}
+    return Response.json({ data:null, meta:{requestId:correlationId}, error: { code, message: messages[code] ?? 'Не удалось выполнить действие. Попробуйте позже.', requestId:correlationId, correlationId } }, { status, headers: { 'Cache-Control': 'no-store', 'X-Request-Id': correlationId, ...(status === 429 ? { 'Retry-After': '900' } : {}) } });
   }
 }

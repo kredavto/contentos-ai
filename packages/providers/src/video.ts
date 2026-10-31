@@ -2,6 +2,8 @@ import {readFile,stat} from 'node:fs/promises';
 import {isAbsolute} from 'node:path';
 import {DomainError,type VideoProvider,type OperationContext} from '@contentos/types';
 import {HeyGenClient,HeyGenVideoProvider} from './heygen';
+import {heyGenClientFromKey} from './heygen-key-client';
+import type {HeyGenCircuitScope} from './heygen-circuit-registry';
 /** Explicit development fixture; never uses production credentials or network. */
 export class MockVideoProvider implements VideoProvider {
   constructor(environment:string,private readonly fixture:string){if(!['development','test'].includes(environment)||!isAbsolute(fixture))throw new DomainError('CONFIGURATION_REQUIRED',503);}
@@ -19,3 +21,5 @@ export function videoFromEnvironment(env:{VIDEO_PROVIDER:string;HEYGEN_API_KEY?:
   if(env.VIDEO_PROVIDER==='mock'&&env.MOCK_VIDEO_FILE)return {provider:new MockVideoProvider(env.NODE_ENV,env.MOCK_VIDEO_FILE),name:'mock-avatar'};
   return null;
 }
+
+export function videoFromKey(apiKey:string,scope?:HeyGenCircuitScope):VideoProvider{return new HeyGenVideoProvider(heyGenClientFromKey(apiKey,scope));}

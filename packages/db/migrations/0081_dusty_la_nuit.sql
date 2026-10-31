@@ -1,0 +1,1 @@
+ALTER TABLE "youtube_oauth_attempts" ADD COLUMN "comments_access" boolean DEFAULT false NOT NULL;

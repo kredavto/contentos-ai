@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CircuitBreaker, CircuitOpenError, type CircuitExecutor } from './circuit-breaker';
 import {downloadProviderVideo} from './video-download';
 import { DomainError, ProviderRequestError, type AvatarProvider, type VideoProvider, type OperationContext, type ProviderReference } from '@contentos/types';
 const externalId = z.string().min(1).max(255);
@@ -10,9 +11,26 @@ function reference(context:OperationContext,id:string,metadata:Record<string,unk
 function checkReference(value:ProviderReference){if(value.provider!=='heygen')throw new DomainError('INVALID_INPUT');return encodeURIComponent(externalId.parse(value.externalId));}
 /** Official v3 transport. No implicit mutation retries; durable jobs own replay. */
 export class HeyGenClient {
-  constructor(private readonly apiKey:string,private readonly transport:typeof fetch=fetch) {if(!apiKey)throw new DomainError('CONFIGURATION_REQUIRED',503);}
+  constructor(private readonly apiKey:string,private readonly transport:typeof fetch=fetch,private readonly circuit:CircuitExecutor=new CircuitBreaker(),private readonly tenantId?:string) {
+    if(!apiKey)throw new DomainError('CONFIGURATION_REQUIRED',503);
+    if(tenantId!==undefined&&!z.uuid().safeParse(tenantId).success)throw new DomainError('INVALID_INPUT');
+  }
   async request<T>(path:string,method:'GET'|'POST'|'DELETE',schema:z.ZodType<T>,context:OperationContext,body?:unknown):Promise<T> {
     if(!path.startsWith('/v3/')||path.includes('://'))throw new DomainError('INVALID_INPUT');
+    if(this.tenantId!==undefined&&(typeof context.tenantId!=='string'||context.tenantId.toLowerCase()!==this.tenantId.toLowerCase()))throw new DomainError('NOT_AUTHORIZED',403);
+    try{
+      return await this.circuit.execute(()=>this.requestAdmitted(path,method,schema,context,body),error=>!context.signal.aborted&&error instanceof DomainError&&error.code==='PROVIDER_UNAVAILABLE');
+    }catch(error){
+      if(error instanceof CircuitOpenError){
+        // A local POST admission denial is not a retry of an uncertain mutation.
+        // Do not make read/poll failures definitive: a remote resource may exist.
+        if(method==='POST')throw new ProviderRequestError('RATE_LIMITED',429,true);
+        throw new DomainError('PROVIDER_UNAVAILABLE',503);
+      }
+      throw error;
+    }
+  }
+  private async requestAdmitted<T>(path:string,method:'GET'|'POST'|'DELETE',schema:z.ZodType<T>,context:OperationContext,body?:unknown):Promise<T>{
     const start=Date.now();let status=0;
     try{
       const response=await this.transport(`https://api.heygen.com${path}`,{method,redirect:'error',signal:AbortSignal.any([context.signal,AbortSignal.timeout(30_000)]),headers:{'X-Api-Key':this.apiKey,...(body?{'Content-Type':'application/json'}:{}),...(method==='POST'?{'Idempotency-Key':context.idempotencyKey}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -100,4 +118,10 @@ export class HeyGenVideoProvider implements VideoProvider {
     const voices=await this.client.pages('/v3/voices?type=public',voiceSchema,context);
     return voices.filter(voice=>voice.type==='public').map(voice=>({reference:reference(context,voice.voice_id,{public:true}),name:voice.name,language:voice.language??null,previewUrl:voice.preview_audio_url??null}));
   }
+}
+
+/** Read-only authentication check. Does not assert generation permissions, account identity or balance. */
+export async function verifyHeyGenKey(apiKey:string,context:OperationContext,transport:typeof fetch=fetch):Promise<void>{
+ const result=await new HeyGenClient(apiKey,transport).request('/v3/api_keys/self','GET',z.object({data:z.object({key_id:externalId,status:z.string().min(1).max(100)})}),context);
+ if(result.data.status!=='active')throw new DomainError('CONFIGURATION_REQUIRED',503);
 }

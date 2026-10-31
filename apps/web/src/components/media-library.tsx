@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { MediaService } from '@contentos/core';
 import { maxPhotoUploadBytes, photoMimeTypes } from '@contentos/types';
 import { api } from '../lib/api-client';
+import {apiUrl} from '../lib/api-url';
+import {LibraryMediaPanel} from './library-media-panel';
 type Overview = Awaited<ReturnType<MediaService['overview']>>;
 const states = {UPLOADING:'Загружается',READY:'Готово',DELETE_PENDING:'Удаляется',DELETED:'Удалено'};
 export function MediaLibrary({base,canWrite}:{base:string;canWrite:boolean}) {
@@ -21,7 +23,7 @@ export function MediaLibrary({base,canWrite}:{base:string;canWrite:boolean}) {
     if(!file)return;
     if(file.size>maxPhotoUploadBytes||!photoMimeTypes.some(type=>type===file.type))throw new Error('Выберите JPEG, PNG или WebP размером до 3 МБ.');
     intent.current ??= crypto.randomUUID();
-    const response=await fetch(`/api/${base}/media`,{method:'POST',headers:{'Content-Type':file.type,'X-File-Name':encodeURIComponent(file.name),'Idempotency-Key':intent.current},body:file,credentials:'same-origin'});
+    const response=await fetch(apiUrl(`${base}/media`),{method:'POST',headers:{'Content-Type':file.type,'X-File-Name':encodeURIComponent(file.name),'Idempotency-Key':intent.current},body:file,credentials:'same-origin'});
     const result=await response.json() as {error?:{message?:string}};
     if(!response.ok)throw new Error(result.error?.message??'Не удалось загрузить файл');
     intent.current=null;setFile(null);if(fileInput.current)fileInput.current.value='';setNotice('Фотография сохранена');
@@ -47,5 +49,6 @@ export function MediaLibrary({base,canWrite}:{base:string;canWrite:boolean}) {
         {canWrite&&asset.status!=='DELETE_PENDING'?<button className="text-button" disabled={pending} onClick={()=>void perform(async()=>{await api(`${base}/media/${asset.id}/delete`,'POST');if(preview?.id===asset.id)setPreview(null);setNotice('Удаление запланировано');})}>Удалить фотографию</button>:null}
       </div>
     </article>)}</div>
+    <LibraryMediaPanel key={base} base={base} canWrite={canWrite}/>
   </section>;
 }

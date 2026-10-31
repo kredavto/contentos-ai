@@ -1,3 +1,4 @@
+import {providerKeys} from './provider-keys';
 import {sql} from 'drizzle-orm';
 import {pgTable,uuid,text,integer,jsonb,timestamp,unique,foreignKey,index,check} from 'drizzle-orm/pg-core';
 import {brands,users} from './identity';
@@ -12,13 +13,15 @@ export const videoProjects=pgTable('video_projects',{
   scriptText:text('script_text').notNull(),title:text('title').notNull(),platform:text('platform').notNull(),plannedDuration:integer('planned_duration').notNull(),
   avatarReference:jsonb('avatar_reference').$type<ProviderReference>().notNull(),voiceReference:jsonb('voice_reference').$type<ProviderReference>().notNull(),consent:jsonb('consent').$type<Pick<AvatarJobInput,'subjectId'|'requirements'>>().notNull(),
   options:jsonb('options').$type<VideoProcessingOptions>().notNull(),maxDurationSeconds:integer('max_duration_seconds').notNull(),stage:text('stage').$type<VideoStage>().notNull().default('VIDEO_REQUESTED'),stageRevision:integer('stage_revision').notNull().default(0),
+  providerKeyId:uuid('provider_key_id'),providerKeyRevision:integer('provider_key_revision'),
   provider:text('provider').notNull(),reference:jsonb('reference').$type<ProviderReference>(),firstSubmittedAt:timestamp('first_submitted_at',{withTimezone:true}),mutationState:text('mutation_state',{enum:['NONE','STARTED','UNKNOWN','ACCEPTED','REJECTED']}).notNull().default('NONE'),
   captionMode:text('caption_mode',{enum:['NONE','MANUAL','AUTO']}).notNull().default('NONE'),captionLanguage:text('caption_language').notNull().default('ru'),captionProvider:text('caption_provider'),captionModel:text('caption_model'),captionReservationId:uuid('caption_reservation_id'),captionMutationState:text('caption_mutation_state',{enum:['NONE','STARTED','UNKNOWN','ACCEPTED','REJECTED']}).notNull().default('NONE'),originalStoredAt:timestamp('original_stored_at',{withTimezone:true}),sourceDurationMs:integer('source_duration_ms'),
+  coverVersion:integer('cover_version').notNull().default(0),coverRevision:integer('cover_revision').notNull().default(0),
   originalKey:text('original_key').notNull(),finalKey:text('final_key').notNull(),coverKey:text('cover_key').notNull(),durationMs:integer('duration_ms'),finalBytes:integer('final_bytes'),
   lifecycle:text('lifecycle',{enum:['ACTIVE','DELETE_PENDING','DELETED']}).notNull().default('ACTIVE'),
   deleteAfter:timestamp('delete_after',{withTimezone:true}),deleteAttempts:integer('delete_attempts').notNull().default(0),deleteLeaseToken:uuid('delete_lease_token'),deleteLeaseExpiresAt:timestamp('delete_lease_expires_at',{withTimezone:true}),deleteError:text('delete_error'),deleteCorrelationId:uuid('delete_correlation_id'),deletedAt:timestamp('deleted_at',{withTimezone:true}),
   approvedBy:uuid('approved_by').references(()=>users.id),approvedAt:timestamp('approved_at',{withTimezone:true}),createdAt:timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),
-},t=>[unique('video_tenant_id_uq').on(t.tenantId,t.id),unique('video_job_uq').on(t.jobId),index('video_brand_idx').on(t.tenantId,t.brandId),index('video_deletion_idx').on(t.lifecycle,t.deleteAfter),
+},t=>[foreignKey({name:'video_provider_key_scope_fk',columns:[t.tenantId,t.brandId,t.providerKeyId,t.provider],foreignColumns:[providerKeys.tenantId,providerKeys.brandId,providerKeys.id,providerKeys.provider]}),check('video_provider_key_binding_valid',sql`(${t.providerKeyId} is null and ${t.providerKeyRevision} is null) or (${t.providerKeyId} is not null and ${t.providerKeyRevision} is not null and ${t.providerKeyRevision}>=0 and ${t.provider}='heygen')`),unique('video_tenant_id_uq').on(t.tenantId,t.id),unique('video_job_uq').on(t.jobId),index('video_brand_idx').on(t.tenantId,t.brandId),index('video_deletion_idx').on(t.lifecycle,t.deleteAfter),
   check('video_lifecycle_valid',sql`${t.lifecycle} in ('ACTIVE','DELETE_PENDING','DELETED')`),
   foreignKey({columns:[t.tenantId,t.captionReservationId],foreignColumns:[usageReservations.tenantId,usageReservations.id]}),
   check('video_caption_mode_valid',sql`${t.captionMode} in ('NONE','MANUAL','AUTO')`),check('video_caption_mutation_valid',sql`${t.captionMutationState} in ('NONE','STARTED','UNKNOWN','ACCEPTED','REJECTED')`),

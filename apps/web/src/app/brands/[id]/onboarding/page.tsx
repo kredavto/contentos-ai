@@ -9,5 +9,6 @@ export default async function OnboardingPage({ params, searchParams }: { params:
   if (!user) redirect('/login');
   const { id } = await params; const { organization } = await searchParams;
   if (!z.uuid().safeParse(id).success || !z.uuid().safeParse(organization).success) redirect('/dashboard');
+  const overview=await services().brands.overview(user.userId,organization!);if(overview.role==='CLIENT_APPROVER')redirect(`/approvals?organization=${organization}`);
   return <OnboardingWizard tenantId={organization!} brandId={id} />;
 }

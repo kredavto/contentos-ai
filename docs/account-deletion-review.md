@@ -1,0 +1,51 @@
+# Account deletion review
+
+The existing account request intake remains REQUESTED/CANCELLED; submitting it does not start erasure or disable access. The general asynchronous LOCKED → external cleanup → PII anonymization workflow remains incomplete. A separate explicitly confirmed, resource-free authentication/profile erasure path is described below; the original intake never authorizes it. This review is a preparatory operator tool, not completion of specification §107.
+
+GET `/api/admin/deletion-requests/:id` requires the enabled admin feature and a current, verified, enabled platform SUPPORT/ADMIN operator. Tenant ownership does not grant access. The route uses the authenticated read throttle and existing no-store responses. Unknown requests return NOT_FOUND only after operator authorization. Every successful inspection records ADMIN_DELETION_INSPECTED with the request ID and correlation ID, without inventory or private payloads.
+
+The response contains request identity, current revision/status/timestamps, inspection time, and actor-linked counts: current memberships/ownership, live sessions, unfinished generation jobs and reconciliation, non-deleted photo/library uploads, non-revoked social connections originally created by the user, active BYOK records originally created by the user, accepted consent/renewal evidence and unfinished email deliveries. Counts are decimal strings to preserve PostgreSQL bigint values. A repeatable-read transaction and one inventory statement provide a snapshot; it is not a lock authorizing a later mutation. A five-second query timeout fails explicitly instead of treating missing data as zero.
+
+No plaintext, ciphertext, masked key suffix, file path, media name, email contents, external identity, job payload or other users' data is exposed. Migration 0080 adds actor/status indexes for jobs, photo uploads, library uploads and social connections; other counts use existing actor indexes.
+
+The admin request list offers an inspection panel for requests on the current page, including cancelled requests. Refreshing obtains the latest status and revision. The interface explicitly warns that an uploader or consent acceptor need not be the depicted person, and that an originally created connection can later belong to another owner. Neither inventory nor a zero count authorizes deleting that organization's resources.
+
+## Work remaining for general shared-account erasure
+
+- Define and confirm subject/resource scope independently of uploader/acceptor identity; distinguish account data from organization-owned content and other people's likenesses.
+- Resolve current ownership before locking an account; recheck under transaction locks against concurrent membership/ownership changes.
+- Capture explicit authorization for execution. Existing requests were submitted under copy saying automatic deletion is unavailable and must not be silently reinterpreted.
+- Implement durable staged execution, fencing, retries, progress and reconciliation with active remote operations, bounded cleanup adapters, current consent and credential bindings.
+- Inventory generated avatars/voices/videos, publishing and payment evidence, arbitrary material content and retention requirements; the displayed counts are not exhaustive.
+- Revoke access and queued delivery, clean selected remote/local resources, anonymize eligible PII while preserving necessary references, then verify before reporting COMPLETED.
+
+## Security review
+
+Reviewed before delivery on 2026-10-24: authenticated session precedes routing; current verified/enabled operator rows are locked for the read transaction; schema restricts operator roles to SUPPORT/ADMIN; unknown request IDs cannot bypass authorization. Strict UUID validation and parameterized queries cover the new input. Rate limits, a five-second statement timeout and actor/status indexes bound work. Explicit projections omit private content and credentials, responses use no-store, and safe errors/logs expose only codes/correlation/timing. Rendering uses React text. The route only records inspection audit evidence and does not authorize erasure. These checks address the changed access-control, injection and data-exposure surface; they are not a claim of a complete platform security audit.
+
+## Explicit resource-free authentication-data execution — 2026-10-26
+
+A new self-service action accepts a current password, the current REQUESTED intake ID/revision, a new idempotency key, scope ACCOUNT_AUTH_DATA_V1 and two explicit acknowledgments: irreversible access closure and retention/exclusions. Existing requests are not migrated into execution. Admission requires ACCOUNT_ERASURE_ENABLED=true; the default is false. Already confirmed work continues in the worker even if admission is later disabled.
+
+The scope is the account profile and authentication data, not erasure of organization content, copied email addresses in shared material, media/likeness, financial evidence or all data in external providers/backups. Required audit/request IDs remain linked to a disabled pseudonymous user. The account must have no other direct foreign-key references to public.users beyond the narrow audit/request/session/token/execution allowlist. Unsupported FK shapes fail explicitly. This conservative catalog-based check also rejects new product dependencies instead of relying on the older partial inventory. Ownership, membership, retained author/resource evidence and platform operator records therefore require manual scope review.
+
+Confirmation locks the verified active user and current intake, fences password changes, locks active authentication-mail rows, rejects SENDING/RECONCILIATION or excessive mail workloads, and rechecks dependencies. One transaction stores immutable consent/execution, disables access, deletes every session, consumes authentication tokens and clears pending encrypted mail. The browser cookie is cleared only after commit. The UI replaces the profile with a queued-operation receipt and does not claim completion. Cancellation of the older intake is not a cancellation mechanism after explicit irreversible closure.
+
+The database-backed worker executes one bounded job at a time. In a single transaction it locks user/execution, rechecks dependencies and uncertain mail, removes authentication tokens (cascading their mail records), pseudonymizes name/email/password, clears email verification, marks erased_at and records COMPLETED plus a safe audit event. No external provider is invoked. PostgreSQL transaction rollback and row locks fence crashes/concurrent workers. Erased identities and execution consent/terminal state are protected by triggers. Organization creation checks enabled users; a membership trigger prevents late joins after access closure. Unexpected dependencies or three execution failures produce BLOCKED for manual investigation, never a false COMPLETED. There is no force-erasure control.
+
+SUPPORT/ADMIN can inspect the execution ID, scope and state through the existing read-only request inspection. They cannot use that screen to submit another user's password proof or authorize erasure. Full shared-account/media/provider cleanup, retention policy enforcement, broad organization exports remain open.
+
+Migration 0091 additionally binds execution and intake to the same user through a composite FK. Migration 0092 reserves @account.invalid for actual erased identities; normal registration and direct non-erased inserts cannot claim a future tombstone address. Erasure identity names remain deterministic and cannot collide with a newly registered normal account.
+
+Confirmation uses a no-key-update user lock: it still fences password/session creation and the membership guard's share lock, while allowing a finishing authentication-mail transaction to commit its foreign-key-linked audit receipt. Finalization retains the stronger user lock. A deterministic two-transaction regression verifies that the mail receipt is not lost and that confirmation either safely declines an in-flight send or proceeds after the receipt, with no partial access closure on refusal.
+
+
+## ADMIN recovery of blocked V1 executions — 2026-10-26
+
+POST `/api/admin/account-erasures/:id/retry` resumes an existing BLOCKED ACCOUNT_AUTH_DATA_V1 execution. It requires the enabled platform-admin feature, a current verified/enabled ADMIN, authenticated same-origin session, shared mutation and specific recovery throttles. SUPPORT can inspect but cannot recover. An old REQUESTED/CANCELLED intake without separate consent is never converted into execution.
+
+The strict body binds `expectedRecoveryId` (null for the initial cycle), a new `idempotencyKey`, a fixed reason (DEPENDENCIES_RESOLVED or TRANSIENT_FAILURE_RESOLVED), an ASCII ticket reference and `acknowledgeOriginalScope:true`. No scope override or force flag exists. The transaction locks current operator, subject and execution, checks that the subject remains disabled/not erased, then repeats the same catalog dependency and uncertain-mail gates. Retry resets the attempt budget only after fresh immutable evidence is inserted and records ADMIN_ACCOUNT_ERASURE_RECOVERED without private data.
+
+Migration 0093 adds append-only recovery history, a composite execution/recovery FK and a chained previous-recovery FK. The execution trigger permits BLOCKED→QUEUED only for a fresh event matching the prior recovery pointer, attempt count and error. Active recovery pointers, original consent and completed executions remain immutable. Actor/idempotency serialization and the execution lock deduplicate concurrent requests. Replaying a successful key returns current state and cannot requeue a later blocked cycle. A new cycle requires the current pointer and new evidence; old approvals cannot be recycled.
+
+Inspection returns at most ten recent recovery records and an explicit has-more indicator; the full immutable history stays in PostgreSQL. The admin UI requires reason, ticket and scope acknowledgment, then refreshes the inspection. Recovery only resumes the original database transaction: it neither deletes linked resources nor authorizes provider/media/shared-account cleanup. New resources or uncertain mail appearing later can block execution again.

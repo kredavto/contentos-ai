@@ -34,6 +34,7 @@
         "OPENAI_API_KEY",
         "OPENAI_MODEL",
         "WORKER_HEALTH_PORT",
+        "ACCOUNT_ERASURE_ENABLED",
         "STORAGE_PROVIDER",
         "S3_REGION",
         "S3_BUCKET",

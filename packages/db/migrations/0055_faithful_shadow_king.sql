@@ -1,0 +1,2 @@
+ALTER TABLE "broll_segments" ADD COLUMN "fade_ms" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "broll_segments" ADD CONSTRAINT "broll_fade_valid" CHECK (("broll_segments"."fade_ms" = 0 or "broll_segments"."fade_ms" between 100 and 2000) and 2 * "broll_segments"."fade_ms" <= "broll_segments"."end_ms" - "broll_segments"."start_ms");

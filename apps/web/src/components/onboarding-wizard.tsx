@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowRight, Check, LoaderCircle, Save, Sparkles } from 'lucide-react';
 import { emptyOnboarding, onboardingSaveSchema, type OnboardingData } from '@contentos/types';
 import { api } from '../lib/api-client';
+import { BrandCollections } from './brand-collections';
+import { BrandProfileEditor } from './brand-profile-editor';
 const steps: Array<{ key: keyof OnboardingData; title: string; subtitle: string; hint: string }> = [
   { key: 'company', title: 'Как называется ваш бренд?', subtitle: 'Начнём с основ', hint: 'Название, которое увидит ваша команда.' },
   { key: 'website', title: 'Где узнать о вас больше?', subtitle: 'Сайт компании', hint: 'Ссылка на ваш сайт. Можно оставить пустым. Мы не запускаем автоматический сбор данных.' },
@@ -32,6 +34,8 @@ export function OnboardingWizard({ tenantId, brandId }: { tenantId: string; bran
   const [step, setStep] = useState(0);
   const [revision, setRevision] = useState(0);
   const [completed, setCompleted] = useState(false);
+  const [collectionDirty, setCollectionDirty] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
@@ -72,7 +76,7 @@ export function OnboardingWizard({ tenantId, brandId }: { tenantId: string; bran
   }
   if (loading) return <div className="loading" role="status"><LoaderCircle className="spin" />Загружаем данные бренда…</div>;
   if (!canEdit && !completed) return <div className="page-container"><p className="notice error">{error || 'У вашей роли нет прав на изменение Brand Brain.'}</p><Link href="/dashboard">Вернуться в пространство</Link></div>;
-  if (completed) return <div className="page-container brain-summary"><Link className="back-link" href="/dashboard"><ArrowLeft size={16} />В рабочее пространство</Link><div className="icon-tile"><Check /></div><div className="page-eyebrow">КОНТЕКСТ СОХРАНЁН</div><h1>Brand Brain: {data.company}</h1><p className="muted">Структурированная основа вашего бренда готова. Эти данные будут использоваться при создании стратегии и контента.</p><div className="summary-grid">{steps.map(item => <section className="panel" key={item.key}><h3>{item.subtitle}</h3><p className="preserve-lines">{valueAsText(data, item.key) || 'Не указано'}</p></section>)}</div></div>;
+  if (completed) return <div className="page-container brain-summary"><Link className="back-link" href="/dashboard"><ArrowLeft size={16} />В рабочее пространство</Link><div className="icon-tile"><Check /></div><div className="page-eyebrow">КОНТЕКСТ СОХРАНЁН</div><h1>Brand Brain: {data.company}</h1><p className="muted">Структурированная основа вашего бренда готова. Эти данные будут использоваться при создании стратегии и контента.</p>{message ? <p role="status" className="saved-message">{message}</p> : null}{canEdit && !editingProfile ? <button className="button secondary" disabled={collectionDirty} onClick={() => { setEditingProfile(true); setMessage(''); }}>Редактировать профиль</button> : null}{editingProfile ? <BrandProfileEditor tenantId={tenantId} brandId={brandId} data={data} revision={revision} onCancel={() => setEditingProfile(false)} onSaved={(profile, nextRevision) => { setData(value => ({ ...value, ...profile })); setRevision(nextRevision); setEditingProfile(false); setMessage('Профиль бренда обновлён'); }} /> : null}{!editingProfile ? <BrandCollections tenantId={tenantId} brandId={brandId} canEdit={canEdit} onDirty={setCollectionDirty} onSaved={() => window.location.reload()} /> : null}<div className="summary-grid">{steps.map(item => <section className="panel" key={item.key}><h3>{item.subtitle}</h3><p className="preserve-lines">{valueAsText(data, item.key) || 'Не указано'}</p></section>)}</div></div>;
   return <div className="wizard-layout">
     <aside className="wizard-sidebar"><Link className="back-link" href="/dashboard"><ArrowLeft size={16} />Все бренды</Link><h2>Знакомство с брендом</h2><p className="muted">15 шагов, чтобы сохранить ваш контекст.</p><ol className="step-list">{steps.map((item, index) => <li key={item.key} className={index === step ? 'current' : ''}><button disabled={pending} onClick={() => void save(index)} aria-current={index === step ? 'step' : undefined}><span>{index + 1}</span>{item.subtitle}</button></li>)}</ol></aside>
     <section className="wizard-main"><div className="wizard-progress"><span>ШАГ {step + 1} ИЗ 15</span><span>{Math.round((step + 1) / 15 * 100)}%</span></div><div className="progress-track"><span style={{ width: `${(step + 1) / 15 * 100}%` }} /></div>

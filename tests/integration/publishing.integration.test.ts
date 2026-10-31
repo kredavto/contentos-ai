@@ -1,6 +1,6 @@
 import {randomUUID,randomBytes} from 'node:crypto';
 import {describe,it,expect,beforeAll,afterAll} from 'vitest';
-import {createDatabase,AnalyticsRepository,PublishingRepository,CalendarRepository,SocialRepository} from '../../packages/db/src/index';
+import {FeaturePolicyRepository,SearchRepository,NotificationRepository,createDatabase,AnalyticsRepository,PublishingRepository,CalendarRepository,SocialRepository} from '../../packages/db/src/index';
 import {PublishingProcessor} from '../../packages/core/src/publishing';
 import {CredentialVault} from '../../packages/core/src/credential-vault';
 import {SocialService} from '../../packages/core/src/social';
@@ -32,8 +32,8 @@ describe.skipIf(!url)('durable approval publishing',()=>{
     const job=await repo.approve(owner,tenantId,brandId,input,'telegram',[],correlation);expect(await repo.approve(owner,tenantId,brandId,input,'telegram',[],correlation)).toEqual(job);expect(await repo.claim(tenantId,job.id)).toBeNull();
     await expect(calendar.update(owner,tenantId,brandId,entry.id,calendarUpdateSchema.parse({...fields,revision:0}),[],correlation)).rejects.toThrow('CONFLICT');await expect(calendar.cancel(owner,tenantId,brandId,entry.id,0,correlation)).rejects.toThrow('CONFLICT');
     await expect(database.client`update publishing_jobs set snapshot='{}'::jsonb where id=${job.id}`).rejects.toThrow('immutable');
-    now=new Date('2030-01-01T00:11:00Z');expect((await repo.due()).some(row=>row.id===job.id)).toBe(true);await Promise.all([processor.run(tenantId,job.id),processor.run(tenantId,job.id)]);await processor.run(tenantId,job.id);expect(sends).toBe(1);expect((await state(job.id)).status).toBe('PUBLISHED');
-    expect(await database.client`select id from publications where job_id=${job.id}`).toHaveLength(1);expect(JSON.stringify(await repo.list(editor,tenantId,brandId))).not.toContain('credential');
+    now=new Date('2030-01-01T00:11:00Z');expect((await repo.due()).some(row=>row.id===job.id)).toBe(true);await Promise.all([processor.run(tenantId,job.id),processor.run(tenantId,job.id)]);await processor.run(tenantId,job.id);expect(sends).toBe(1);expect((await state(job.id)).status).toBe('PUBLISHED');const notifications=new NotificationRepository(database.db);await notifications.projectBatch(tenantId);expect((await notifications.list(owner,tenantId)).items.some(item=>item.type==='PUBLICATION_SUCCESS')).toBe(true);
+    expect(await database.client`select id from publications where job_id=${job.id}`).toHaveLength(1);const search=await new SearchRepository(database.db).search(editor,tenantId,{q:'telegram',kind:'PUBLICATION'});expect(search.items.some(item=>item.id)).toBe(true);expect(JSON.stringify(search)).not.toContain('credential');expect(JSON.stringify(await repo.list(editor,tenantId,brandId))).not.toContain('credential');
   });
   it('cancels before submission and permits a newly reviewed calendar revision',async()=>{
     const {entry,fields,input}=await planned(),job=await repo.approve(owner,tenantId,brandId,input,'telegram',[],correlation);await repo.cancel(owner,tenantId,brandId,job.id);await repo.cancel(owner,tenantId,brandId,job.id);
@@ -112,6 +112,22 @@ describe.skipIf(!url)('durable approval publishing',()=>{
       await expect(analytics.record(owner,tenant,brand,input,correlation)).rejects.toThrow('NOT_FOUND');
     }
     await expect(database.client`insert into publication_metrics(tenant_id,publication_id,source_note,metrics,observed_at,recorded_by,idempotency_key,input_hash) values(${otherTenant},${target.id},'Foreign metrics','{}',now(),${owner},${randomUUID()},'invalid')`).rejects.toThrow();
+  });
+
+  it('blocks pending Telegram sends but records a verified response after the policy changes in flight',async()=>{
+    const actor=randomUUID(),governance=new FeaturePolicyRepository(database.db);let revision=0;
+    await database.client`insert into users(id,email,name,password_hash,email_verified_at) values(${actor},${actor+'@example.test'},'Policy operator','unusable',now())`;
+    await database.client`insert into platform_operators(user_id,role) values(${actor},'ADMIN')`;
+    const set=async(mode:'DISABLED'|'INHERIT')=>{revision=(await governance.change(actor,{feature:'telegram_publishing',scope:'ORGANIZATION',targetId:tenantId,mode,expectedRevision:revision,ticket:'SEND-POLICY',idempotencyKey:randomUUID()},correlation)).revision;};
+    const currentConnection=await socialRepo.managed(owner,tenantId,brandId,connectionId);await social.reconnect(owner,tenantId,brandId,connectionId,{revision:currentConnection.revision,token:'123456:fixture_token_not_a_real_credential'},correlation);
+    try{
+      const first=await planned(),pending=await repo.approve(owner,tenantId,brandId,first.input,'telegram',[],correlation),before=sends;
+      await set('DISABLED');now=new Date('2030-01-01T00:11:00Z');await processor.run(tenantId,pending.id);expect((await state(pending.id)).status).toBe('FAILED');expect(sends).toBe(before);
+      await set('INHERIT');const second=await planned(),inFlight=await repo.approve(owner,tenantId,brandId,second.input,'telegram',[],correlation);now=new Date('2030-01-01T00:11:00Z');
+      const changing=new PublishingProcessor(repo,{name:'telegram',provider:{publish:async(...args)=>{await set('DISABLED');return provider.publish(...args);}}},{name:'telegram',provider:inspector},vault,null);
+      await changing.run(tenantId,inFlight.id);expect((await state(inFlight.id)).status).toBe('PUBLISHED');expect(sends).toBe(before+1);
+      expect(await database.client`select id from publications where job_id=${inFlight.id}`).toHaveLength(1);
+    }finally{if(revision)await set('INHERIT');await database.client`update platform_operators set revoked_at=now() where user_id=${actor}`;}
   });
 
 });

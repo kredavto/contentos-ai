@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import sharp from 'sharp';
 import {beforeAll,afterAll,describe,it,expect} from 'vitest';
-import {createDatabase,AvatarRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
+import {createDatabase,FeaturePolicyRepository,AvatarRepository,ConsentRepository,MediaRepository,LedgerRepository,VoiceRepository} from '../../packages/db/src/index';
 import {VoiceService} from '../../packages/core/src/voices';
 import {AvatarService,AvatarProcessor,avatarConsentPolicies} from '../../packages/core/src/avatars';
 import {ConsentService,consentPolicy} from '../../packages/core/src/consent';
@@ -93,6 +93,24 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     await expect(repo.complete(claimed,avatarConsentPolicies())).rejects.toThrow('CONFLICT');
     expect(await service.cleanupOne()).toBe(true);
   });
+  it('releases a fresh local circuit denial without erasing an earlier unknown submission',async()=>{
+    const {subject}=await person();
+    const deniedProvider={...provider,create:async()=>{throw new ProviderRequestError('RATE_LIMITED',429,true);}};
+    const denied=new AvatarProcessor(database.db,{provider:deniedProvider,name:connection.name},storage,true);
+    const fresh=await service.create(userId,tenantId,brandId,request(subject),correlationId);
+    await denied.run(tenantId,fresh.id);
+    expect((await row(fresh.id)).status).toBe('FAILED');
+    expect((await row(fresh.id)).error_code).toBe('RATE_LIMITED');
+    expect((await database.client`select mutation_state from avatar_looks where job_id=${fresh.id}`)[0]?.mutation_state).toBe('REJECTED');
+    expect((await database.client`select status from usage_reservations where id=${(await row(fresh.id)).reservation_id}`)[0]?.status).toBe('RELEASED');
+    const uncertain=await service.create(userId,tenantId,brandId,request(subject),correlationId);
+    const dispatched=new AvatarProcessor(database.db,{name:connection.name,provider:{...provider,create:async()=>{throw new DomainError('PROVIDER_UNAVAILABLE',503);}}},storage,true);
+    await dispatched.run(tenantId,uncertain.id);expect((await row(uncertain.id)).status).toBe('RETRY');
+    await due(uncertain.id);await denied.run(tenantId,uncertain.id);
+    expect((await row(uncertain.id)).status).toBe('RECONCILIATION');
+    expect((await database.client`select mutation_state from avatar_looks where job_id=${uncertain.id}`)[0]?.mutation_state).toBe('UNKNOWN');
+    expect((await database.client`select status from usage_reservations where id=${(await row(uncertain.id)).reservation_id}`)[0]?.status).toBe('HELD');
+  });
   it('does not exhaust submission retries during normal long-running polling',async()=>{
     const {subject}=await person();const job=await service.create(userId,tenantId,brandId,request(subject),correlationId);
     const pending=new AvatarProcessor(database.db,{name:connection.name,provider:{...provider,status:async()=>({status:'PROCESSING',previewUrl:null})}},storage,true);
@@ -115,4 +133,19 @@ describe.skipIf(!url)('consent-bound avatar jobs',()=>{
     const unsafe=new VoiceService(new VoiceRepository(database.db),{name:connection.name,provider:{listPublicVoicePage:async()=>({voices:[{name:'Private',language:null,previewUrl:null,reference:{provider:connection.name,externalId:'private',internalId:randomUUID(),metadata:{public:false}}}],nextCursor:null})}});
     await expect(unsafe.refresh(userId,tenantId,brandId,{},correlationId)).rejects.toThrow('PROVIDER_REJECTED');
   });
+  it('stops an unsubmitted queued avatar while preserving polling of an already submitted reference',async()=>{
+    const actor=randomUUID(),governance=new FeaturePolicyRepository(database.db);let revision=0,creates=0;
+    await database.client`insert into users(id,email,name,password_hash,email_verified_at) values(${actor},${actor+'@example.test'},'Policy operator','unusable',now())`;
+    await database.client`insert into platform_operators(user_id,role) values(${actor},'ADMIN')`;
+    const set=async(mode:'DISABLED'|'INHERIT')=>{revision=(await governance.change(actor,{feature:'avatar_generation',scope:'ORGANIZATION',targetId:tenantId,mode,expectedRevision:revision,ticket:'AVATAR-POLICY',idempotencyKey:randomUUID()},correlationId)).revision;};
+    const guarded=new AvatarProcessor(database.db,{name:connection.name,provider:{...provider,create:async(...args)=>{creates++;return provider.create(...args);}}},storage,true);
+    try{
+      const {subject}=await person(),accepted=await service.create(userId,tenantId,brandId,request(subject),correlationId),pending=await service.create(userId,tenantId,brandId,request(subject),correlationId);
+      await guarded.run(tenantId,accepted.id);expect((await row(accepted.id)).status).toBe('WAITING_EXTERNAL');expect(creates).toBe(1);
+      await set('DISABLED');await guarded.run(tenantId,pending.id);expect((await row(pending.id)).status).toBe('FAILED');expect((await row(pending.id)).error_code).toBe('NOT_AUTHORIZED');expect(creates).toBe(1);
+      await due(accepted.id);await guarded.run(tenantId,accepted.id);expect((await row(accepted.id)).status).toBe('SUCCEEDED');expect(creates).toBe(1);
+      const [reservation]=await database.client`select r.status from usage_reservations r join jobs j on j.reservation_id=r.id where j.id=${pending.id}`;expect(reservation?.status).toBe('RELEASED');
+    }finally{if(revision)await set('INHERIT');await database.client`update platform_operators set revoked_at=now() where user_id=${actor}`;}
+  });
+
 });

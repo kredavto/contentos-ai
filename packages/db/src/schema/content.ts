@@ -19,7 +19,7 @@ export const contentItems = pgTable('content_items', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), brandId: uuid('brand_id').notNull(), ideaId: uuid('idea_id'),
   title: text('title').notNull(), type: text('type', { enum: ['SHORT_VIDEO', 'POST', 'CAROUSEL', 'STORY', 'IMAGE'] }).notNull(),
   status: text('status').$type<ContentState>().notNull().default('SCRIPT'), revision: integer('revision').notNull().default(0), createdAt: createdAt(),
-}, t => [unique('content_items_tenant_id_uq').on(t.tenantId, t.id), foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }), foreignKey({ columns: [t.tenantId, t.ideaId], foreignColumns: [ideas.tenantId, ideas.id] })]);
+}, t => [unique('content_items_tenant_id_uq').on(t.tenantId, t.id), unique('content_items_brand_id_uq').on(t.tenantId,t.brandId,t.id), foreignKey({ columns: [t.tenantId, t.brandId], foreignColumns: [brands.tenantId, brands.id] }), foreignKey({ columns: [t.tenantId, t.ideaId], foreignColumns: [ideas.tenantId, ideas.id] })]);
 export const scripts = pgTable('scripts', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), brandId: uuid('brand_id').notNull(), contentItemId: uuid('content_item_id').notNull(),
   currentVersion: integer('current_version').notNull().default(0), approvedVersion: integer('approved_version'), approvedBy: uuid('approved_by').references(() => users.id),
@@ -28,5 +28,5 @@ export const scripts = pgTable('scripts', {
 export const scriptVersions = pgTable('script_versions', {
   id: uuid('id').primaryKey().defaultRandom(), tenantId: uuid('tenant_id').notNull(), scriptId: uuid('script_id').notNull(), jobId: uuid('job_id'),
   version: integer('version').notNull(), content: jsonb('content').$type<ScriptOutput>().notNull(), createdBy: uuid('created_by').notNull().references(() => users.id), createdAt: createdAt(),
-}, t => [unique('script_version_number_uq').on(t.scriptId, t.version), unique('script_version_job_uq').on(t.jobId),
+}, t => [unique('script_version_tenant_number_uq').on(t.tenantId, t.scriptId, t.version), unique('script_version_number_uq').on(t.scriptId, t.version), unique('script_version_job_uq').on(t.jobId),
   foreignKey({ columns: [t.tenantId, t.scriptId], foreignColumns: [scripts.tenantId, scripts.id] }), foreignKey({ columns: [t.tenantId, t.jobId], foreignColumns: [jobs.tenantId, jobs.id] })]);

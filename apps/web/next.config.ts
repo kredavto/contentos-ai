@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 const config: NextConfig = {
   output: 'standalone',
+  serverExternalPackages: ['@sentry/node'],
   poweredByHeader: false,
   transpilePackages: ['@contentos/core', '@contentos/db', '@contentos/config', '@contentos/types', '@contentos/ui', '@contentos/providers', '@contentos/ai'],
   async headers() {
@@ -9,6 +10,8 @@ const config: NextConfig = {
       { key: 'X-Frame-Options', value: 'DENY' },
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
       { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+    ] }, { source: '/api/social/youtube/callback', headers: [
+      { key: 'Referrer-Policy', value: 'no-referrer' },
     ] }];
   },
 };

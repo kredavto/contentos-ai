@@ -1,10 +1,11 @@
 import OpenAI,{toFile} from 'openai';
+import {CircuitBreaker,CircuitOpenError} from './circuit-breaker';
 import {z} from 'zod';
 import {DomainError,ProviderRequestError,captionSegmentsSchema,type CaptionProvider,type OperationContext} from '@contentos/types';
 /** Timestamp-capable transcription. No implicit retries of a billable request. */
 export class OpenAICaptionProvider implements CaptionProvider {
   private readonly client:OpenAI;
-  constructor(apiKey:string,private readonly model:string,transport?:typeof fetch){
+  constructor(apiKey:string,private readonly model:string,transport?:typeof fetch,private readonly circuit=new CircuitBreaker()){
     if(!apiKey||model!=='whisper-1')throw new DomainError('CONFIGURATION_REQUIRED',503);
     this.client=new OpenAI({apiKey,maxRetries:0,timeout:90_000,...(transport?{fetch:transport}:{})});
   }
@@ -12,11 +13,12 @@ export class OpenAICaptionProvider implements CaptionProvider {
     if(input.mimeType!=='audio/wav'||input.bytes.length<44||input.bytes.length>6_000_000||Buffer.from(input.bytes.subarray(0,4)).toString()!=='RIFF'||Buffer.from(input.bytes.subarray(8,12)).toString()!=='WAVE'||!z.string().regex(/^[a-z]{2}$/).safeParse(input.language).success)throw new ProviderRequestError('INVALID_MEDIA',422,true);
     const started=Date.now();let status='FAILED';
     try{
-      const output=await this.client.audio.transcriptions.create({file:await toFile(input.bytes,'audio.wav',{type:'audio/wav'}),model:this.model,language:input.language,response_format:'verbose_json',timestamp_granularities:['segment']},{signal:context.signal});
+      const output=await this.circuit.execute(async()=>this.client.audio.transcriptions.create({file:await toFile(input.bytes,'audio.wav',{type:'audio/wav'}),model:this.model,language:input.language,response_format:'verbose_json',timestamp_granularities:['segment']},{signal:context.signal}),error=>!context.signal.aborted&&(error instanceof OpenAI.APIConnectionError||(error instanceof OpenAI.APIError&&(error.status===408||error.status===429||(error.status!==undefined&&error.status>=500)))));
       const parsed=captionSegmentsSchema.safeParse(output.segments?.map(segment=>({start:segment.start,end:segment.end,text:segment.text})));
       if(!parsed.success)throw new DomainError('PROVIDER_REJECTED',502);
       status='SUCCEEDED';return parsed.data;
     }catch(error){
+      if(error instanceof CircuitOpenError){status='CIRCUIT_OPEN';throw new ProviderRequestError('RATE_LIMITED',429,true);}
       if(error instanceof DomainError)throw error;
       if(error instanceof OpenAI.APIError&&(error.status===401||error.status===403))throw new ProviderRequestError('CONFIGURATION_REQUIRED',503,true);
       if(error instanceof OpenAI.APIError&&error.status&&error.status>=400&&error.status<500&&![408,409,429].includes(error.status))throw new ProviderRequestError('PROVIDER_REJECTED',502,true);
@@ -32,3 +34,4 @@ export function captionsFromEnvironment(env:{CAPTION_PROVIDER:string;OPENAI_API_
   }
   return null;
 }
+

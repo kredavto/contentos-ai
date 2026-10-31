@@ -1,0 +1,19 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import type {CommentReplyService} from '@contentos/core';
+import {CommentReplyDelivery} from './comment-reply-delivery';
+import {api} from '../lib/api-client';
+type Approval=Awaited<ReturnType<CommentReplyService['approvalStatus']>>;
+export function CommentReplyApproval({endpoint,version,revision,reply,risks,canApprove,canSend}:{endpoint:string;version:number;revision:number;reply:string|null;risks:Array<{reason:string}>;canApprove:boolean;canSend:boolean}){
+ const [approval,setApproval]=useState<Approval>(null),[loaded,setLoaded]=useState(false),[error,setError]=useState(''),[pollError,setPollError]=useState(''),[checked,setChecked]=useState(false),[pending,setPending]=useState(false),[reload,setReload]=useState(0);
+ const intent=useRef<string|null>(null);
+ useEffect(()=>{const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;async function poll(){try{const value=await api<Approval>(`${endpoint}/approval`,'GET',undefined,controller.signal);if(!controller.signal.aborted){setApproval(value);setLoaded(true);setPollError('');}}catch(failure){if(!controller.signal.aborted){setLoaded(false);setPollError(failure instanceof Error?failure.message:'Не удалось проверить одобрение');}}finally{if(!controller.signal.aborted)timer=setTimeout(()=>void poll(),5000);}}void poll();return()=>{controller.abort();clearTimeout(timer);};},[endpoint,reload]);
+ async function approve(){setPending(true);setError('');try{intent.current??=crypto.randomUUID();await api(`${endpoint}/approval`,'POST',{version,revision,acknowledgeRisks:checked,idempotencyKey:intent.current});intent.current=null;setChecked(false);setLoaded(false);setReload(value=>value+1);}catch(failure){setError(failure instanceof Error?failure.message:'Не удалось одобрить версию');}finally{setPending(false);}}
+ async function revoke(){if(!approval)return;setPending(true);setError('');try{await api(`${endpoint}/approval/${approval.id}/revoke`,'POST',{});setLoaded(false);setReload(value=>value+1);}catch(failure){setError(failure instanceof Error?failure.message:'Не удалось отозвать одобрение');}finally{setPending(false);}}
+ return <section className="panel stack" aria-label="Согласование ответа"><h4>Согласование версии {version}</h4><p>Одобряется сохранённый текст ниже. Несохранённые правки не входят в одобрение. Отправка запрашивается отдельно после одобрения.</p><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{reply??'Ответ не предложен. Сначала сохраните текст.'}</p>{risks.map((risk,index)=><p key={index}>Проверить перед одобрением: {risk.reason}</p>)}
+  {error?<p role="alert">{error}</p>:null}{pollError?<p role="alert">{pollError}</p>:null}{!loaded&&!error?<p role="status">Проверяем одобрение…</p>:null}
+  {loaded?<p role="status">{approval?`Версия ${approval.version}: ${approval.status==='APPROVED'?'одобрена':approval.status==='REVOKED'?'одобрение отозвано':'одобрение устарело'}`:'Одобрения пока нет.'}</p>:null}
+  {canApprove?<><label><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)} disabled={pending}/>Я проверил сохранённый текст и указанные риски</label><div className="studio-actions"><button className="button primary" disabled={pending||!loaded||!checked||!reply||approval?.status==='APPROVED'} onClick={()=>void approve()}>Одобрить версию {version}</button>{approval&&approval.status!=='REVOKED'?<button className="button secondary" disabled={pending||!loaded} onClick={()=>void revoke()}>Отозвать одобрение</button>:null}</div></>:null}
+ <CommentReplyDelivery key={endpoint} endpoint={endpoint} approvalId={loaded&&approval?.status==='APPROVED'?approval.id:null} canSend={canSend}/>
+ </section>;
+}

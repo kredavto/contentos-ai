@@ -1,5 +1,7 @@
 import { DomainError,type VoiceCatalogProvider,type AvatarProvider } from '@contentos/types';
 import { HeyGenAvatarProvider,HeyGenClient,HeyGenVideoProvider } from './heygen';
+import { heyGenClientFromKey } from './heygen-key-client';
+import type { HeyGenCircuitScope } from './heygen-circuit-registry';
 /** Explicit development fixture. Never sends images or claims a real avatar. */
 export class MockAvatarProvider implements AvatarProvider {
   constructor(environment:string){if(!['development','test'].includes(environment))throw new DomainError('CONFIGURATION_REQUIRED',503);}
@@ -25,3 +27,8 @@ export function voiceCatalogFromEnvironment(env:{AVATAR_PROVIDER:string;HEYGEN_A
   }
   return null;
 }
+
+/** Creates a request-scoped public catalog adapter; never caches a tenant credential. */
+export function voiceCatalogFromKey(apiKey:string,scope?:HeyGenCircuitScope):VoiceCatalogProvider {return new HeyGenVideoProvider(heyGenClientFromKey(apiKey,scope));}
+
+export function avatarFromKey(apiKey:string,scope?:HeyGenCircuitScope):AvatarProvider{return new HeyGenAvatarProvider(heyGenClientFromKey(apiKey,scope));}

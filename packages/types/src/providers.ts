@@ -23,7 +23,12 @@ export interface LLMProvider {
   generate(input: { system: string; prompt: string; jsonSchema: Record<string, unknown>; model: string }, context: OperationContext): Promise<{ json: unknown; usage: Usage }>;
 }
 export interface ImageProvider {
-  generate(input: { prompt: string; width: number; height: number }, context: OperationContext): Promise<{ reference: ProviderReference; bytes: Uint8Array; mimeType: string; usage: Usage }>;
+  readonly name:string;
+  readonly model:string;
+  readonly currency:string;
+  /** A synchronous remote mutation: callers must persist submission before calling,
+   * and must not replay an uncertain outcome. No remote idempotency is assumed. */
+  generate(input: import('./images').ImageGenerationInput, context: OperationContext): Promise<{ reference: ProviderReference|null; bytes: Uint8Array; mimeType: string; usage: import('./images').ImageUsage }>;
 }
 export interface AvatarProvider {
   create(input: { photoUrl: string; name: string; groupReference?: ProviderReference }, context: OperationContext): Promise<ProviderReference>;
@@ -44,9 +49,10 @@ export interface VideoProvider {
   status(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PROCESSING' | 'READY' | 'FAILED'; downloadUrl?: string; errorCode?: string }>;
 }
 export interface CaptionSegment { start: number; end: number; text: string }
+export interface VideoBrollInput { fadeMs?:number;bytes:Uint8Array;startMs:number;endMs:number;sourceStartMs:number }
 export interface VideoProcessingProvider {
   prepareAudio(bytes:Uint8Array,context:OperationContext):Promise<{bytes:Uint8Array;durationSeconds:number}>;
-  process(input:{bytes:Uint8Array;options:import('./video-processing').VideoProcessingOptions;onStage?:(stage:'CAPTIONS_GENERATING'|'BROLL_PROCESSING'|'COVER_GENERATING'|'QC',details:Record<string,unknown>)=>Promise<void>},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
+  process(input:{bytes:Uint8Array;maximumDurationSeconds?:number;bookends?:Partial<Record<'intro'|'outro',{bytes:Uint8Array;sourceStartMs:number;durationMs:number}>>;broll?:VideoBrollInput;brollClips?:VideoBrollInput[];backgroundMusic?:{bytes:Uint8Array;volumePercent:number;fadeInMs?:number;fadeOutMs?:number};options:import('./video-processing').VideoProcessingOptions;onStage?:(stage:'CAPTIONS_GENERATING'|'BROLL_PROCESSING'|'COVER_GENERATING'|'QC',details:Record<string,unknown>)=>Promise<void>},context:OperationContext):Promise<{bytes:Uint8Array;thumbnail:Uint8Array;durationSeconds:number;width:number;height:number}>;
 }
 export interface CaptionProvider {
   transcribe(input: { bytes: Uint8Array; mimeType: string; language: string }, context: OperationContext): Promise<CaptionSegment[]>;
@@ -61,10 +67,14 @@ export type MetricName = 'views' | 'impressions' | 'reach' | 'likes' | 'comments
 export interface AnalyticsProvider {
   fetch(reference: ProviderReference, credential: string, context: OperationContext): Promise<{ metrics: Partial<Record<MetricName, number | null>>; observedAt: string; raw: unknown }>;
 }
+export type PaymentLookupContext = Pick<OperationContext, 'correlationId' | 'signal'>;
 export interface PaymentProvider {
-  create(input: { amountMinor: number; currency: string; description: string; returnUrl: string; saveMethod: boolean }, context: OperationContext): Promise<{ reference: ProviderReference; confirmationUrl: string }>;
-  get(reference: ProviderReference, context: OperationContext): Promise<{ status: 'PENDING' | 'SUCCEEDED' | 'CANCELED'; amountMinor: number; currency: string; paymentMethodId?: string }>;
-  refund(reference: ProviderReference, amountMinor: number, context: OperationContext): Promise<ProviderReference>;
+  readonly name: string;
+  inspect(externalId: string, context: PaymentLookupContext): Promise<import('./payments').PaymentResult>;
+  create(input: import('./payments').CreatePayment, context: import('./payments').PaymentMutationContext): Promise<import('./payments').PaymentResult>;
+  get(reference: ProviderReference, context: OperationContext): Promise<import('./payments').PaymentResult>;
+  refund(reference: ProviderReference, input: import('./payments').RefundPayment, context: import('./payments').PaymentMutationContext): Promise<import('./payments').RefundResult>;
+  getRefund(reference: ProviderReference, context: OperationContext): Promise<import('./payments').RefundResult>;
 }
 export interface StorageProvider {
   get(key:string,maxBytes:number,context:OperationContext):Promise<Uint8Array>;
@@ -72,10 +82,16 @@ export interface StorageProvider {
   signedDownload(key: string, expiresSeconds: number, context: OperationContext): Promise<string>;
   delete(key: string, context: OperationContext): Promise<void>;
 }
+/** Exact, bounded reads of one immutable object version for resumable uploads. */
+export interface RangeStorageProvider extends StorageProvider {
+  inspectObject(key:string,context:OperationContext):Promise<{bytes:number;etag:string;mimeType:string|null}>;
+  getRange(key:string,input:{offset:number;length:number;totalBytes:number;etag:string},context:OperationContext):Promise<Uint8Array>;
+}
 export interface EmailProvider {
   send(input: { recipient: string; subject: string; text: string }, context: OperationContext): Promise<ProviderReference>;
 }
 export interface ErrorReporter {
+  flush?(timeout?:number):Promise<boolean>;
   capture(error: Error, context: { correlationId: string; code: string; jobId?: string }): void;
 }
 export interface SocialConnectionProvider {
