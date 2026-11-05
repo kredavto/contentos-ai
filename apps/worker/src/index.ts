@@ -1,3 +1,4 @@
+import {createHeavyTaskGate, parseWorkerResourceProfile, drainHeavyWorkers} from './resource-profile';
 import {errorReporterFromEnvironment} from '@contentos/providers/error-reporting';
 import {randomUUID} from 'node:crypto';
 import { createServer } from 'node:http';
@@ -10,6 +11,8 @@ import { validateCommentReply, DomainError, workflowSchemas, generationInputSche
 import { GenerationOrchestrator } from '@contentos/ai';
 import {  youtubePublishingFromEnvironment, FFmpegMediaPreparation, SmtpEmailProvider, paymentsFromEnvironment, channelAnalyticsFromEnvironment, OpenAILLMProvider, MockLLMProvider, imageFromEnvironment, storageFromEnvironment, avatarFromEnvironment, videoFromEnvironment, captionsFromEnvironment, FFmpegVideoProcessor, publishingFromEnvironment, socialFromEnvironment } from '@contentos/providers';
 
+const resourceProfile = parseWorkerResourceProfile(process.env.WORKER_RESOURCE_PROFILE);
+const runHeavyTask = createHeavyTaskGate(resourceProfile);
 const env = parseServerEnvironment(process.env);
 const errors=errorReporterFromEnvironment(env,'worker');
 function operationalError(event:string,code:string,error:unknown){const correlationId=randomUUID();console.error(JSON.stringify({event,code,correlationId}));reportError(errors,error,{correlationId,code});}
@@ -32,17 +35,17 @@ const videoProcessor = new VideoProcessor(database.db,videoConnection,storage,en
 const connection = new Redis(env.REDIS_URL,{maxRetriesPerRequest:null});
 const queue = new Queue('contentos-generation',{connection});
 const libraryMediaQueue=new Queue('contentos-library-media',{connection});
-const libraryMediaWorker=new Worker<{tenantId:string;id:string}>('contentos-library-media',delivery=>libraryMediaProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:1});
+const libraryMediaWorker=new Worker<{tenantId:string;id:string}>('contentos-library-media',delivery=>runHeavyTask(()=>libraryMediaProcessor.run(delivery.data.tenantId,delivery.data.id)),{connection,concurrency:1});
 libraryMediaWorker.on('error',error=>operationalError('library_media_worker_error','QUEUE_UNAVAILABLE',error));
 const imageRepository=new ImageRepository(database.db);
 const imageProcessor=new ImageProcessor(imageRepository,imageFromEnvironment(env),storage,errors);
 const imageQueue=new Queue('contentos-images',{connection});
-const imageWorker=new Worker<{tenantId:string;id:string}>('contentos-images',delivery=>imageProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:1});
+const imageWorker=new Worker<{tenantId:string;id:string}>('contentos-images',delivery=>runHeavyTask(()=>imageProcessor.run(delivery.data.tenantId,delivery.data.id)),{connection,concurrency:1});
 imageWorker.on('error',error=>operationalError('image_worker_error','QUEUE_UNAVAILABLE',error));
 const coverRepository=new CoverRepository(database.db);
 const coverProcessor=new CoverProcessor(coverRepository,storage,env.FFMPEG_PATH&&env.FFPROBE_PATH?new FFmpegVideoProcessor(env.FFMPEG_PATH,env.FFPROBE_PATH):null,errors);
 const coverQueue=new Queue('contentos-covers',{connection});
-const coverWorker=new Worker<{tenantId:string;id:string}>('contentos-covers',delivery=>coverProcessor.run(delivery.data.tenantId,delivery.data.id),{connection,concurrency:1});
+const coverWorker=new Worker<{tenantId:string;id:string}>('contentos-covers',delivery=>runHeavyTask(()=>coverProcessor.run(delivery.data.tenantId,delivery.data.id)),{connection,concurrency:1});
 coverWorker.on('error',error=>operationalError('cover_worker_error','QUEUE_UNAVAILABLE',error));
 const channelAnalyticsRepository=new ChannelAnalyticsRepository(database.db);
 const channelAnalyticsProcessor=new ChannelAnalyticsProcessor(channelAnalyticsRepository,channelAnalyticsFromEnvironment(env),credentialVaultFromEnvironment(env),errors);
@@ -102,7 +105,7 @@ commentDeliveryWorker.on('error',error=>operationalError('comment_delivery_worke
 youtubeWorker.on('error',error=>operationalError('youtube_worker_error','QUEUE_UNAVAILABLE',error));
 const routes = env.AI_PROVIDER === 'mock' ? [{provider:new MockLLMProvider(env.NODE_ENV),model:'mock-v1'}] : env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY && env.OPENAI_MODEL ? [{provider:new OpenAILLMProvider(env.OPENAI_API_KEY),model:env.OPENAI_MODEL}] : [];
 const orchestrator = new GenerationOrchestrator(routes);
-const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-generation', async delivery => {
+const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-generation', delivery => runHeavyTask(async () => {
   if(delivery.data.type==='GENERATE_VIDEO'){await videoProcessor.run(delivery.data.tenantId,delivery.data.id);return;}
   if(delivery.data.type==='CREATE_AVATAR'){await avatarProcessor.run(delivery.data.tenantId,delivery.data.id);return;}
   const job = await repository.claim(delivery.data.tenantId,delivery.data.id);
@@ -129,7 +132,7 @@ const worker = new Worker<{tenantId:string;id:string;type:JobType}>('contentos-g
     catch (failure) { if (!(failure instanceof DomainError && failure.code === 'CONFLICT')) throw failure; }
     console.log(JSON.stringify({event:'job_error',jobId:job.id,correlationId:job.correlationId,code}));
   } finally { clearInterval(heartbeat); }
-},{connection,concurrency:3});
+}),{connection,concurrency:3});
 worker.on('error',error=>operationalError('worker_error','QUEUE_UNAVAILABLE',error));
 connection.on('error',error=>operationalError('redis_error','QUEUE_UNAVAILABLE',error));
 for(const backgroundWorker of [worker,commentWorker,youtubeResolutionWorker,publicationAnalyticsWorker,youtubeWorker,libraryMediaWorker,imageWorker,coverWorker,publishingWorker,analyticsWorker,paymentWorker]){
@@ -228,7 +231,9 @@ const erasureTimer=setInterval(()=>{if(erasing)return;erasing=true;erasureTask=e
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;
-  clearInterval(erasureTimer);await erasureTask;clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await commentDeliveryWorker.close();await commentDeliveryQueue.close();await commentWorker.close(); await worker.close(); await youtubeResolutionWorker.close(); await publicationAnalyticsWorker.close(); await youtubeWorker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close(); await coverWorker.close(); await imageWorker.close(); await libraryMediaWorker.close(); await cleanupTask; await commentQueue.close(); await queue.close(); await youtubeResolutionQueue.close(); await publicationAnalyticsQueue.close(); await youtubeQueue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await imageQueue.close(); await libraryMediaQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
+  clearInterval(erasureTimer);clearInterval(timer);clearInterval(cleanupTimer);clearInterval(notificationTimer);clearInterval(emailTimer);
+  await drainHeavyWorkers([worker,libraryMediaWorker,imageWorker,coverWorker]);
+  clearInterval(erasureTimer);await erasureTask;clearInterval(timer); clearInterval(cleanupTimer); clearInterval(notificationTimer); clearInterval(emailTimer); await notificationTask; await emailTask; health?.close(); await commentDeliveryWorker.close();await commentDeliveryQueue.close();await commentWorker.close();  await youtubeResolutionWorker.close(); await publicationAnalyticsWorker.close(); await youtubeWorker.close(); await publishingWorker.close(); await analyticsWorker.close(); await paymentWorker.close();    await cleanupTask; await commentQueue.close(); await queue.close(); await youtubeResolutionQueue.close(); await publicationAnalyticsQueue.close(); await youtubeQueue.close(); await publishingQueue.close(); await analyticsQueue.close(); await paymentQueue.close(); await coverQueue.close(); await imageQueue.close(); await libraryMediaQueue.close(); await connection.quit(); storage?.close(); await database.close(); await errors.flush?.(2000);
 }
 process.on('SIGTERM',()=>void stop()); process.on('SIGINT',()=>void stop());
-console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER}));
+console.log(JSON.stringify({event:'worker_started',provider:env.AI_PROVIDER,resourceProfile}));

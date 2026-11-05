@@ -43,6 +43,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Verify economy queue locking and graceful drain
+        env:
+          REQUIRE_ECONOMY_INTEGRATION: "1"
+        run: pnpm exec vitest run tests/integration/worker-economy.integration.test.ts
       - run: pnpm test
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
