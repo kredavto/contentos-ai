@@ -1,0 +1,7 @@
+# Experimental overlay for ONE worker process/replica. Not a measured RAM budget.
+# Combine with compose.production.yml only after isolated runtime acceptance.
+services:
+  worker:
+    environment:
+      WORKER_RESOURCE_PROFILE: economy
+    # Keep existing memory/tmpfs caps: lower safe values have not been measured.
