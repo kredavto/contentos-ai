@@ -1,0 +1,62 @@
+name: Synthetic stack benchmark
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  fixture-benchmark:
+    # Standard public-repository compute only; never provision a larger/paid runner.
+    if: github.event.repository.private == false && github.head_ref == 'codex/stack-benchmark'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check measurement contracts
+        run: |
+          bash -n deploy/benchmark/run.sh
+          cd deploy/benchmark
+          python -m unittest -v test_sampler.py test_contracts.py
+      - name: Pull digest-verified official fixture images
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PG_REF=postgres@sha256:e4cb93687b062cd25a0e8f672d85a7708235009d70d31f8a7698d9370092a9c4
+          REDIS_REF=redis@sha256:ec1c2d3603c3d7d65b153bedda0248b641aa3bd7684503406b27b9e870ac0796
+          SMTP_REF=axllent/mailpit@sha256:c5fa09022cf2139438f09461f942d56fab2ed63cdf1a4046467af032fb2403ba
+          for name in PG_REF REDIS_REF SMTP_REF;do docker pull "${!name}";done
+          echo "BENCH_POSTGRES_IMAGE=$(docker image inspect --format '{{.Id}}' "$PG_REF")" >> "$GITHUB_ENV"
+          echo "BENCH_REDIS_IMAGE=$(docker image inspect --format '{{.Id}}' "$REDIS_REF")" >> "$GITHUB_ENV"
+          echo "BENCH_SMTP_IMAGE=$(docker image inspect --format '{{.Id}}' "$SMTP_REF")" >> "$GITHUB_ENV"
+      - name: Build test S3 from verified official source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source="$RUNNER_TEMP/contentos-minio-source"
+          git init "$source"
+          git -C "$source" fetch --depth 1 https://github.com/minio/minio.git 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          git -C "$source" checkout --detach FETCH_HEAD
+          test "$(git -C "$source" rev-parse HEAD)" = 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          docker build --progress plain -f "$GITHUB_WORKSPACE/deploy/benchmark/Minio.Dockerfile" -t benchmark-s3:fixture "$source"
+          echo "BENCH_S3_IMAGE=$(docker image inspect --format '{{.Id}}' benchmark-s3:fixture)" >> "$GITHUB_ENV"
+      - name: Build application images once for both modes
+        run: |
+          docker build --target worker -t benchmark-worker:fixture .
+          docker build --target web -t benchmark-web:fixture .
+          echo "BENCH_WORKER_IMAGE=$(docker image inspect --format '{{.Id}}' benchmark-worker:fixture)" >> "$GITHUB_ENV"
+          echo "BENCH_WEB_IMAGE=$(docker image inspect --format '{{.Id}}' benchmark-web:fixture)" >> "$GITHUB_ENV"
+      - name: Run paired workload and loaded drain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash deploy/benchmark/run.sh | tee benchmark-run.log
+          path=$(sed -n 's/^benchmark_evidence://p' benchmark-run.log)
+          [[ $path =~ ^/tmp/contentos-benchmark-results\.[A-Za-z0-9]+$ ]]
+          # Logs/job summaries do not consume billed artifact storage. No upload/cache action.
+          cat "$path/comparison.json"
+          cat "$path/provenance.json"
+          printf '\nSynthetic stack results (not a production RAM budget)\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "$path/comparison.json" >> "$GITHUB_STEP_SUMMARY"

@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.head_ref != 'codex/stack-benchmark' && 'pnpm' || '' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
       - run: pnpm typecheck
@@ -52,7 +52,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && github.head_ref != 'codex/stack-benchmark'
         with:
           name: browser-verification-evidence
           path: test-results/
@@ -81,7 +81,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.head_ref != 'codex/stack-benchmark' && 'pnpm' || '' }}
       - run: pnpm install --frozen-lockfile
       - name: Rehearse isolated fixture backup and restore
         run: pnpm test:local --recovery
