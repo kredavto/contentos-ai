@@ -1701,3 +1701,26 @@ Added a bounded independent `database-recovery` job invoking the existing dispos
 Predecessor acceptance: PR #16 merged as `77d591d`. GitHub Actions run [41250994940](https://github.com/kredavto/contentos-ai/actions/runs/41250994940) passed the source and real container jobs: **1061 tests / 137 files**, plus **41 Chromium scenarios (9.3m)**. This supersedes the earlier container slice's Docker-pending note for that commit only. The new recovery gate still requires its own completed cloud rehearsal; neither result establishes production backup or full live readiness.
 
 Recovery-slice local verification: final `pnpm typecheck`, `pnpm lint`, source `pnpm build` (build cache reused), `node --check scripts/test-local.mjs` and `git diff --check` passed. Final full Vitest: **520 passed / 550 skipped**, 82 passed / 56 skipped files; focused recovery/runner checks: **19 passed**. These cover safe target guards, sentinel suppression/environment filtering and owned cleanup using mock executables. Docker is unavailable locally, so this is not a claimed dump/restore execution; the new cloud recovery job remains pending.
+
+## Authentication recovery UX — local candidate, 2026-11-12
+
+Registration and login now expose resend-verification navigation. Missing or malformed
+verification/reset links explain how to reopen the original email or request a new
+link instead of leaving an unexplained disabled submit button. Tokens remain only in
+component memory, are removed from the URL, survive development Strict Mode effect
+replay and are cleared when the form mode changes. They are never persisted in web
+storage. A synchronous request guard blocks repeated form events; leaving the form
+aborts UI handling so a late login response cannot redirect a different page. Aborting
+fetch does not assert rollback of any server operation. Existing server authentication,
+rate limits, generic anti-enumeration messages and outbox behavior are unchanged.
+
+Local verification: web TypeScript, test TypeScript, targeted ESLint, whitespace checks
+and a fresh Next production build passed. Available Vitest: 520 passed / 550 skipped
+(no PostgreSQL/Redis fixture acceptance). Five new Playwright scenarios cover missing
+and malformed links, duplicate registration and captured payload, retry and token loss
+on reload, navigation during delayed login, and successful reset payload/recovery.
+Chromium could not launch in this executor because creating its Unix socket was denied,
+including after the permitted escalation; these browser cases have NOT passed here.
+Independent static review found no blocking defect; its mode-change hardening suggestion
+was incorporated. This candidate is not published, merged or deployed. SMTP delivery,
+real provider acceptance and production readiness remain unverified.
