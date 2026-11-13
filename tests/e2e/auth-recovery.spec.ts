@@ -58,7 +58,7 @@ test('failed verification can retry; reload never stores or silently reuses the 
   await expect(page.getByRole('button', { name: 'Подтвердить почту' })).toBeEnabled();
   await expect(page).not.toHaveURL(/token=/);
   await page.getByRole('button', { name: 'Подтвердить почту' }).click();
-  await expect(page.getByRole('alert')).toHaveText('Попробуйте ещё раз');
+  await expect(page.locator('form').getByRole('alert')).toHaveText('Попробуйте ещё раз');
   await page.getByRole('button', { name: 'Подтвердить почту' }).click();
   await expect(page.getByRole('status')).toHaveText('Почта подтверждена');
   expect(calls).toBe(2);
